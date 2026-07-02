@@ -88,6 +88,18 @@ describe("project sessions", () => {
       experiments: {
         activeBundleId: "bundle:local",
         bundleIds: ["bundle:local"],
+        game: {
+          assignmentKind: "generator-cochain",
+          activeAssignmentId: "working-generator-cochain",
+          activeCocycleId: "working-generator-cochain-cocycle",
+          generatorValues: [
+            { generator: 0, value: 1 },
+            { generator: 1, value: -1 },
+          ],
+          selectedVertexId: "base",
+          cocycleStatus: "passed",
+          failedCellIds: [],
+        },
       },
       warnings: ["rounded matrix hash", "rounded matrix hash"],
       notes: ["rank-two cells enabled"],
@@ -104,6 +116,15 @@ describe("project sessions", () => {
     expect(serializeProjectSession(imported.value)).toBe(exported.contents);
     expect(JSON.parse(exported.contents)).toMatchObject({
       warnings: ["rounded matrix hash"],
+      experiments: {
+        game: {
+          generatorValues: [
+            { generator: 0, value: 1 },
+            { generator: 1, value: -1 },
+          ],
+          cocycleStatus: "passed",
+        },
+      },
       view: {
         camera: {
           position: [2, 3, 5],

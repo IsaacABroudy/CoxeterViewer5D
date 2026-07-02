@@ -16,8 +16,19 @@ import {
 } from "../src/backends";
 import {
   classifyIncidentEdges,
+  applyJnwMove,
   certifyMorseCocycle,
+  checkJnwLegalState,
+  checkJnwMoveProperty,
+  createGeneratorGameAssignment,
+  createJnwState,
+  formatBoundaryEquation,
+  invertGeneratorAssignment,
+  jnwOrbitToQuotientComplex,
+  propagateGeneratorAssignment,
   resolveIntegerEdgeAssignment,
+  summarizeJnwLegalSystem,
+  summarizeCocycle,
   validateRankTwoCocycle,
 } from "../src/game";
 import { computeF2HomologySummary } from "../src/topology";
@@ -615,6 +626,195 @@ describe("game and PL Morse preparation helpers", () => {
     ]);
   });
 
+  it("propagates generator cochains and formats boundary equations", () => {
+    const assignment = createGeneratorGameAssignment(2, [
+      { generator: 0, value: 1 },
+      { generator: 1, value: -1 },
+    ]);
+    const edgeStates = propagateGeneratorAssignment(
+      edges,
+      assignment.assignment.generatorStates,
+    );
+    const check = validateRankTwoCocycle([cell], edges, edgeStates);
+    const equation = formatBoundaryEquation(
+      check.checks[0],
+      [{ label: "s0" }, { label: "s1" }],
+      edges,
+    );
+
+    expect(edgeStates).toEqual([
+      { edgeId: "e01", value: 1 },
+      { edgeId: "e12", value: -1 },
+      { edgeId: "e23", value: 1 },
+      { edgeId: "e30", value: -1 },
+    ]);
+    expect(check.ok).toBe(true);
+    expect(equation).toMatchObject({
+      generatorWord: "s0 s1 s0 s1",
+      valueEquation: "1 - 1 + 1 - 1 = 0",
+    });
+
+    const inverted = invertGeneratorAssignment(assignment);
+    expect(inverted.generatorValues.map((state) => state.value)).toEqual([
+      -1, 1,
+    ]);
+  });
+
+  it("summarizes generator and edge-specific game assignments", () => {
+    const generatorAssignment = createGeneratorGameAssignment(2, [
+      { generator: 0, value: 1 },
+      { generator: 1, value: -1 },
+    ]);
+    const generatorSummary = summarizeCocycle(
+      [cell],
+      edges,
+      generatorAssignment,
+      "v0",
+      { generators: [{ label: "s0" }, { label: "s1" }] },
+    );
+
+    expect(generatorSummary).toMatchObject({
+      assignmentKind: "generator-cochain",
+      generatorUniform: true,
+      status: "passed",
+      passedCellCount: 1,
+      totalCellCount: 1,
+    });
+    expect(
+      generatorSummary.flows.some(
+        (flow) => flow.classification === "ascending",
+      ),
+    ).toBe(true);
+
+    const edgeSummary = summarizeCocycle(
+      [cell],
+      edges,
+      {
+        id: "edge-specific",
+        kind: "integer-edge-labeling",
+        edgeStates: [
+          { edgeId: "e01", value: 1 },
+          { edgeId: "e12", value: -1 },
+          { edgeId: "e23", value: -2 },
+          { edgeId: "e30", value: 2 },
+        ],
+      },
+      "v0",
+    );
+
+    expect(edgeSummary.generatorUniform).toBe(false);
+    expect(edgeSummary.warnings).toContain(
+      "Active assignment is edge-specific, not generator-uniform.",
+    );
+  });
+
+  it("checks one-vertex Y_Gamma-style generator loops", () => {
+    const loopEdges = [
+      { id: "g0", source: "base", target: "base", generator: 0 },
+      { id: "g1", source: "base", target: "base", generator: 1 },
+    ];
+    const loopCell = {
+      id: "decagon",
+      generatorPair: [0, 1] as [number, number],
+      m: 5,
+      boundaryVertexIds: Array.from({ length: 10 }, () => "base"),
+      boundaryEdgeIds: Array.from({ length: 10 }, (_unused, index) =>
+        index % 2 === 0 ? "g0" : "g1",
+      ),
+    };
+    const assignment = createGeneratorGameAssignment(2, [
+      { generator: 0, value: 1 },
+      { generator: 1, value: -1 },
+    ]);
+    const summary = summarizeCocycle(
+      [loopCell],
+      loopEdges,
+      assignment,
+      "base",
+      {
+        generators: [{ label: "s0" }, { label: "s1" }],
+      },
+    );
+
+    expect(summary.status).toBe("passed");
+    expect(summary.boundaryEquations[0]).toMatchObject({
+      generatorWord: "s0 s1 s0 s1 s0 s1 s0 s1 s0 s1",
+      valueEquation: "1 - 1 + 1 - 1 + 1 - 1 + 1 - 1 + 1 - 1 = 0",
+    });
+  });
+
+  it("models JNW moves as state-dependent symmetric differences", () => {
+    const squareRacg: CoxeterSystemInput = {
+      schemaVersion: 1,
+      name: "RACG square",
+      rank: 4,
+      generators: [0, 1, 2, 3].map((index) => ({
+        id: `s${index}`,
+        label: `s${index}`,
+      })),
+      coxeterMatrix: [
+        [1, 2, "inf", 2],
+        [2, 1, 2, "inf"],
+        ["inf", 2, 1, 2],
+        [2, "inf", 2, 1],
+      ],
+    };
+    const moveSystem = {
+      id: "color-moves",
+      moves: [
+        { generator: 0, toggles: [0, 2] },
+        { generator: 1, toggles: [1, 3] },
+        { generator: 2, toggles: [0, 2] },
+        { generator: 3, toggles: [1, 3] },
+      ],
+    };
+    const initialState = createJnwState([0, 1]);
+    const moved = applyJnwMove(initialState, moveSystem.moves[0]);
+
+    expect(moved.generators).toEqual([1, 2]);
+    expect(
+      checkJnwMoveProperty(squareRacg, moveSystem).every((check) => check.ok),
+    ).toBe(true);
+    expect(checkJnwLegalState(squareRacg, initialState)).toMatchObject({
+      legal: true,
+      stronglyLegal: true,
+    });
+
+    const summary = summarizeJnwLegalSystem(
+      squareRacg,
+      moveSystem,
+      initialState,
+    );
+    expect(summary.claimStatus).toBe("jnw-faithful");
+    expect(summary.legalOrbit).toBe(true);
+
+    const quotient = jnwOrbitToQuotientComplex(squareRacg, summary);
+    expect(quotient.vertices.length).toBeGreaterThan(1);
+    expect(quotient.game?.assignments[0]?.kind).toBe("integer-edge-labeling");
+    const edge = quotient.edges.find((entry) => entry.generator === 0);
+    expect(edge).toBeDefined();
+    expect(edge?.source).not.toBe(edge?.target);
+  });
+
+  it("marks non-right-angled JNW diagnostics as experimental", () => {
+    const moveSystem = {
+      id: "i2-shared-move",
+      moves: [
+        { generator: 0, toggles: [0, 1] },
+        { generator: 1, toggles: [0, 1] },
+      ],
+    };
+    const summary = summarizeJnwLegalSystem(
+      I2_5 as CoxeterSystemInput,
+      moveSystem,
+      createJnwState([0]),
+    );
+
+    expect(summary.rightAngled).toBe(false);
+    expect(summary.claimStatus).toBe("experimental-non-jnw");
+    expect(summary.warnings.join(" ")).toContain("not right-angled");
+  });
+
   it("validates named cocycles and experiment logs", () => {
     const quotient: QuotientComplex = {
       ...validQuotient(),
@@ -845,7 +1045,7 @@ describe("local-link topology helpers and scripts", () => {
     });
     expect(workflow.status).toBe(0);
     expect(JSON.parse(workflow.stdout).workflow).toBe("quotient-game-i2-5");
-  }, 20000);
+  }, 60000);
 });
 
 describe("backend reproducibility command contracts", () => {

@@ -10,6 +10,22 @@ export interface IntegerEdgeState {
   value: number;
 }
 
+export interface GameGraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  generator: number;
+}
+
+export interface GameRankTwoBoundaryCell {
+  id: string;
+  generatorPair: [number, number];
+  m: number;
+  boundaryNodeIds?: string[];
+  boundaryVertexIds?: string[];
+  boundaryEdgeIds?: string[];
+}
+
 export type IntegerGameAssignmentKind =
   | "integer-generator-labeling"
   | "integer-edge-labeling";
@@ -104,6 +120,138 @@ export interface RankTwoCocycleValidationResult {
   ok: boolean;
   checks: RankTwoBoundaryCheck[];
   errors: string[];
+}
+
+export interface GameGeneratorValue {
+  generator: number;
+  value: number;
+}
+
+export interface EditableGameAssignment {
+  kind: "generator-cochain";
+  assignment: IntegerGeneratorGameAssignment;
+  cocycle: NamedIntegerCocycle;
+  generatorValues: GameGeneratorValue[];
+  uniform: true;
+}
+
+export interface BoundaryEquation {
+  cellId: string;
+  ok: boolean;
+  boundarySum: number;
+  generatorWord: string;
+  valueEquation: string;
+  signedValues: number[];
+}
+
+export interface GameCocycleSummary {
+  assignmentId?: string;
+  cocycleId?: string;
+  assignmentKind: IntegerGameAssignmentKind | "generator-cochain" | "none";
+  generatorValues: GameGeneratorValue[];
+  generatorUniform: boolean;
+  status: "passed" | "failed" | "incomplete";
+  passedCellCount: number;
+  totalCellCount: number;
+  failedCellIds: string[];
+  boundaryEquations: BoundaryEquation[];
+  flows: IncidentEdgeFlow[];
+  warnings: string[];
+  errors: string[];
+}
+
+export interface GameWorkflowState {
+  activeAssignment: EditableGameAssignment;
+  summary: GameCocycleSummary;
+  selectedVertexId?: string;
+}
+
+export type GameWorkflowKind = "generator-uniform-cochain" | "jnw-legal-system";
+
+export type JnwClaimStatus =
+  | "jnw-faithful"
+  | "experimental-non-jnw"
+  | "failed"
+  | "incomplete-orbit-cap";
+
+export interface JnwState {
+  id: string;
+  generators: number[];
+}
+
+export interface JnwMove {
+  generator: number;
+  toggles: number[];
+}
+
+export interface JnwMoveSystem {
+  id: string;
+  label?: string;
+  moves: JnwMove[];
+}
+
+export interface JnwMovePropertyCheck {
+  generator: number;
+  includesSelf: boolean;
+  adjacentGeneratorViolations: number[];
+  ok: boolean;
+}
+
+export interface JnwLegalStateCheck {
+  stateId: string;
+  state: number[];
+  nonempty: boolean;
+  complementNonempty: boolean;
+  stateConnected: boolean;
+  complementConnected: boolean;
+  stronglyLegal: boolean;
+  legal: boolean;
+}
+
+export interface JnwOrbitEdge {
+  id: string;
+  source: string;
+  target: string;
+  generator: number;
+  undirectedSource: string;
+  undirectedTarget: string;
+}
+
+export interface JnwRankTwoDiagnostic {
+  id: string;
+  generatorPair: [number, number];
+  m: number;
+  startStateId: string;
+  boundaryStateIds: string[];
+  boundaryEdgeIds: string[];
+  periodClosed: boolean;
+  ok: boolean;
+  warnings: string[];
+}
+
+export interface JnwLegalOrbitSummary {
+  claimStatus: JnwClaimStatus;
+  rightAngled: boolean;
+  orbitComplete: boolean;
+  orbitCap: number;
+  states: Array<JnwState & { legal: JnwLegalStateCheck }>;
+  edges: JnwOrbitEdge[];
+  moveChecks: JnwMovePropertyCheck[];
+  rankTwoDiagnostics: JnwRankTwoDiagnostic[];
+  legalOrbit: boolean;
+  stronglyLegalOrbit: boolean;
+  legalStateCount: number;
+  stronglyLegalStateCount: number;
+  warnings: string[];
+  errors: string[];
+}
+
+export interface JnwGameWorkflowState {
+  workflowKind: "jnw-legal-system";
+  sourceSystemName: string;
+  moveSystem: JnwMoveSystem;
+  initialState: JnwState;
+  summary: JnwLegalOrbitSummary;
 }
 
 export interface MorseCocycleCertificate {

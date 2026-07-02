@@ -99,9 +99,39 @@ export interface ProjectSessionFileState {
   recent: ProjectSessionRecentFile[];
 }
 
+export interface ProjectSessionGameState {
+  workflowKind?: "generator-uniform-cochain" | "jnw-legal-system";
+  claimStatus?:
+    | "jnw-faithful"
+    | "experimental-non-jnw"
+    | "failed"
+    | "incomplete-orbit-cap";
+  assignmentKind?: string;
+  activeAssignmentId?: string;
+  activeCocycleId?: string;
+  generatorValues: Array<{ generator: number; value: number }>;
+  generatorUniformCochain?: {
+    generatorValues: Array<{ generator: number; value: number }>;
+    cocycleStatus?: "passed" | "failed" | "incomplete";
+    failedCellIds?: string[];
+  };
+  jnwLegalSystem?: {
+    sourceSystemName: string;
+    initialState: number[];
+    moves: Array<{ generator: number; toggles: number[] }>;
+    orbitStateCount: number;
+    legalStateCount: number;
+    stronglyLegalStateCount: number;
+  };
+  selectedVertexId?: string;
+  cocycleStatus?: "passed" | "failed" | "incomplete";
+  failedCellIds?: string[];
+}
+
 export interface ProjectSessionExperimentState {
   activeBundleId?: string;
   bundleIds: string[];
+  game?: ProjectSessionGameState;
 }
 
 export interface ProjectSessionDesktopState {
@@ -274,6 +304,7 @@ export function createProjectSession(
     experiments: {
       activeBundleId: input.experiments?.activeBundleId,
       bundleIds: input.experiments?.bundleIds ?? [],
+      game: input.experiments?.game,
     },
     desktop: {
       preferredRuntime: input.desktop?.preferredRuntime ?? "web",
@@ -820,13 +851,247 @@ function validateExperiments(
     errors,
     { required: true, uniqueSorted: true },
   );
+  const game =
+    input.game === undefined
+      ? undefined
+      : validateGameState(input.game, `${path}.game`, errors);
   if (activeBundleId !== undefined && !bundleIds.includes(activeBundleId)) {
     warnings.push({
       path: `${path}.activeBundleId`,
       message: "activeBundleId is not present in bundleIds.",
     });
   }
-  return { activeBundleId, bundleIds };
+  return { activeBundleId, bundleIds, game };
+}
+
+function validateGameState(
+  input: unknown,
+  path: string,
+  errors: ProjectSessionValidationIssue[],
+): ProjectSessionGameState {
+  if (!isRecord(input)) {
+    errors.push({ path, message: "game state must be an object." });
+    return { generatorValues: [] };
+  }
+  const generatorValues = validateGeneratorValues(
+    input.generatorValues,
+    `${path}.generatorValues`,
+    errors,
+    true,
+  );
+  return {
+    workflowKind:
+      input.workflowKind === undefined
+        ? undefined
+        : requireEnum(
+            input.workflowKind,
+            `${path}.workflowKind`,
+            ["generator-uniform-cochain", "jnw-legal-system"] as const,
+            errors,
+          ),
+    claimStatus:
+      input.claimStatus === undefined
+        ? undefined
+        : requireEnum(
+            input.claimStatus,
+            `${path}.claimStatus`,
+            [
+              "jnw-faithful",
+              "experimental-non-jnw",
+              "failed",
+              "incomplete-orbit-cap",
+            ] as const,
+            errors,
+          ),
+    assignmentKind: optionalString(
+      input.assignmentKind,
+      `${path}.assignmentKind`,
+      errors,
+    ),
+    activeAssignmentId: optionalString(
+      input.activeAssignmentId,
+      `${path}.activeAssignmentId`,
+      errors,
+    ),
+    activeCocycleId: optionalString(
+      input.activeCocycleId,
+      `${path}.activeCocycleId`,
+      errors,
+    ),
+    generatorValues,
+    generatorUniformCochain: validateGeneratorUniformCochainState(
+      input.generatorUniformCochain,
+      `${path}.generatorUniformCochain`,
+      errors,
+    ),
+    jnwLegalSystem: validateJnwLegalSystemState(
+      input.jnwLegalSystem,
+      `${path}.jnwLegalSystem`,
+      errors,
+    ),
+    selectedVertexId: optionalString(
+      input.selectedVertexId,
+      `${path}.selectedVertexId`,
+      errors,
+    ),
+    cocycleStatus:
+      input.cocycleStatus === undefined
+        ? undefined
+        : requireEnum(
+            input.cocycleStatus,
+            `${path}.cocycleStatus`,
+            ["passed", "failed", "incomplete"] as const,
+            errors,
+          ),
+    failedCellIds: validateStringArray(
+      input.failedCellIds,
+      `${path}.failedCellIds`,
+      errors,
+      { required: false, uniqueSorted: false },
+    ),
+  };
+}
+
+function validateGeneratorValues(
+  input: unknown,
+  path: string,
+  errors: ProjectSessionValidationIssue[],
+  required: boolean,
+): Array<{ generator: number; value: number }> {
+  if (!Array.isArray(input)) {
+    if (required) {
+      errors.push({
+        path,
+        message: "generatorValues must be an array.",
+      });
+    }
+    return [];
+  }
+  return input.map((entry, index) => {
+    if (!isRecord(entry)) {
+      errors.push({
+        path: `${path}[${index}]`,
+        message: "generator value must be an object.",
+      });
+      return { generator: 0, value: 0 };
+    }
+    return {
+      generator: requireInteger(
+        entry.generator,
+        `${path}[${index}].generator`,
+        errors,
+      ),
+      value: requireInteger(entry.value, `${path}[${index}].value`, errors),
+    };
+  });
+}
+
+function validateGeneratorUniformCochainState(
+  input: unknown,
+  path: string,
+  errors: ProjectSessionValidationIssue[],
+): ProjectSessionGameState["generatorUniformCochain"] {
+  if (input === undefined) {
+    return undefined;
+  }
+  if (!isRecord(input)) {
+    errors.push({
+      path,
+      message: "generatorUniformCochain must be an object.",
+    });
+    return undefined;
+  }
+  return {
+    generatorValues: validateGeneratorValues(
+      input.generatorValues,
+      `${path}.generatorValues`,
+      errors,
+      true,
+    ),
+    cocycleStatus:
+      input.cocycleStatus === undefined
+        ? undefined
+        : requireEnum(
+            input.cocycleStatus,
+            `${path}.cocycleStatus`,
+            ["passed", "failed", "incomplete"] as const,
+            errors,
+          ),
+    failedCellIds: validateStringArray(
+      input.failedCellIds,
+      `${path}.failedCellIds`,
+      errors,
+      { required: false, uniqueSorted: false },
+    ),
+  };
+}
+
+function validateJnwLegalSystemState(
+  input: unknown,
+  path: string,
+  errors: ProjectSessionValidationIssue[],
+): ProjectSessionGameState["jnwLegalSystem"] {
+  if (input === undefined) {
+    return undefined;
+  }
+  if (!isRecord(input)) {
+    errors.push({ path, message: "jnwLegalSystem must be an object." });
+    return undefined;
+  }
+  const moves = Array.isArray(input.moves)
+    ? input.moves.map((entry, index) => {
+        if (!isRecord(entry)) {
+          errors.push({
+            path: `${path}.moves[${index}]`,
+            message: "move must be an object.",
+          });
+          return { generator: 0, toggles: [] };
+        }
+        return {
+          generator: requireInteger(
+            entry.generator,
+            `${path}.moves[${index}].generator`,
+            errors,
+          ),
+          toggles: validateIntegerArray(
+            entry.toggles,
+            `${path}.moves[${index}].toggles`,
+            errors,
+          ),
+        };
+      })
+    : [];
+  if (!Array.isArray(input.moves)) {
+    errors.push({ path: `${path}.moves`, message: "moves must be an array." });
+  }
+  return {
+    sourceSystemName: requireNonEmptyString(
+      input.sourceSystemName,
+      `${path}.sourceSystemName`,
+      errors,
+    ),
+    initialState: validateIntegerArray(
+      input.initialState,
+      `${path}.initialState`,
+      errors,
+    ),
+    moves,
+    orbitStateCount: requireInteger(
+      input.orbitStateCount,
+      `${path}.orbitStateCount`,
+      errors,
+    ),
+    legalStateCount: requireInteger(
+      input.legalStateCount,
+      `${path}.legalStateCount`,
+      errors,
+    ),
+    stronglyLegalStateCount: requireInteger(
+      input.stronglyLegalStateCount,
+      `${path}.stronglyLegalStateCount`,
+      errors,
+    ),
+  };
 }
 
 function validateDesktop(
@@ -939,6 +1204,32 @@ function requireNonNegativeInteger(
     return 0;
   }
   return value;
+}
+
+function requireInteger(
+  value: unknown,
+  path: string,
+  errors: ProjectSessionValidationIssue[],
+): number {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    errors.push({ path, message: "must be an integer." });
+    return 0;
+  }
+  return value;
+}
+
+function validateIntegerArray(
+  input: unknown,
+  path: string,
+  errors: ProjectSessionValidationIssue[],
+): number[] {
+  if (!Array.isArray(input)) {
+    errors.push({ path, message: "must be an array of integers." });
+    return [];
+  }
+  return input.map((entry, index) =>
+    requireInteger(entry, `${path}[${index}]`, errors),
+  );
 }
 
 function requirePositiveInteger(

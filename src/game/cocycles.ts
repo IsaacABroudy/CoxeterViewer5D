@@ -1,5 +1,11 @@
 import type {
+  BoundaryEquation,
   BoundaryCocycleTerm,
+  EditableGameAssignment,
+  GameCocycleSummary,
+  GameGeneratorValue,
+  GameGraphEdge,
+  GameRankTwoBoundaryCell,
   IncidentEdgeFlow,
   IntegerEdgeState,
   IntegerGameAssignment,
@@ -12,21 +18,8 @@ import type {
   ResolvedIntegerEdgeAssignment,
 } from "./types";
 
-interface GraphEdge {
-  id: string;
-  source: string;
-  target: string;
-  generator: number;
-}
-
-interface RankTwoBoundaryCell {
-  id: string;
-  generatorPair: [number, number];
-  m: number;
-  boundaryNodeIds?: string[];
-  boundaryVertexIds?: string[];
-  boundaryEdgeIds?: string[];
-}
+type GraphEdge = GameGraphEdge;
+type RankTwoBoundaryCell = GameRankTwoBoundaryCell;
 
 function isInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value);
@@ -197,6 +190,274 @@ export function generatorStatesToEdgeStates(
     edgeId: edge.id,
     value: generatorValues.get(edge.generator) ?? 0,
   }));
+}
+
+export function createGeneratorGameAssignment(
+  systemOrRank: { rank: number } | number,
+  values: readonly Partial<GameGeneratorValue>[] = [],
+  options: {
+    id?: string;
+    label?: string;
+    cocycleId?: string;
+    cocycleLabel?: string;
+  } = {},
+): EditableGameAssignment {
+  const rank =
+    typeof systemOrRank === "number" ? systemOrRank : systemOrRank.rank;
+  const suppliedValues = new Map(
+    values
+      .filter(
+        (value): value is GameGeneratorValue =>
+          isInteger(value.generator) && isInteger(value.value),
+      )
+      .map((value) => [value.generator, value.value]),
+  );
+  const generatorValues = Array.from(
+    { length: rank },
+    (_unused, generator) => ({
+      generator,
+      value: suppliedValues.get(generator) ?? 0,
+    }),
+  );
+  const assignmentId = options.id ?? "working-generator-cochain";
+  const cocycleId = options.cocycleId ?? `${assignmentId}-cocycle`;
+
+  return {
+    kind: "generator-cochain",
+    assignment: {
+      id: assignmentId,
+      label: options.label ?? "Working generator-uniform cochain",
+      kind: "integer-generator-labeling",
+      generatorStates: generatorValues,
+      notes: [
+        "Exploratory generator-level integer 1-cochain; export or certify it before using it as a research claim.",
+      ],
+    },
+    cocycle: {
+      id: cocycleId,
+      label: options.cocycleLabel ?? "Working cocycle check",
+      assignmentId,
+      coefficientRing: "Z",
+    },
+    generatorValues,
+    uniform: true,
+  };
+}
+
+export function propagateGeneratorAssignment(
+  edges: GraphEdge[],
+  generatorStates: IntegerGeneratorState[],
+): IntegerEdgeState[] {
+  return generatorStatesToEdgeStates(edges, generatorStates);
+}
+
+export function invertGeneratorAssignment(
+  assignment: EditableGameAssignment,
+): EditableGameAssignment {
+  const generatorValues = assignment.generatorValues.map((state) => ({
+    generator: state.generator,
+    value: -state.value,
+  }));
+
+  return {
+    ...assignment,
+    assignment: {
+      ...assignment.assignment,
+      generatorStates: generatorValues,
+    },
+    generatorValues,
+  };
+}
+
+export function summarizeCocycle(
+  cells: RankTwoBoundaryCell[],
+  edges: GraphEdge[],
+  assignment: EditableGameAssignment | IntegerGameAssignment | undefined,
+  selectedVertexId?: string,
+  options: {
+    rank?: number;
+    generators?: Array<{ label?: string }>;
+    cocycleId?: string;
+  } = {},
+): GameCocycleSummary {
+  const resolved = resolveEditableAssignment(assignment, edges, options.rank);
+  const validation = validateRankTwoCocycle(cells, edges, resolved.edgeStates);
+  const boundaryEquations = validation.checks.map((check) =>
+    formatBoundaryEquation(check, options.generators ?? [], edges),
+  );
+  const failedCellIds = validation.checks
+    .filter((check) => !check.ok)
+    .map((check) => check.cellId);
+  const flows =
+    selectedVertexId === undefined
+      ? []
+      : classifyIncidentEdges(selectedVertexId, edges, resolved.edgeStates);
+  const status =
+    cells.length === 0 || hasIncompleteBoundary(validation.checks)
+      ? "incomplete"
+      : validation.ok
+        ? "passed"
+        : "failed";
+
+  return {
+    assignmentId: resolved.assignmentId,
+    cocycleId:
+      assignment?.kind === "generator-cochain"
+        ? assignment.cocycle.id
+        : options.cocycleId,
+    assignmentKind: resolved.assignmentKind,
+    generatorValues: resolved.generatorValues,
+    generatorUniform: resolved.generatorUniform,
+    status,
+    passedCellCount: validation.checks.filter((check) => check.ok).length,
+    totalCellCount: validation.checks.length,
+    failedCellIds,
+    boundaryEquations,
+    flows,
+    warnings: resolved.warnings,
+    errors: [...resolved.errors, ...validation.errors],
+  };
+}
+
+export function formatBoundaryEquation(
+  check: RankTwoBoundaryCheck,
+  generators: Array<{ label?: string }>,
+  edges: GraphEdge[] = [],
+): BoundaryEquation {
+  const edgeById = new Map(edges.map((edge) => [edge.id, edge]));
+  const generatorWord = check.terms
+    .map((term) => {
+      const generator = edgeById.get(term.edgeId)?.generator;
+      return generator === undefined
+        ? term.edgeId
+        : (generators[generator]?.label ?? `s${generator}`);
+    })
+    .join(" ");
+  const signedValues = check.terms.map((term) => term.signedValue);
+  const valueEquation = `${formatSignedIntegerSequence(signedValues)} = ${check.boundarySum}`;
+
+  return {
+    cellId: check.cellId,
+    ok: check.ok,
+    boundarySum: check.boundarySum,
+    generatorWord,
+    valueEquation,
+    signedValues,
+  };
+}
+
+function resolveEditableAssignment(
+  assignment: EditableGameAssignment | IntegerGameAssignment | undefined,
+  edges: GraphEdge[],
+  rank?: number,
+): {
+  assignmentId?: string;
+  assignmentKind: GameCocycleSummary["assignmentKind"];
+  edgeStates: IntegerEdgeState[];
+  generatorValues: GameGeneratorValue[];
+  generatorUniform: boolean;
+  errors: string[];
+  warnings: string[];
+} {
+  const zeroStates = edges.map((edge) => ({ edgeId: edge.id, value: 0 }));
+
+  if (assignment === undefined) {
+    return {
+      assignmentKind: "none",
+      edgeStates: zeroStates,
+      generatorValues: [],
+      generatorUniform: true,
+      errors: [],
+      warnings: ["No assignment is active; zero labels were checked."],
+    };
+  }
+
+  const concreteAssignment =
+    assignment.kind === "generator-cochain"
+      ? assignment.assignment
+      : assignment;
+  const validation = validateIntegerGameAssignment(
+    concreteAssignment,
+    edges,
+    rank,
+    `game.assignment["${concreteAssignment.id}"]`,
+  );
+
+  if (validation.errors.length > 0) {
+    return {
+      assignmentId: concreteAssignment.id,
+      assignmentKind:
+        assignment.kind === "generator-cochain"
+          ? "generator-cochain"
+          : concreteAssignment.kind,
+      edgeStates: zeroStates,
+      generatorValues:
+        concreteAssignment.kind === "integer-generator-labeling"
+          ? concreteAssignment.generatorStates
+          : [],
+      generatorUniform:
+        assignment.kind === "generator-cochain" ||
+        concreteAssignment.kind === "integer-generator-labeling",
+      errors: validation.errors,
+      warnings: [
+        "Active game assignment is invalid; zero labels were checked.",
+      ],
+    };
+  }
+
+  if (concreteAssignment.kind === "integer-generator-labeling") {
+    const generatorValues = concreteAssignment.generatorStates.map((state) => ({
+      generator: state.generator,
+      value: state.value,
+    }));
+    return {
+      assignmentId: concreteAssignment.id,
+      assignmentKind:
+        assignment.kind === "generator-cochain"
+          ? "generator-cochain"
+          : concreteAssignment.kind,
+      edgeStates: propagateGeneratorAssignment(edges, generatorValues),
+      generatorValues,
+      generatorUniform: true,
+      errors: [],
+      warnings: [],
+    };
+  }
+
+  return {
+    assignmentId: concreteAssignment.id,
+    assignmentKind: concreteAssignment.kind,
+    edgeStates: concreteAssignment.edgeStates,
+    generatorValues: [],
+    generatorUniform: false,
+    errors: [],
+    warnings: ["Active assignment is edge-specific, not generator-uniform."],
+  };
+}
+
+function hasIncompleteBoundary(checks: RankTwoBoundaryCheck[]): boolean {
+  return checks.some(
+    (check) =>
+      check.actualBoundaryLength !== check.expectedBoundaryLength ||
+      check.missingEdgeSteps.length > 0 ||
+      check.missingStateEdgeIds.length > 0,
+  );
+}
+
+function formatSignedIntegerSequence(values: number[]): string {
+  if (values.length === 0) {
+    return "0";
+  }
+
+  return values
+    .map((value, index) => {
+      const magnitude = Math.abs(value);
+      if (index === 0) {
+        return value < 0 ? `-${magnitude}` : `${magnitude}`;
+      }
+      return `${value < 0 ? "-" : "+"} ${magnitude}`;
+    })
+    .join(" ");
 }
 
 export function validateIntegerGameAssignment(
