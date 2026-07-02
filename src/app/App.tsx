@@ -30,8 +30,24 @@ import {
 } from "../davis";
 import {
   classifyIncidentEdges,
+  createBipartiteJnwMoveSystem,
+  createDefaultJnwMoveSystem,
+  createDefaultJnwState,
+  createJnwState,
+  createGeneratorGameAssignment,
+  invertGeneratorAssignment,
+  jnwOrbitToQuotientComplex,
   resolveIntegerEdgeAssignment,
+  summarizeJnwLegalSystem,
+  summarizeCocycle,
   validateRankTwoCocycle,
+  type EditableGameAssignment,
+  type GameCocycleSummary,
+  type GameWorkflowKind,
+  type JnwLegalOrbitSummary,
+  type JnwMoveSystem,
+  type JnwState,
+  type QuotientGameData,
 } from "../game";
 import { placeCayleyNodesInHyperbolicGeometry } from "../geometry";
 import {
@@ -107,8 +123,13 @@ import { generatedBallIdentity } from "./stableHash";
 import {
   buildWhatAmISeeingSummary,
   groupWarnings,
+  type WhatAmISeeingSummary,
   type WarningGroup,
 } from "./viewStory";
+import {
+  buildDefiningGraphScene,
+  type DefiningGraphScene,
+} from "./definingGraphScene";
 import {
   activeGuidedInspectionStep,
   guidedInspectionDefinition,
@@ -193,7 +214,7 @@ import universalRank3 from "../examples/universal_rank3.json";
 
 type ViewerMode = "shell" | "geometric";
 type GraphViewMode = "global" | "on-graph";
-type YGammaMainView = "complex" | "nerve";
+type YGammaMainView = "complex" | "gamma" | "nerve";
 type YGammaFocusPreset =
   | "one-relation"
   | "rank-three-cell"
@@ -461,7 +482,7 @@ export function App() {
   );
   const [radius, setRadius] = useState(5);
   const [graphPresetId, setGraphPresetId] = useState<GraphPresetId>("small");
-  const [uiMode, setUiMode] = useState<UiMode>("research");
+  const [uiMode, setUiMode] = useState<UiMode>("teaching");
   const [colorScheme, setColorScheme] = useState<ColorScheme>(
     () => readStoredColorScheme() ?? "light",
   );
@@ -546,6 +567,21 @@ export function App() {
     id: "full-local-link",
     selectedGenerator: 0,
   });
+  const [teachingLocalLinkOpen, setTeachingLocalLinkOpen] = useState(false);
+  const [gameDraft, setGameDraft] = useState<
+    { datasetId: string; assignment: EditableGameAssignment } | undefined
+  >(undefined);
+  const [gameWorkflowKind, setGameWorkflowKind] = useState<GameWorkflowKind>(
+    "generator-uniform-cochain",
+  );
+  const [jnwDraft, setJnwDraft] = useState<
+    | {
+        sourceKey: string;
+        moveSystem: JnwMoveSystem;
+        initialState: JnwState;
+      }
+    | undefined
+  >(undefined);
   const [notebookImportError, setNotebookImportError] = useState<string | null>(
     null,
   );
@@ -1041,16 +1077,113 @@ export function App() {
     activeDataset.kind === "quotient-complex"
       ? activeDataset.quotient
       : undefined;
+  const activeQuotientRank =
+    activeQuotient?.sourceSystem?.rank ??
+    activeQuotient?.generatorRank ??
+    (activeQuotient
+      ? Math.max(
+          1,
+          Math.max(-1, ...activeQuotient.edges.map((edge) => edge.generator)) +
+            1,
+        )
+      : undefined);
+  const activeQuotientGenerators =
+    activeQuotient?.sourceSystem?.generators ?? system.generators;
+  const jnwSourceSystem =
+    activeQuotient?.sourceSystem ?? sourceSystem ?? system;
+  const jnwSourceKey = `${jnwSourceSystem.name}:${jnwSourceSystem.rank}`;
+  const activeJnwMoveSystem =
+    jnwDraft?.sourceKey === jnwSourceKey
+      ? jnwDraft.moveSystem
+      : createDefaultJnwMoveSystem(jnwSourceSystem);
+  const activeJnwInitialState =
+    jnwDraft?.sourceKey === jnwSourceKey
+      ? jnwDraft.initialState
+      : createDefaultJnwState(jnwSourceSystem);
+  const jnwSummary = useMemo(
+    () =>
+      summarizeJnwLegalSystem(
+        jnwSourceSystem,
+        activeJnwMoveSystem,
+        activeJnwInitialState,
+      ),
+    [activeJnwInitialState, activeJnwMoveSystem, jnwSourceSystem],
+  );
+  const jnwDerivedQuotient = useMemo(
+    () => jnwOrbitToQuotientComplex(jnwSourceSystem, jnwSummary),
+    [jnwSourceSystem, jnwSummary],
+  );
+  const importedGameAssignment = useMemo(
+    () => activeIntegerGameAssignment(activeQuotient?.game),
+    [activeQuotient?.game],
+  );
+  const initialEditableGameAssignment = useMemo(
+    () =>
+      activeQuotient
+        ? editableGameAssignmentFromQuotient(activeQuotient)
+        : undefined,
+    [activeQuotient],
+  );
+  const gameDraftAssignment =
+    gameDraft?.datasetId === activeDataset.id
+      ? gameDraft.assignment
+      : undefined;
+  const gameUsesEditableAssignment =
+    Boolean(gameDraftAssignment) ||
+    importedGameAssignment === undefined ||
+    importedGameAssignment.kind === "integer-generator-labeling";
+  const activeEditableGameAssignment =
+    gameDraftAssignment ?? initialEditableGameAssignment;
+  const effectiveQuotientGame = useMemo(
+    () =>
+      activeQuotient &&
+      activeEditableGameAssignment &&
+      gameUsesEditableAssignment
+        ? gameDataWithEditableAssignment(
+            activeQuotient.game,
+            activeEditableGameAssignment,
+          )
+        : activeQuotient?.game,
+    [activeEditableGameAssignment, activeQuotient, gameUsesEditableAssignment],
+  );
+  const effectiveGameAssignment =
+    gameUsesEditableAssignment && activeEditableGameAssignment
+      ? activeEditableGameAssignment
+      : importedGameAssignment;
   const quotientAssignment = useMemo(
     () =>
       activeQuotient
         ? resolveIntegerEdgeAssignment(
-            activeQuotient.game,
+            effectiveQuotientGame,
             activeQuotient.edges,
-            activeQuotient.sourceSystem?.rank ?? activeQuotient.generatorRank,
+            activeQuotientRank,
           )
         : undefined,
-    [activeQuotient],
+    [activeQuotient, activeQuotientRank, effectiveQuotientGame],
+  );
+  const quotientGameSummary = useMemo(
+    () =>
+      activeQuotient
+        ? summarizeCocycle(
+            activeQuotient.twoCells,
+            activeQuotient.edges,
+            effectiveGameAssignment,
+            selectedNode?.id ?? activeQuotient.vertices[0]?.id,
+            {
+              rank: activeQuotientRank,
+              generators: activeQuotientGenerators,
+              cocycleId: effectiveQuotientGame?.activeCocycleId,
+            },
+          )
+        : undefined,
+    [
+      activeQuotient,
+      activeQuotientGenerators,
+      activeQuotientRank,
+      effectiveGameAssignment,
+      effectiveQuotientGame?.activeCocycleId,
+      selectedNode?.id,
+    ],
   );
   const quotientBoundaryChecks = useMemo(
     () =>
@@ -1073,6 +1206,20 @@ export function App() {
           )
         : [],
     [activeQuotient, quotientAssignment, selectedNode],
+  );
+  const quotientFlowByEdgeId = useMemo(
+    () => new Map(quotientIncidentFlows.map((flow) => [flow.edgeId, flow])),
+    [quotientIncidentFlows],
+  );
+  const quotientGeneratorValueById = useMemo(
+    () =>
+      new Map(
+        quotientGameSummary?.generatorValues.map((state) => [
+          state.generator,
+          state.value,
+        ]) ?? [],
+      ),
+    [quotientGameSummary?.generatorValues],
   );
   const quotientLensSceneIds = useMemo(() => {
     if (!activeQuotient || !isQuotientLinkLens(topologyLens.id)) {
@@ -1251,6 +1398,10 @@ export function App() {
         : undefined,
     [sourceSystem, sphericalSubsetResult],
   );
+  const gammaDefiningGraphScene = useMemo(
+    () => (sourceSystem ? buildDefiningGraphScene(sourceSystem) : undefined),
+    [sourceSystem],
+  );
   const yGammaRankThreeFocus = useMemo(
     () => (yGammaAtlas ? findSharedM2M3RankThreeFocus(yGammaAtlas) : undefined),
     [yGammaAtlas],
@@ -1260,7 +1411,10 @@ export function App() {
     isYGammaBaseComplex(activeDataset.quotient);
   const yGammaDense =
     activeIsYGammaBaseComplex && (yGammaAtlas?.generatorCount ?? 0) >= 7;
-  const showDetailedControls = !activeIsYGammaBaseComplex || showAdvancedPanels;
+  const showReaderControls = uiMode === "teaching" && !showAdvancedPanels;
+  const showResearchControls = uiMode === "research" || showAdvancedPanels;
+  const showDetailedControls =
+    !showReaderControls && (!activeIsYGammaBaseComplex || showAdvancedPanels);
   const yGammaRelationOrderFilter =
     yGammaFocusPreset === "m2-squares"
       ? 2
@@ -1401,10 +1555,15 @@ export function App() {
     activeIsYGammaBaseComplex &&
     yGamma2SkeletonScene !== undefined &&
     yGammaMainView === "complex";
+  const showingGammaDefiningGraph =
+    activeIsYGammaBaseComplex &&
+    gammaDefiningGraphScene !== undefined &&
+    yGammaMainView === "gamma";
   const showingYGammaNerve =
     activeIsYGammaBaseComplex &&
     yGammaAtlas !== undefined &&
     yGammaMainView === "nerve";
+  const showingDerivedScene = showingYGammaComplex || showingGammaDefiningGraph;
   const selectedHigherProxy = sphericalCellProxies.proxies.find(
     (proxy) =>
       proxy.id === selectedCellId || proxy.sourceCellId === selectedCellId,
@@ -1715,28 +1874,75 @@ export function App() {
   );
   const activeSceneNodes = useMemo(
     () =>
-      showingYGammaComplex
-        ? (yGamma2SkeletonScene?.nodes ?? emptySceneNodes)
-        : sceneNodes,
-    [sceneNodes, showingYGammaComplex, yGamma2SkeletonScene],
+      showingGammaDefiningGraph
+        ? (gammaDefiningGraphScene?.nodes ?? emptySceneNodes)
+        : showingYGammaComplex
+          ? (yGamma2SkeletonScene?.nodes ?? emptySceneNodes)
+          : sceneNodes,
+    [
+      gammaDefiningGraphScene,
+      sceneNodes,
+      showingGammaDefiningGraph,
+      showingYGammaComplex,
+      yGamma2SkeletonScene,
+    ],
   );
   const activeSceneEdges = useMemo(
     () =>
-      showingYGammaComplex
-        ? (yGamma2SkeletonScene?.edges ?? emptySceneEdges)
-        : sceneEdges,
-    [sceneEdges, showingYGammaComplex, yGamma2SkeletonScene],
+      showingGammaDefiningGraph
+        ? (gammaDefiningGraphScene?.edges ?? emptySceneEdges)
+        : showingYGammaComplex
+          ? (yGamma2SkeletonScene?.edges ?? emptySceneEdges)
+          : sceneEdges,
+    [
+      gammaDefiningGraphScene,
+      sceneEdges,
+      showingGammaDefiningGraph,
+      showingYGammaComplex,
+      yGamma2SkeletonScene,
+    ],
+  );
+  const gameDecoratedSceneEdges = useMemo(
+    () =>
+      decorateSceneEdgesForGame({
+        edges: activeSceneEdges,
+        enabled:
+          activeQuotient !== undefined &&
+          !showingGammaDefiningGraph &&
+          quotientGameSummary !== undefined,
+        yGamma: showingYGammaComplex,
+        flowByEdgeId: quotientFlowByEdgeId,
+        generatorValueById: quotientGeneratorValueById,
+      }),
+    [
+      activeQuotient,
+      activeSceneEdges,
+      quotientFlowByEdgeId,
+      quotientGameSummary,
+      quotientGeneratorValueById,
+      showingGammaDefiningGraph,
+      showingYGammaComplex,
+    ],
   );
   const activeSceneCells = useMemo(
     () =>
-      showingYGammaComplex
-        ? (yGamma2SkeletonScene?.cells ?? emptySceneCells)
-        : sceneCells,
-    [sceneCells, showingYGammaComplex, yGamma2SkeletonScene],
+      showingGammaDefiningGraph
+        ? emptySceneCells
+        : showingYGammaComplex
+          ? (yGamma2SkeletonScene?.cells ?? emptySceneCells)
+          : sceneCells,
+    [
+      sceneCells,
+      showingGammaDefiningGraph,
+      showingYGammaComplex,
+      yGamma2SkeletonScene,
+    ],
   );
-  const activeSceneSelectedNodeId = showingYGammaComplex
-    ? yGamma2SkeletonScene?.selectedNodeId
-    : selectedNode?.id;
+  const activeSceneSelectedNodeId = showingGammaDefiningGraph
+    ? gammaDefiningGraphScene?.selectedNodeId
+    : showingYGammaComplex
+      ? yGamma2SkeletonScene?.selectedNodeId
+      : selectedNode?.id;
   const activeSceneVisibleNodeCount = useMemo(
     () =>
       activeSceneNodes.filter((node) => !("hidden" in node) || !node.hidden)
@@ -1798,10 +2004,10 @@ export function App() {
     () =>
       sceneStructureVersion(
         activeSceneNodes,
-        activeSceneEdges,
+        gameDecoratedSceneEdges,
         activeSceneCells,
       ),
-    [activeSceneCells, activeSceneEdges, activeSceneNodes],
+    [activeSceneCells, activeSceneNodes, gameDecoratedSceneEdges],
   );
   // Appearance changes can reuse meshes: selected ids, label budgets, colors,
   // opacity, and camera-facing helpers should not invalidate topology buffers.
@@ -1810,12 +2016,12 @@ export function App() {
       hashVersionParts([
         `selected-node:${activeSceneSelectedNodeId ?? ""}`,
         `selected-cell:${selectedCellId ?? ""}`,
-        `show-cells:${showingYGammaComplex || showCells || showHigherCells}`,
-        `show-node-labels:${showingYGammaComplex || showNodeLabels}`,
-        `show-edge-labels:${showingYGammaComplex || showEdgeLabels}`,
-        `label-scope:${showingYGammaComplex ? "focused" : labelScope}`,
+        `show-cells:${showingDerivedScene || showCells || showHigherCells}`,
+        `show-node-labels:${showingDerivedScene || showNodeLabels}`,
+        `show-edge-labels:${showingDerivedScene || showEdgeLabels}`,
+        `label-scope:${showingDerivedScene ? "budgeted" : labelScope}`,
         `active-pair:${activeGeneratorPairKey ?? ""}`,
-        `cell-render:${showingYGammaComplex ? "in-graph" : cellRenderMode}`,
+        `cell-render:${showingDerivedScene ? "in-graph" : cellRenderMode}`,
         `occlusion:${occlusionMode}`,
         `cell-opacity:${
           showingYGammaComplex ? (yGammaTopologyMode ? 0.18 : 0.3) : cellOpacity
@@ -1832,9 +2038,14 @@ export function App() {
         `reference:${geometricReferenceBallVisible}`,
         `reference-radius:${geometricDisplayScale}`,
         `theme:${colorScheme}`,
-        `camera:${showingYGammaComplex ? "global" : graphView}`,
-        `max-node-labels:${showingYGammaComplex ? 80 : effectiveMaxNodeLabels}`,
-        `max-edge-labels:${showingYGammaComplex ? 80 : effectiveMaxEdgeLabels}`,
+        `game:${
+          quotientGameSummary?.generatorValues
+            .map((state) => `${state.generator}:${state.value}`)
+            .join(",") ?? ""
+        }:${quotientGameSummary?.status ?? ""}`,
+        `camera:${showingDerivedScene ? "global" : graphView}`,
+        `max-node-labels:${showingDerivedScene ? 120 : effectiveMaxNodeLabels}`,
+        `max-edge-labels:${showingDerivedScene ? 120 : effectiveMaxEdgeLabels}`,
         ...system.generators.map(
           (generator) => `${generator.label}:${generator.colorHint ?? ""}`,
         ),
@@ -1853,10 +2064,13 @@ export function App() {
       labelScope,
       occlusionMode,
       panelOffsetStrength,
+      quotientGameSummary?.generatorValues,
+      quotientGameSummary?.status,
       selectedCellId,
       showCells,
       showEdgeLabels,
       showHigherCells,
+      showingDerivedScene,
       showingYGammaComplex,
       showNodeLabels,
       system.generators,
@@ -1878,10 +2092,17 @@ export function App() {
       ...(topologyDiagnostics?.warnings ?? []),
       ...sphericalCellProxies.warnings,
       ...(showingYGammaComplex ? (yGamma2SkeletonScene?.warnings ?? []) : []),
-      ...(activeIsYGammaBaseComplex && yGammaSceneState.pending
+      ...(showingGammaDefiningGraph
+        ? (gammaDefiningGraphScene?.warnings ?? [])
+        : []),
+      ...(activeIsYGammaBaseComplex &&
+      yGammaMainView === "complex" &&
+      yGammaSceneState.pending
         ? ["Y_Gamma scene construction is running in a worker."]
         : []),
-      ...(activeIsYGammaBaseComplex && yGammaSceneState.error
+      ...(activeIsYGammaBaseComplex &&
+      yGammaMainView === "complex" &&
+      yGammaSceneState.error
         ? [yGammaSceneState.error]
         : []),
       ...(activeIsYGammaBaseComplex && yGammaAtlas ? yGammaAtlas.warnings : []),
@@ -1984,11 +2205,14 @@ export function App() {
       sphericalCellProxies.warnings,
       system,
       showingYGammaComplex,
+      showingGammaDefiningGraph,
       topologyDiagnostics?.warnings,
       yGamma2SkeletonScene?.warnings,
+      gammaDefiningGraphScene?.warnings,
       yGammaSceneState.error,
       yGammaSceneState.pending,
       yGammaAtlas,
+      yGammaMainView,
     ],
   );
   const repairSuggestions = useMemo(
@@ -2009,9 +2233,11 @@ export function App() {
         activePreset,
         visibleNodeCount: activeSceneVisibleNodeCount,
         visibleEdgeCount: activeSceneEdges.length,
-        visibleRankTwoCellCount: showingYGammaComplex
-          ? activeSceneCells.length
-          : visibleCells.length,
+        visibleRankTwoCellCount: showingGammaDefiningGraph
+          ? 0
+          : showingYGammaComplex
+            ? activeSceneCells.length
+            : visibleCells.length,
         visibleHigherProxyCount: visibleHigherProxies.length,
         geometryAvailable,
         geometryCertified:
@@ -2036,12 +2262,43 @@ export function App() {
       selectedNode,
       system,
       showingYGammaComplex,
+      showingGammaDefiningGraph,
       visibleCells.length,
       visibleHigherProxies.length,
       yGammaMainView,
     ],
   );
+  const currentModelBadge = useMemo(
+    () =>
+      describeCurrentModel({
+        activeDatasetKind: activeDataset.kind,
+        activeIsYGammaBaseComplex,
+        effectiveMode,
+        geometryIntervalCertified:
+          system.geometry?.certifiedModel?.certificate.status === "passed",
+        showingGammaDefiningGraph,
+        showingYGammaComplex,
+        yGammaMainView,
+      }),
+    [
+      activeDataset.kind,
+      activeIsYGammaBaseComplex,
+      effectiveMode,
+      showingGammaDefiningGraph,
+      showingYGammaComplex,
+      system.geometry?.certifiedModel?.certificate.status,
+      yGammaMainView,
+    ],
+  );
   const activeGuideStep = activeGuidedInspectionStep(guidedInspection);
+  const showLocalLinkPanel =
+    showResearchControls ||
+    activeGuideStep?.focus === "local-link" ||
+    isQuotientLinkLens(topologyLens.id) ||
+    teachingLocalLinkOpen;
+  const showYGammaInventoryPanel = showResearchControls;
+  const showGamePanel =
+    showResearchControls || activeDataset.kind === "quotient-complex";
   const activeWorkflowStep = activeResearchWorkflowStep(researchWorkflow);
   const workflowComparison = useMemo(
     () => compareLatestNotebookRuns(savedExperiments),
@@ -2187,6 +2444,37 @@ export function App() {
         experiments: {
           activeBundleId: savedExperiments[0]?.id,
           bundleIds: savedExperiments.map((bundle) => bundle.id),
+          game: quotientGameSummary
+            ? {
+                workflowKind: gameWorkflowKind,
+                claimStatus:
+                  gameWorkflowKind === "jnw-legal-system"
+                    ? jnwSummary.claimStatus
+                    : quotientGameSummary.status === "passed"
+                      ? "experimental-non-jnw"
+                      : "failed",
+                assignmentKind: quotientGameSummary.assignmentKind,
+                activeAssignmentId: quotientGameSummary.assignmentId,
+                activeCocycleId: quotientGameSummary.cocycleId,
+                generatorValues: quotientGameSummary.generatorValues,
+                generatorUniformCochain: {
+                  generatorValues: quotientGameSummary.generatorValues,
+                  cocycleStatus: quotientGameSummary.status,
+                  failedCellIds: quotientGameSummary.failedCellIds,
+                },
+                jnwLegalSystem: {
+                  sourceSystemName: jnwSourceSystem.name,
+                  initialState: activeJnwInitialState.generators,
+                  moves: activeJnwMoveSystem.moves,
+                  orbitStateCount: jnwSummary.states.length,
+                  legalStateCount: jnwSummary.legalStateCount,
+                  stronglyLegalStateCount: jnwSummary.stronglyLegalStateCount,
+                },
+                selectedVertexId: selectedNode?.id,
+                cocycleStatus: quotientGameSummary.status,
+                failedCellIds: quotientGameSummary.failedCellIds,
+              }
+            : undefined,
         },
         desktop: {
           preferredRuntime:
@@ -2210,7 +2498,16 @@ export function App() {
       graphPreset.maxNodes,
       graphPreset.maxRadius,
       graphView,
+      activeJnwInitialState.generators,
+      activeJnwMoveSystem.moves,
+      gameWorkflowKind,
+      jnwSourceSystem.name,
+      jnwSummary.claimStatus,
+      jnwSummary.legalStateCount,
+      jnwSummary.states.length,
+      jnwSummary.stronglyLegalStateCount,
       labelScope,
+      quotientGameSummary,
       radius,
       recentSessions,
       savedExperiments,
@@ -2700,6 +2997,55 @@ export function App() {
       setSelectedNodeId(session.view.selectedNodeId ?? "e");
       setSelectedCellId(session.view.selectedCellId);
       setActiveGeneratorPairKey(session.view.activeGeneratorPairKey);
+      setGameWorkflowKind(
+        session.experiments.game?.workflowKind ?? "generator-uniform-cochain",
+      );
+      setJnwDraft(
+        session.experiments.game?.jnwLegalSystem
+          ? {
+              sourceKey: `${session.experiments.game.jnwLegalSystem.sourceSystemName}:${session.experiments.game.jnwLegalSystem.moves.length}`,
+              moveSystem: {
+                id: "restored-jnw-moves",
+                label: "Restored JNW moves",
+                moves: session.experiments.game.jnwLegalSystem.moves,
+              },
+              initialState: createJnwState(
+                session.experiments.game.jnwLegalSystem.initialState,
+              ),
+            }
+          : undefined,
+      );
+      setGameDraft(
+        session.experiments.game
+          ? {
+              datasetId:
+                session.dataset.activeDatasetId ??
+                session.dataset.activeExampleId ??
+                "I2_5",
+              assignment: createGeneratorGameAssignment(
+                Math.max(
+                  1,
+                  Math.max(
+                    -1,
+                    ...session.experiments.game.generatorValues.map(
+                      (state) => state.generator,
+                    ),
+                  ) + 1,
+                ),
+                session.experiments.game.generatorUniformCochain
+                  ?.generatorValues ?? session.experiments.game.generatorValues,
+                {
+                  id:
+                    session.experiments.game.activeAssignmentId ??
+                    "working-generator-cochain",
+                  cocycleId:
+                    session.experiments.game.activeCocycleId ??
+                    "working-generator-cochain-cocycle",
+                },
+              ),
+            }
+          : undefined,
+      );
       setShowCells(session.view.showRankTwoCells);
       setShowHigherCells(session.view.showHigherCells);
       setShowNodeLabels(session.view.showNodeLabels);
@@ -2893,6 +3239,261 @@ export function App() {
     setShowCells(true);
     setShowHigherCells(true);
     setYGammaMainView("complex");
+    setFocusSignal((value) => value + 1);
+  };
+
+  const openDefiningGraph = () => {
+    if (!activeIsYGammaBaseComplex) {
+      openBaseOrbicomplex();
+    }
+    setYGammaMainView("gamma");
+    setShowNodeLabels(true);
+    setShowEdgeLabels(true);
+    setLabelScope("budgeted");
+    setShowCells(false);
+    setSelectedCellId(undefined);
+    setActiveGeneratorPairKey(undefined);
+    setHoveredCellId(undefined);
+    setFocusSignal((value) => value + 1);
+  };
+
+  const showDavisComplexForSource = (targetMode: ViewerMode = "shell") => {
+    if (!activeIsYGammaBaseComplex || !sourceSystem) {
+      setYGammaMainView("complex");
+      setMode(targetMode);
+      return;
+    }
+    const existingExample = examples.find(
+      (example) => example.input.name === sourceSystem.name,
+    );
+    if (existingExample) {
+      setExampleId(existingExample.id);
+    } else {
+      const id = `source:${sourceSystem.name.replace(/\W+/g, "_")}`;
+      setImportedExample({
+        id,
+        label: sourceSystem.name,
+        input: sourceSystem,
+      });
+      setExampleId(id);
+    }
+    setImportedDataset(null);
+    resetSelectionForImport();
+    setMode(targetMode);
+    setGraphView("global");
+    setShowCells(true);
+    setShowNodeLabels(true);
+    setShowEdgeLabels(true);
+    setLabelScope("budgeted");
+    setFocusSignal((value) => value + 1);
+  };
+
+  const openProjectionView = () => {
+    if (!geometryAvailable) {
+      return;
+    }
+    showDavisComplexForSource("geometric");
+  };
+
+  const openQuotientAndGames = () => {
+    if (activeDataset.kind !== "quotient-complex") {
+      openBaseOrbicomplex();
+    }
+    setShowAdvancedPanels(true);
+  };
+
+  const setActiveGameDraftAssignment = (
+    assignment: EditableGameAssignment | undefined,
+  ) => {
+    setGameDraft(
+      assignment ? { datasetId: activeDataset.id, assignment } : undefined,
+    );
+  };
+
+  const setActiveJnwDraft = (
+    moveSystem: JnwMoveSystem,
+    initialState: JnwState,
+  ) => {
+    setJnwDraft({ sourceKey: jnwSourceKey, moveSystem, initialState });
+  };
+
+  const updateJnwInitialState = (generator: number, enabled: boolean) => {
+    const nextGenerators = enabled
+      ? [...activeJnwInitialState.generators, generator]
+      : activeJnwInitialState.generators.filter((entry) => entry !== generator);
+    setActiveJnwDraft(activeJnwMoveSystem, createJnwState(nextGenerators));
+  };
+
+  const updateJnwMoveToggle = (
+    moveGenerator: number,
+    toggledGenerator: number,
+    enabled: boolean,
+  ) => {
+    setActiveJnwDraft(
+      {
+        ...activeJnwMoveSystem,
+        id: "jnw-custom-moves",
+        label: "Custom JNW moves",
+        moves: activeJnwMoveSystem.moves.map((move) => {
+          if (move.generator !== moveGenerator) {
+            return move;
+          }
+          const toggles = enabled
+            ? [...move.toggles, toggledGenerator]
+            : move.toggles.filter((entry) => entry !== toggledGenerator);
+          return {
+            ...move,
+            toggles: [...new Set(toggles)].sort((left, right) => left - right),
+          };
+        }),
+      },
+      activeJnwInitialState,
+    );
+  };
+
+  const applyJnwPreset = (
+    preset: "singletons" | "bipartite" | "clear" | "invert-state",
+  ) => {
+    if (preset === "invert-state") {
+      const current = new Set(activeJnwInitialState.generators);
+      setActiveJnwDraft(
+        activeJnwMoveSystem,
+        createJnwState(
+          Array.from({ length: jnwSourceSystem.rank }, (_unused, generator) =>
+            current.has(generator) ? -1 : generator,
+          ).filter((generator) => generator >= 0),
+        ),
+      );
+      return;
+    }
+
+    if (preset === "bipartite") {
+      const bipartite = createBipartiteJnwMoveSystem(jnwSourceSystem);
+      if (bipartite) {
+        setActiveJnwDraft(bipartite, activeJnwInitialState);
+      }
+      return;
+    }
+
+    setActiveJnwDraft(
+      createDefaultJnwMoveSystem(jnwSourceSystem),
+      preset === "clear"
+        ? createJnwState([])
+        : createDefaultJnwState(jnwSourceSystem),
+    );
+  };
+
+  const openJnwStateQuotient = () => {
+    const quotient = jnwDerivedQuotient;
+    setImportedDataset({
+      kind: "quotient-complex",
+      id: `jnw:${jnwSourceKey}`,
+      label: quotient.name,
+      quotient,
+      ball: quotientToGeneratedBall(quotient),
+      sourceSystem: jnwSourceSystem,
+    });
+    setGameWorkflowKind("jnw-legal-system");
+    setSelectedNodeId(quotient.vertices[0]?.id ?? "jnw:state:empty");
+    setSelectedCellId(undefined);
+    setYGammaMainView("complex");
+    setMode("shell");
+    setGraphView("global");
+    setShowCells(true);
+    setShowEdgeLabels(true);
+    setLabelScope("focused");
+    setFocusSignal((value) => value + 1);
+  };
+
+  const focusJnwDiagnostic = (diagnosticId: string) => {
+    openJnwStateQuotient();
+    setSelectedCellId(diagnosticId);
+    setActiveGeneratorPairKey(
+      pairKey(
+        jnwSummary.rankTwoDiagnostics.find(
+          (diagnostic) => diagnostic.id === diagnosticId,
+        )?.generatorPair ?? [0, 1],
+      ),
+    );
+    setCellFocusMode("selected-cell");
+    setRelationWalkMode("numbered");
+  };
+
+  const updateGameGeneratorValue = (generator: number, value: number) => {
+    if (!activeEditableGameAssignment) {
+      return;
+    }
+    setActiveGameDraftAssignment(
+      updateEditableGameAssignmentValue(
+        activeEditableGameAssignment,
+        generator,
+        value,
+      ),
+    );
+  };
+
+  const applyGamePreset = (preset: "zero" | "height" | "invert" | "clear") => {
+    if (!activeEditableGameAssignment || !activeQuotientRank) {
+      return;
+    }
+    if (preset === "clear") {
+      setActiveGameDraftAssignment(undefined);
+      return;
+    }
+    if (preset === "invert") {
+      setActiveGameDraftAssignment(
+        invertGeneratorAssignment(activeEditableGameAssignment),
+      );
+      return;
+    }
+    if (preset === "zero") {
+      setActiveGameDraftAssignment(
+        createGeneratorGameAssignment(
+          activeQuotientRank,
+          activeEditableGameAssignment.generatorValues.map((state) => ({
+            generator: state.generator,
+            value: 0,
+          })),
+          gameAssignmentOptionsFromEditable(activeEditableGameAssignment),
+        ),
+      );
+      return;
+    }
+
+    const pair =
+      activeGeneratorPairKey !== undefined
+        ? parsePairKey(activeGeneratorPairKey)
+        : activeQuotient?.twoCells[0]?.generatorPair;
+    setActiveGameDraftAssignment(
+      createGeneratorGameAssignment(
+        activeQuotientRank,
+        activeEditableGameAssignment.generatorValues.map((state) => ({
+          generator: state.generator,
+          value:
+            pair && state.generator === pair[0]
+              ? 1
+              : pair && state.generator === pair[1]
+                ? -1
+                : 0,
+        })),
+        gameAssignmentOptionsFromEditable(activeEditableGameAssignment),
+      ),
+    );
+  };
+
+  const focusGameBoundaryCell = (cellId: string) => {
+    const cell = activeQuotient?.twoCells.find((entry) => entry.id === cellId);
+    if (!cell) {
+      return;
+    }
+    setSelectedCellId(cell.id);
+    setActiveGeneratorPairKey(pairKey(cell.generatorPair));
+    setRelationWalkMode("numbered");
+    setCellFocusMode("selected-cell");
+    if (activeIsYGammaBaseComplex) {
+      setYGammaMainView("complex");
+      setYGammaFocusPreset("one-relation");
+    }
     setFocusSignal((value) => value + 1);
   };
 
@@ -3727,9 +4328,45 @@ export function App() {
               quotient: activeQuotient
                 ? {
                     name: activeQuotient.name,
-                    activeCocycleId: activeQuotient.game?.activeCocycleId,
+                    activeCocycleId: effectiveQuotientGame?.activeCocycleId,
                     verifierStatus: activeQuotient.verifier?.status,
                     artifactHash: activeQuotient.verifier?.outputHash,
+                    game: quotientGameSummary
+                      ? {
+                          workflowKind: gameWorkflowKind,
+                          claimStatus:
+                            gameWorkflowKind === "jnw-legal-system"
+                              ? jnwSummary.claimStatus
+                              : quotientGameSummary.status === "passed"
+                                ? "experimental-non-jnw"
+                                : "failed",
+                          assignmentKind: quotientGameSummary.assignmentKind,
+                          generatorValues: quotientGameSummary.generatorValues,
+                          generatorUniformCochain: {
+                            generatorValues:
+                              quotientGameSummary.generatorValues,
+                            cocycleStatus: quotientGameSummary.status,
+                            failedCellIds: quotientGameSummary.failedCellIds,
+                          },
+                          jnwLegalSystem: {
+                            sourceSystemName: jnwSourceSystem.name,
+                            initialState:
+                              jnwSummary.states.find(
+                                (state) =>
+                                  state.id === activeJnwInitialState.id,
+                              )?.generators ?? activeJnwInitialState.generators,
+                            moves: activeJnwMoveSystem.moves,
+                            orbitStateCount: jnwSummary.states.length,
+                            legalStateCount: jnwSummary.legalStateCount,
+                            stronglyLegalStateCount:
+                              jnwSummary.stronglyLegalStateCount,
+                          },
+                          cocycleStatus: quotientGameSummary.status,
+                          failedCellIds: quotientGameSummary.failedCellIds,
+                          selectedVertexId:
+                            selectedNode?.id ?? activeQuotient.vertices[0]?.id,
+                        }
+                      : undefined,
                   }
                 : undefined,
             },
@@ -3764,18 +4401,30 @@ export function App() {
       cellRenderMode,
       disabledPairs,
       effectiveMode,
+      effectiveQuotientGame?.activeCocycleId,
       experimentNote,
+      activeJnwInitialState.generators,
+      activeJnwInitialState.id,
+      activeJnwMoveSystem.moves,
+      gameWorkflowKind,
       graphView,
       guidedInspection,
+      jnwSourceSystem.name,
+      jnwSummary.claimStatus,
+      jnwSummary.legalStateCount,
+      jnwSummary.states,
+      jnwSummary.stronglyLegalStateCount,
       labelScope,
       localDepth,
       localViewLayout,
       occlusionMode,
       panelOffsetStrength,
       projection,
+      quotientGameSummary,
       relationWalkMode,
       researchWorkflow,
       sceneStats,
+      selectedNode?.id,
       system,
       topologyLens,
       topologyDiagnostics,
@@ -3955,7 +4604,7 @@ export function App() {
         );
         break;
       case "help-about":
-        setDesktopMessage("CoxeterViewer5D 0.1.0 desktop research viewer.");
+        setDesktopMessage("CoxeterViewer5D 0.2.0 desktop research viewer.");
         break;
     }
   };
@@ -4102,21 +4751,25 @@ export function App() {
             </select>
           </div>
 
-          <div className="field">
-            <label htmlFor="backend-select">Backend</label>
-            <select
-              id="backend-select"
-              value={backendId}
-              onChange={(event) => setBackendId(event.target.value)}
-            >
-              <option value="browserApproxBackend">Browser approximate</option>
-              {exactBackendStubs.map((backend) => (
-                <option key={backend.name} value={backend.name}>
-                  {backend.name} (external)
+          {showResearchControls ? (
+            <div className="field">
+              <label htmlFor="backend-select">Backend</label>
+              <select
+                id="backend-select"
+                value={backendId}
+                onChange={(event) => setBackendId(event.target.value)}
+              >
+                <option value="browserApproxBackend">
+                  Browser approximate
                 </option>
-              ))}
-            </select>
-          </div>
+                {exactBackendStubs.map((backend) => (
+                  <option key={backend.name} value={backend.name}>
+                    {backend.name} (external)
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
 
           <div className="field">
             <label htmlFor="graph-preset-select">Graph size</label>
@@ -4164,99 +4817,109 @@ export function App() {
             />
           </div>
 
-          <label className="button file-button" htmlFor="import-coxeter-input">
-            <FileUp size={16} aria-hidden="true" />
-            Import Coxeter system
-          </label>
-          <input
-            id="import-coxeter-input"
-            data-testid="import-json-input"
-            className="hidden-input"
-            type="file"
-            accept="application/json,.json"
-            onChange={(event) =>
-              void handleImportCoxeterFile(event.currentTarget.files?.[0])
-            }
-          />
-          <label
-            className="button file-button"
-            htmlFor="import-generated-input"
-          >
-            <FileUp size={16} aria-hidden="true" />
-            Import generated graph
-          </label>
-          <input
-            id="import-generated-input"
-            data-testid="import-generated-input"
-            className="hidden-input"
-            type="file"
-            accept="application/json,.json"
-            onChange={(event) =>
-              void handleImportGeneratedFile(event.currentTarget.files?.[0])
-            }
-          />
-          <label className="button file-button" htmlFor="import-quotient-input">
-            <FileUp size={16} aria-hidden="true" />
-            Import quotient
-          </label>
-          <input
-            id="import-quotient-input"
-            data-testid="import-quotient-input"
-            className="hidden-input"
-            type="file"
-            accept="application/json,.json"
-            onChange={(event) =>
-              void handleImportQuotientFile(event.currentTarget.files?.[0])
-            }
-          />
-          <div className="button-row">
-            <button
-              type="button"
-              className="button"
-              onClick={chooseNativeWorkspace}
-            >
-              <FolderOpen size={16} aria-hidden="true" />
-              Workspace
-            </button>
-            <button
-              type="button"
-              className="button"
-              onClick={openNativeProjectSession}
-            >
-              <FolderOpen size={16} aria-hidden="true" />
-              Open session
-            </button>
-            <button
-              type="button"
-              className="button"
-              onClick={() => void exportProjectSession()}
-            >
-              <Save size={16} aria-hidden="true" />
-              Save session
-            </button>
-            <button
-              type="button"
-              className="button"
-              onClick={() => void revealWorkspaceArtifacts()}
-            >
-              <FolderOpen size={16} aria-hidden="true" />
-              Artifacts
-            </button>
-            <button
-              type="button"
-              className="button"
-              onClick={() => void refreshDesktopTools()}
-            >
-              Check tools
-            </button>
-            <button
-              type="button"
-              className="button"
-              onClick={() => void exportDesktopDiagnostics()}
-            >
-              Diagnostics
-            </button>
-          </div>
+          {showResearchControls ? (
+            <>
+              <label
+                className="button file-button"
+                htmlFor="import-coxeter-input"
+              >
+                <FileUp size={16} aria-hidden="true" />
+                Import Coxeter system
+              </label>
+              <input
+                id="import-coxeter-input"
+                data-testid="import-json-input"
+                className="hidden-input"
+                type="file"
+                accept="application/json,.json"
+                onChange={(event) =>
+                  void handleImportCoxeterFile(event.currentTarget.files?.[0])
+                }
+              />
+              <label
+                className="button file-button"
+                htmlFor="import-generated-input"
+              >
+                <FileUp size={16} aria-hidden="true" />
+                Import generated graph
+              </label>
+              <input
+                id="import-generated-input"
+                data-testid="import-generated-input"
+                className="hidden-input"
+                type="file"
+                accept="application/json,.json"
+                onChange={(event) =>
+                  void handleImportGeneratedFile(event.currentTarget.files?.[0])
+                }
+              />
+              <label
+                className="button file-button"
+                htmlFor="import-quotient-input"
+              >
+                <FileUp size={16} aria-hidden="true" />
+                Import quotient
+              </label>
+              <input
+                id="import-quotient-input"
+                data-testid="import-quotient-input"
+                className="hidden-input"
+                type="file"
+                accept="application/json,.json"
+                onChange={(event) =>
+                  void handleImportQuotientFile(event.currentTarget.files?.[0])
+                }
+              />
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="button"
+                  onClick={chooseNativeWorkspace}
+                >
+                  <FolderOpen size={16} aria-hidden="true" />
+                  Workspace
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={openNativeProjectSession}
+                >
+                  <FolderOpen size={16} aria-hidden="true" />
+                  Open session
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => void exportProjectSession()}
+                >
+                  <Save size={16} aria-hidden="true" />
+                  Save session
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => void revealWorkspaceArtifacts()}
+                >
+                  <FolderOpen size={16} aria-hidden="true" />
+                  Artifacts
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => void refreshDesktopTools()}
+                >
+                  Check tools
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => void exportDesktopDiagnostics()}
+                >
+                  Diagnostics
+                </button>
+              </div>
+            </>
+          ) : null}
           <button
             type="button"
             className="button file-button"
@@ -4264,54 +4927,63 @@ export function App() {
           >
             Open 3D Y_Gamma model
           </button>
-          <details className="advanced-details">
-            <summary>Quotient builder</summary>
-            <div className="field">
-              <label htmlFor="quotient-subgroup-words">
-                Subgroup generator words
-              </label>
-              <textarea
-                id="quotient-subgroup-words"
-                value={quotientSubgroupText}
-                onChange={(event) =>
-                  setQuotientSubgroupText(event.target.value)
-                }
-                placeholder="One word per line, e.g. s0 s1"
-              />
-            </div>
-            <div className="field inline-field">
-              <label htmlFor="quotient-max-cosets">Max cosets</label>
-              <input
-                id="quotient-max-cosets"
-                type="number"
-                min={1}
-                max={100000}
-                value={quotientMaxCosets}
-                onChange={(event) =>
-                  setQuotientMaxCosets(
-                    clampInteger(Number(event.target.value), 1, 100000),
-                  )
-                }
-              />
-            </div>
-            <button
-              type="button"
-              className="button"
-              onClick={exportQuotientBuildRequest}
-            >
-              Export quotient build request
-            </button>
-            {quotientBuilderError ? (
-              <p className="error-box" role="alert">
-                {quotientBuilderError}
-              </p>
-            ) : (
-              <p className="math-note">
-                The browser exports request JSON; Sage/GAP scripts must certify
-                the quotient action.
-              </p>
-            )}
-          </details>
+          <button
+            type="button"
+            className="button file-button"
+            onClick={openDefiningGraph}
+          >
+            Open defining graph Gamma
+          </button>
+          {showResearchControls ? (
+            <details className="advanced-details">
+              <summary>Quotient builder</summary>
+              <div className="field">
+                <label htmlFor="quotient-subgroup-words">
+                  Subgroup generator words
+                </label>
+                <textarea
+                  id="quotient-subgroup-words"
+                  value={quotientSubgroupText}
+                  onChange={(event) =>
+                    setQuotientSubgroupText(event.target.value)
+                  }
+                  placeholder="One word per line, e.g. s0 s1"
+                />
+              </div>
+              <div className="field inline-field">
+                <label htmlFor="quotient-max-cosets">Max cosets</label>
+                <input
+                  id="quotient-max-cosets"
+                  type="number"
+                  min={1}
+                  max={100000}
+                  value={quotientMaxCosets}
+                  onChange={(event) =>
+                    setQuotientMaxCosets(
+                      clampInteger(Number(event.target.value), 1, 100000),
+                    )
+                  }
+                />
+              </div>
+              <button
+                type="button"
+                className="button"
+                onClick={exportQuotientBuildRequest}
+              >
+                Export quotient build request
+              </button>
+              {quotientBuilderError ? (
+                <p className="error-box" role="alert">
+                  {quotientBuilderError}
+                </p>
+              ) : (
+                <p className="math-note">
+                  The browser exports request JSON; Sage/GAP scripts must
+                  certify the quotient action.
+                </p>
+              )}
+            </details>
+          ) : null}
           {importError ? (
             <p className="error-box" data-testid="import-error" role="alert">
               {importError}
@@ -4328,6 +5000,164 @@ export function App() {
             </ul>
           ) : null}
         </Panel>
+
+        {showReaderControls ? (
+          <Panel title="Reader Controls">
+            <div className="reader-control-group">
+              <span className="small-label">Focus</span>
+              <div
+                className="focus-button-grid"
+                role="group"
+                aria-label="Reader focus presets"
+              >
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => {
+                    setTeachingLocalLinkOpen(false);
+                    if (activeIsYGammaBaseComplex) {
+                      applyYGammaNarratedPreset("full-skeleton");
+                    } else {
+                      applyViewPreset("global", { persist: false });
+                    }
+                  }}
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => {
+                    setTeachingLocalLinkOpen(false);
+                    applyViewPreset("local-chamber", { persist: false });
+                  }}
+                >
+                  Local Chamber
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  disabled={!firstFinitePairKey(system)}
+                  onClick={() => {
+                    setTeachingLocalLinkOpen(false);
+                    const key =
+                      activeGeneratorPairKey ?? firstFinitePairKey(system);
+                    if (!key) {
+                      return;
+                    }
+                    if (activeIsYGammaBaseComplex) {
+                      applyYGammaNarratedPreset("one-relation");
+                    }
+                    focusPairByKey(key);
+                  }}
+                >
+                  One relation
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => {
+                    setTeachingLocalLinkOpen(false);
+                    setTopologyLens({
+                      id: "generator-star",
+                      selectedGenerator: yGammaFocusGenerator,
+                    });
+                    if (activeIsYGammaBaseComplex) {
+                      applyYGammaNarratedPreset("around-generator");
+                    } else {
+                      applyViewPreset("local-chamber", { persist: false });
+                    }
+                  }}
+                >
+                  Generator star
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  disabled={!yGammaRankThreeFocus && !activeIsYGammaBaseComplex}
+                  onClick={() => {
+                    setTeachingLocalLinkOpen(false);
+                    if (!activeIsYGammaBaseComplex) {
+                      openBaseOrbicomplex();
+                    }
+                    focusRankThreeM2M3Demo();
+                  }}
+                >
+                  Rank-three cell
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => {
+                    setTeachingLocalLinkOpen(true);
+                    setTopologyLens({
+                      id: "full-local-link",
+                      selectedGenerator: yGammaFocusGenerator,
+                    });
+                    applyViewPreset("local-chamber", { persist: false });
+                  }}
+                >
+                  Local link
+                </button>
+              </div>
+            </div>
+            <div className="breadcrumb" aria-label="Selected word breadcrumb">
+              {breadcrumb.map((entry, index) => (
+                <span key={`${entry.index}:${entry.label}`}>
+                  {index > 0 ? (
+                    <span className="breadcrumb-separator">/</span>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={!entry.clickable}
+                    onClick={() => {
+                      if (entry.nodeId) {
+                        setSelectedNodeId(entry.nodeId);
+                      }
+                    }}
+                  >
+                    {entry.label}
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="step-grid" aria-label="Step by generator">
+              {generatorSteps.map((step) => (
+                <button
+                  key={step.generatorId}
+                  type="button"
+                  disabled={!step.available}
+                  title={step.reason ?? `Step by ${step.label}`}
+                  onClick={() => stepByGenerator(step.generator)}
+                >
+                  {step.label}
+                </button>
+              ))}
+            </div>
+            <div className="reader-control-row">
+              <Toggle
+                checked={showNodeLabels}
+                label="Show compact group-element labels"
+                onChange={setShowNodeLabels}
+              />
+              <Toggle
+                checked={showEdgeLabels}
+                label="Show generator labels on edges"
+                onChange={setShowEdgeLabels}
+              />
+              <Toggle
+                checked={showCells}
+                label="Show filled rank-two cells"
+                onChange={setShowCells}
+              />
+            </div>
+            <p className="math-note">
+              Teaching mode keeps the controls close to the picture. Switch to
+              Research for imports, certificates, notebooks, and detailed cell
+              budgets.
+            </p>
+          </Panel>
+        ) : null}
 
         <Panel title="Example Gallery">
           <div className="gallery-list" aria-label="Walkthrough gallery">
@@ -4490,15 +5320,7 @@ export function App() {
               onExport={() => void exportExperimentBundle()}
             />
           </Panel>
-        ) : (
-          <Panel title="Teaching Focus">
-            <p className="math-note">
-              Teaching mode keeps quotient certificates, notebooks, and backend
-              reports tucked away. Use the guide or gallery to choose one
-              mathematical object at a time.
-            </p>
-          </Panel>
-        )}
+        ) : null}
 
         {activeIsYGammaBaseComplex && yGammaAtlas ? (
           <Panel title="Y_Gamma 3D Reader">
@@ -4961,28 +5783,82 @@ export function App() {
             </p>
           </div>
           <div className="stats-row" aria-live="polite">
-            {activeIsYGammaBaseComplex ? (
+            {hasMathContext ? (
               <div
                 className="segmented ygamma-view-switch"
                 role="group"
-                aria-label="Y_Gamma display mode"
+                aria-label="Main mathematical view"
               >
                 <button
                   type="button"
-                  aria-pressed={yGammaMainView === "complex"}
-                  onClick={() => setYGammaMainView("complex")}
+                  aria-pressed={!activeIsYGammaBaseComplex}
+                  onClick={() => showDavisComplexForSource()}
                 >
-                  3D model
+                  Davis
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={
+                    activeIsYGammaBaseComplex && yGammaMainView === "complex"
+                  }
+                  onClick={() => {
+                    if (!activeIsYGammaBaseComplex) {
+                      openBaseOrbicomplex();
+                    } else {
+                      setYGammaMainView("complex");
+                    }
+                  }}
+                >
+                  Y_Gamma
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={
+                    activeIsYGammaBaseComplex && yGammaMainView === "gamma"
+                  }
+                  onClick={openDefiningGraph}
+                >
+                  Gamma
                 </button>
                 <button
                   type="button"
                   aria-pressed={yGammaMainView === "nerve"}
+                  disabled={!activeIsYGammaBaseComplex}
+                  title="2D nerve/local-link diagnostic, not the defining graph Gamma."
                   onClick={() => setYGammaMainView("nerve")}
                 >
-                  2D nerve schematic
+                  Nerve
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={effectiveMode === "geometric"}
+                  disabled={!geometryAvailable}
+                  title={
+                    geometryAvailable
+                      ? "Show the certified or numerical geometric projection for the source system."
+                      : "This example has no geometric reflection data."
+                  }
+                  onClick={openProjectionView}
+                >
+                  Projection
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={
+                    activeDataset.kind === "quotient-complex" &&
+                    !activeIsYGammaBaseComplex
+                  }
+                  onClick={openQuotientAndGames}
+                >
+                  Quotient
                 </button>
               </div>
             ) : null}
+            <div className="current-model-badge" aria-label="Current model">
+              <span>Current model</span>
+              <strong>{currentModelBadge.label}</strong>
+              <em>{currentModelBadge.status}</em>
+            </div>
             {showingYGammaComplex &&
             yGammaDense &&
             !yGammaRankThreeFocusEnabled ? (
@@ -5074,7 +5950,7 @@ export function App() {
             <Stat
               label="Nodes"
               value={
-                showingYGammaComplex
+                showingDerivedScene
                   ? activeSceneVisibleNodeCount
                   : (ball?.nodes.length ?? 0)
               }
@@ -5083,7 +5959,7 @@ export function App() {
             <Stat
               label="Edges"
               value={
-                showingYGammaComplex
+                showingDerivedScene
                   ? activeSceneEdges.length
                   : (ball?.edges.length ?? 0)
               }
@@ -5091,9 +5967,11 @@ export function App() {
             <Stat
               label="Cells"
               value={
-                showingYGammaComplex
-                  ? activeSceneCells.length
-                  : visibleCells.length + visibleHigherProxies.length
+                showingGammaDefiningGraph
+                  ? 0
+                  : showingYGammaComplex
+                    ? activeSceneCells.length
+                    : visibleCells.length + visibleHigherProxies.length
               }
               testId="rank-two-cell-count"
             />
@@ -5152,20 +6030,20 @@ export function App() {
             ) : null}
             <SceneView
               nodes={activeSceneNodes}
-              edges={activeSceneEdges}
+              edges={gameDecoratedSceneEdges}
               cells={activeSceneCells}
               generators={system.generators}
               structureVersion={activeSceneStructureVersion}
               appearanceVersion={activeSceneAppearanceVersion}
               selectedNodeId={activeSceneSelectedNodeId}
               selectedCellId={selectedCellId}
-              showCells={showingYGammaComplex || showCells || showHigherCells}
-              showNodeLabels={showingYGammaComplex || showNodeLabels}
-              showEdgeLabels={showingYGammaComplex || showEdgeLabels}
-              labelScope={showingYGammaComplex ? "focused" : labelScope}
+              showCells={showingDerivedScene || showCells || showHigherCells}
+              showNodeLabels={showingDerivedScene || showNodeLabels}
+              showEdgeLabels={showingDerivedScene || showEdgeLabels}
+              labelScope={showingDerivedScene ? "budgeted" : labelScope}
               activeGeneratorPair={activeGeneratorPair}
               localCellRenderMode={
-                showingYGammaComplex ? "in-graph" : cellRenderMode
+                showingDerivedScene ? "in-graph" : cellRenderMode
               }
               occlusionMode={occlusionMode}
               cellOpacity={
@@ -5189,7 +6067,7 @@ export function App() {
               showReferenceBall={geometricReferenceBallVisible}
               referenceBallRadius={geometricDisplayScale}
               cameraPreset={
-                showingYGammaComplex
+                showingDerivedScene
                   ? "global"
                   : graphView === "on-graph"
                     ? "on-graph"
@@ -5198,9 +6076,15 @@ export function App() {
               resetSignal={resetSignal}
               focusNodeId={activeSceneSelectedNodeId}
               focusSignal={focusSignal}
-              maxNodeLabels={showingYGammaComplex ? 80 : effectiveMaxNodeLabels}
-              maxEdgeLabels={showingYGammaComplex ? 80 : effectiveMaxEdgeLabels}
-              pickingEnabled={!showingYGammaComplex}
+              maxNodeLabels={showingDerivedScene ? 120 : effectiveMaxNodeLabels}
+              maxEdgeLabels={
+                showingYGammaComplex
+                  ? Math.max(activeSceneEdges.length, 120)
+                  : showingDerivedScene
+                    ? 120
+                    : effectiveMaxEdgeLabels
+              }
+              pickingEnabled={!showingDerivedScene}
               workerGenerationMs={generation.generationMs}
               colorScheme={colorScheme}
               layoutVersion={sceneLayoutSignal}
@@ -5220,7 +6104,7 @@ export function App() {
         aria-label="Graph details"
       >
         <Panel
-          title="Inspector"
+          title="Focus Inspector"
           actions={
             <>
               <button
@@ -5241,68 +6125,77 @@ export function App() {
               >
                 <Home size={17} aria-hidden="true" />
               </button>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Export graph JSON"
-                title="Export graph JSON"
-                onClick={exportGraph}
-              >
-                <Download size={17} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Export local neighborhood"
-                title="Export local neighborhood"
-                onClick={exportLocalNeighborhood}
-              >
-                <FileJson size={17} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Export screenshot"
-                title="Export screenshot"
-                onClick={exportScreenshot}
-              >
-                <ImageDown size={17} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Export view bundle"
-                title="Export view bundle"
-                onClick={exportViewBundle}
-              >
-                <Package size={17} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Export figure bundle"
-                title="Export figure bundle"
-                onClick={exportFigureBundle}
-              >
-                <Package size={17} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Export project session"
-                title="Export project session"
-                onClick={() => void exportProjectSession()}
-              >
-                <FileJson size={17} aria-hidden="true" />
-              </button>
+              {showResearchControls ? (
+                <>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label="Export graph JSON"
+                    title="Export graph JSON"
+                    onClick={exportGraph}
+                  >
+                    <Download size={17} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label="Export local neighborhood"
+                    title="Export local neighborhood"
+                    onClick={exportLocalNeighborhood}
+                  >
+                    <FileJson size={17} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label="Export screenshot"
+                    title="Export screenshot"
+                    onClick={exportScreenshot}
+                  >
+                    <ImageDown size={17} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label="Export view bundle"
+                    title="Export view bundle"
+                    onClick={exportViewBundle}
+                  >
+                    <Package size={17} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label="Export figure bundle"
+                    title="Export figure bundle"
+                    onClick={exportFigureBundle}
+                  >
+                    <Package size={17} aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label="Export project session"
+                    title="Export project session"
+                    onClick={() => void exportProjectSession()}
+                  >
+                    <FileJson size={17} aria-hidden="true" />
+                  </button>
+                </>
+              ) : null}
             </>
           }
         >
-          <TopologyFirstInspector explanation={topologyExplanation} />
-        </Panel>
-
-        <Panel title="What Relation Am I Seeing?">
-          {showingYGammaComplex && yGammaAtlas ? (
+          <TopologyFirstInspector
+            explanation={topologyExplanation}
+            compact={showReaderControls}
+          />
+          {showingGammaDefiningGraph && gammaDefiningGraphScene ? (
+            <DefiningGraphPanel
+              system={sourceSystem ?? system}
+              scene={gammaDefiningGraphScene}
+            />
+          ) : showingYGammaComplex && yGammaAtlas ? (
             <YGammaWhyPanel
               relation={yGammaActiveRelation}
               sceneCellId={yGammaHoveredOrActiveCell?.id}
@@ -5513,183 +6406,211 @@ export function App() {
           </>
         ) : null}
 
-        <Panel title="Local Link">
-          {hasMathContext ? (
-            <>
-              <LocalLinkView
-                localLink={localLink}
-                activeGeneratorPair={activeGeneratorPair}
-                disabledPairs={disabledPairs}
-                onGeneratorStep={stepByGenerator}
-                onPairToggle={(pair) => focusPairByKey(pairKey(pair))}
-              />
-              <p className="math-note">
-                Link at {localLink.nodeId}: {localLink.vertices.length}{" "}
-                vertices, {localLink.simplices.length} spherical simplices.
-              </p>
-              <div className="badge-row" aria-label="Davis exactness badges">
-                <span className="status-badge">rank-two exact</span>
-                <span className="status-badge">
-                  incidence exact in visible ball
-                </span>
-                <span className="status-badge muted">visual proxy</span>
-              </div>
-              <div
-                className="chip-grid"
-                role="group"
-                aria-label="Local link pair filters"
-              >
-                {localLink.sphericalSubsets
-                  .filter((subset) => subset.rank === 2)
-                  .map((subset) => {
-                    const pair = subset.generators as [number, number];
-                    const key = pairKey(pair);
-                    const disabled = disabledPairs.has(key);
-
-                    return (
-                      <button
-                        key={subset.id}
-                        type="button"
-                        className="chip-button"
-                        data-active={activeGeneratorPairKey === key}
-                        aria-pressed={!disabled}
-                        onClick={() => focusPairByKey(key)}
-                      >
-                        Focus {subset.generatorLabels.join("-")} rank-two cells
-                      </button>
-                    );
-                  })}
-              </div>
-              <ul className="subset-list">
-                {groupSphericalSubsetsByRank(localLink.sphericalSubsets).map(
-                  ([rank, subsets]) => (
-                    <li key={rank}>
-                      <span className="subset-rank">rank {rank}</span>
-                      <span>
-                        {subsets.length} subset{subsets.length === 1 ? "" : "s"}
-                      </span>
-                    </li>
-                  ),
-                )}
-              </ul>
-              {topologyDiagnostics ? (
-                <div className="topology-summary">
-                  <p className="math-note">
-                    Link diagnostics: flag condition{" "}
-                    {topologyDiagnostics.linkCondition.status};{" "}
-                    {
-                      topologyDiagnostics.linkCondition.missingFlagSimplices
-                        .length
-                    }{" "}
-                    missing flag simplex
-                    {topologyDiagnostics.linkCondition.missingFlagSimplices
-                      .length === 1
-                      ? ""
-                      : "es"}
-                    .
-                  </p>
-                </div>
-              ) : null}
-              {sphericalCellProxies.proxies.length > 0 ? (
+        {showLocalLinkPanel ? (
+          <Panel title="Local Link">
+            {hasMathContext ? (
+              <>
+                <LocalLinkView
+                  localLink={localLink}
+                  activeGeneratorPair={activeGeneratorPair}
+                  disabledPairs={disabledPairs}
+                  onGeneratorStep={stepByGenerator}
+                  onPairToggle={(pair) => focusPairByKey(pairKey(pair))}
+                />
                 <p className="math-note">
-                  {sphericalCellProxies.proxies.length} higher-rank Davis cell
-                  proxies are available;{" "}
-                  {
-                    sphericalCellProxies.proxies.filter(
-                      (proxy) => proxy.exactIncidenceAvailable,
-                    ).length
-                  }{" "}
-                  have exact visible incidence metadata.
+                  Link at {localLink.nodeId}: {localLink.vertices.length}{" "}
+                  vertices, {localLink.simplices.length} spherical simplices.
                 </p>
-              ) : null}
-            </>
-          ) : (
-            <p className="math-note">
-              Local-link mathematics needs the source Coxeter system, not only a
-              generated graph.
-            </p>
-          )}
-        </Panel>
+                <div className="badge-row" aria-label="Davis exactness badges">
+                  <span className="status-badge">rank-two exact</span>
+                  <span className="status-badge">
+                    incidence exact in visible ball
+                  </span>
+                  <span className="status-badge muted">visual proxy</span>
+                </div>
+                <div
+                  className="chip-grid"
+                  role="group"
+                  aria-label="Local link pair filters"
+                >
+                  {localLink.sphericalSubsets
+                    .filter((subset) => subset.rank === 2)
+                    .map((subset) => {
+                      const pair = subset.generators as [number, number];
+                      const key = pairKey(pair);
+                      const disabled = disabledPairs.has(key);
 
-        <Panel title="Y_Gamma Cell Inventory">
-          {yGammaAtlas ? (
-            <YGammaAtlasPanel
-              atlas={yGammaAtlas}
-              active={activeIsYGammaBaseComplex}
-              activeGeneratorPairKey={activeGeneratorPairKey}
-              rankThreeFocus={yGammaRankThreeFocus}
-              rankThreeFocusEnabled={yGammaRankThreeFocusEnabled}
-              onShowComplex={() => {
-                openBaseOrbicomplex();
-                setYGammaMainView("complex");
-              }}
-              onShowNerve={() => {
-                openBaseOrbicomplex();
-                setYGammaMainView("nerve");
-              }}
-              onFocusPair={focusPairByKey}
-              onFocusRankThree={() => {
-                if (!activeIsYGammaBaseComplex) {
-                  openBaseOrbicomplex();
-                }
-                focusRankThreeM2M3Demo();
-              }}
-              onFocusRankThreePair={(key) => {
-                if (!activeIsYGammaBaseComplex) {
-                  openBaseOrbicomplex();
-                }
-                focusRankThreeM2M3Demo(key);
-              }}
-            />
-          ) : (
-            <p className="math-note">
-              The Y_Gamma atlas needs a source Coxeter system. Generated graph
-              imports without source data cannot determine spherical cells.
-            </p>
-          )}
-        </Panel>
+                      return (
+                        <button
+                          key={subset.id}
+                          type="button"
+                          className="chip-button"
+                          data-active={activeGeneratorPairKey === key}
+                          aria-pressed={!disabled}
+                          onClick={() => focusPairByKey(key)}
+                        >
+                          Focus {subset.generatorLabels.join("-")} rank-two
+                          cells
+                        </button>
+                      );
+                    })}
+                </div>
+                <ul className="subset-list">
+                  {groupSphericalSubsetsByRank(localLink.sphericalSubsets).map(
+                    ([rank, subsets]) => (
+                      <li key={rank}>
+                        <span className="subset-rank">rank {rank}</span>
+                        <span>
+                          {subsets.length} subset
+                          {subsets.length === 1 ? "" : "s"}
+                        </span>
+                      </li>
+                    ),
+                  )}
+                </ul>
+                {topologyDiagnostics ? (
+                  <div className="topology-summary">
+                    <p className="math-note">
+                      Link diagnostics: flag condition{" "}
+                      {topologyDiagnostics.linkCondition.status};{" "}
+                      {
+                        topologyDiagnostics.linkCondition.missingFlagSimplices
+                          .length
+                      }{" "}
+                      missing flag simplex
+                      {topologyDiagnostics.linkCondition.missingFlagSimplices
+                        .length === 1
+                        ? ""
+                        : "es"}
+                      .
+                    </p>
+                  </div>
+                ) : null}
+                {sphericalCellProxies.proxies.length > 0 ? (
+                  <p className="math-note">
+                    {sphericalCellProxies.proxies.length} higher-rank Davis cell
+                    proxies are available;{" "}
+                    {
+                      sphericalCellProxies.proxies.filter(
+                        (proxy) => proxy.exactIncidenceAvailable,
+                      ).length
+                    }{" "}
+                    have exact visible incidence metadata.
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <p className="math-note">
+                Local-link mathematics needs the source Coxeter system, not only
+                a generated graph.
+              </p>
+            )}
+          </Panel>
+        ) : null}
 
-        <Panel title="Game / Quotient">
-          {activeDataset.kind === "quotient-complex" ? (
-            <QuotientGamePanel
-              quotient={activeDataset.quotient}
-              selectedVertexId={selectedNode?.id}
-            />
-          ) : (
-            <>
+        {showYGammaInventoryPanel ? (
+          <Panel title="Y_Gamma Cell Inventory">
+            {yGammaAtlas ? (
+              <YGammaAtlasPanel
+                atlas={yGammaAtlas}
+                active={activeIsYGammaBaseComplex}
+                activeGeneratorPairKey={activeGeneratorPairKey}
+                rankThreeFocus={yGammaRankThreeFocus}
+                rankThreeFocusEnabled={yGammaRankThreeFocusEnabled}
+                onShowComplex={() => {
+                  openBaseOrbicomplex();
+                  setYGammaMainView("complex");
+                }}
+                onShowNerve={() => {
+                  openBaseOrbicomplex();
+                  setYGammaMainView("nerve");
+                }}
+                onShowGamma={openDefiningGraph}
+                onFocusPair={focusPairByKey}
+                onFocusRankThree={() => {
+                  if (!activeIsYGammaBaseComplex) {
+                    openBaseOrbicomplex();
+                  }
+                  focusRankThreeM2M3Demo();
+                }}
+                onFocusRankThreePair={(key) => {
+                  if (!activeIsYGammaBaseComplex) {
+                    openBaseOrbicomplex();
+                  }
+                  focusRankThreeM2M3Demo(key);
+                }}
+              />
+            ) : (
               <p className="math-note">
-                Game and PL Morse diagnostics live on quotient-style complexes:
-                imported quotients or the one-vertex base orbicomplex{" "}
-                <span className="matrix-key">Y_Gamma</span>.
+                The Y_Gamma atlas needs a source Coxeter system. Generated graph
+                imports without source data cannot determine spherical cells.
               </p>
-              <button
-                type="button"
-                className="button"
-                onClick={openBaseOrbicomplex}
-              >
-                Open 3D Y_Gamma model
-              </button>
-              <p className="math-note">
-                Y_Gamma is the fundamental-domain cell complex: one base vertex,
-                oriented generator arrows, and relation polytopes/cells for
-                spherical subsets. The 2D nerve schematic is only a diagnostic.
-              </p>
-            </>
-          )}
-        </Panel>
+            )}
+          </Panel>
+        ) : null}
+
+        {showGamePanel ? (
+          <Panel title="Quotient + Games">
+            {activeDataset.kind === "quotient-complex" ? (
+              <QuotientGamePanel
+                quotient={activeDataset.quotient}
+                selectedVertexId={selectedNode?.id}
+                workflowKind={gameWorkflowKind}
+                onWorkflowKindChange={setGameWorkflowKind}
+                editableAssignment={activeEditableGameAssignment}
+                summary={quotientGameSummary}
+                usingEditableAssignment={gameUsesEditableAssignment}
+                jnwSourceSystem={jnwSourceSystem}
+                jnwMoveSystem={activeJnwMoveSystem}
+                jnwInitialState={activeJnwInitialState}
+                jnwSummary={jnwSummary}
+                onGeneratorValueChange={updateGameGeneratorValue}
+                onPreset={applyGamePreset}
+                onJnwInitialStateChange={updateJnwInitialState}
+                onJnwMoveToggle={updateJnwMoveToggle}
+                onJnwPreset={applyJnwPreset}
+                onOpenJnwStateQuotient={openJnwStateQuotient}
+                onFocusJnwDiagnostic={focusJnwDiagnostic}
+                onFocusCell={focusGameBoundaryCell}
+              />
+            ) : (
+              <>
+                <GameWorkflowModelCards />
+                <p className="math-note">
+                  Game and PL Morse diagnostics live on quotient-style
+                  complexes: imported quotients or the one-vertex base
+                  orbicomplex <span className="matrix-key">Y_Gamma</span>.
+                </p>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={openBaseOrbicomplex}
+                >
+                  Open 3D Y_Gamma model
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={openDefiningGraph}
+                >
+                  Open defining graph Gamma
+                </button>
+                <p className="math-note">
+                  Y_Gamma is the fundamental-domain cell complex: one base
+                  vertex, oriented generator arrows, and relation
+                  polytopes/cells for spherical subsets. The 2D nerve schematic
+                  is only a diagnostic.
+                </p>
+              </>
+            )}
+          </Panel>
+        ) : null}
 
         <Panel title="What Am I Seeing?">
-          <p className="math-note">
-            <strong>{whatAmISeeing.title}</strong>
-          </p>
-          <ul className="plain-list story-list">
-            {whatAmISeeing.facts.map((fact) => (
-              <li key={fact}>{fact}</li>
-            ))}
-          </ul>
+          <CompactWhatAmISeeingPanel summary={whatAmISeeing} />
         </Panel>
 
-        <Panel title="Warnings">
+        <Panel title="Caveats">
           {warningGroups.length > 0 ? (
             <WarningGroupsView
               groups={warningGroups}
@@ -5697,7 +6618,7 @@ export function App() {
               onToggleShowAll={() => setShowAllWarnings((value) => !value)}
             />
           ) : (
-            <p className="math-note">No warnings for the current view.</p>
+            <p className="math-note">No caveats for the current view.</p>
           )}
         </Panel>
       </aside>
@@ -5705,24 +6626,65 @@ export function App() {
   );
 }
 
+function describeCurrentModel(input: {
+  activeDatasetKind: ViewerDataset["kind"];
+  activeIsYGammaBaseComplex: boolean;
+  effectiveMode: ViewerMode;
+  geometryIntervalCertified: boolean;
+  showingGammaDefiningGraph: boolean;
+  showingYGammaComplex: boolean;
+  yGammaMainView: YGammaMainView;
+}): { label: string; status: string } {
+  if (input.showingGammaDefiningGraph) {
+    return {
+      label: "Gamma",
+      status: "Coxeter diagram drawing",
+    };
+  }
+  if (
+    input.activeIsYGammaBaseComplex &&
+    (input.showingYGammaComplex || input.yGammaMainView === "nerve")
+  ) {
+    return {
+      label: input.yGammaMainView === "nerve" ? "Y_Gamma nerve" : "Y_Gamma",
+      status:
+        input.yGammaMainView === "nerve"
+          ? "2D diagnostic"
+          : "exact incidence, 3D drawing",
+    };
+  }
+  if (
+    input.activeDatasetKind === "quotient-complex" &&
+    !input.activeIsYGammaBaseComplex
+  ) {
+    return {
+      label: "Quotient",
+      status: "imported or derived complex",
+    };
+  }
+  if (input.effectiveMode === "geometric") {
+    return {
+      label: "Projection",
+      status: input.geometryIntervalCertified
+        ? "certified data, projected view"
+        : "visualization-grade projection",
+    };
+  }
+  return {
+    label: "Davis",
+    status: "Cayley ball with Davis cells",
+  };
+}
+
 function TopologyFirstInspector({
   explanation,
+  compact = false,
 }: {
   explanation: TopologyExplanation;
+  compact?: boolean;
 }) {
-  return (
-    <div className="topology-inspector">
-      <div className="status-row">
-        <span className="status-badge">{explanation.layer}</span>
-        <span className="status-badge muted">{explanation.status}</span>
-        {explanation.badges.slice(0, 4).map((badge) => (
-          <span className="status-badge muted" key={badge}>
-            {badge}
-          </span>
-        ))}
-      </div>
-      <h3>{explanation.title}</h3>
-      <p className="math-note">{explanation.summary}</p>
+  const detailContent = (
+    <>
       {explanation.boundaryWord && explanation.boundaryWord.length > 0 ? (
         <p className="math-note">
           Boundary word:{" "}
@@ -5743,6 +6705,159 @@ function TopologyFirstInspector({
           </tbody>
         </table>
       ) : null}
+    </>
+  );
+
+  return (
+    <div className="topology-inspector">
+      <div className="inspector-question">
+        <h3>What is selected?</h3>
+        <p className="math-note">
+          <strong>{explanation.title}</strong>
+        </p>
+      </div>
+      <div className="inspector-question">
+        <h3>Why is it here?</h3>
+        <p className="math-note">{explanation.summary}</p>
+      </div>
+      <div className="inspector-question">
+        <h3>Exact or drawing?</h3>
+        <div className="status-row">
+          <span className="status-badge">{explanation.layer}</span>
+          <span className="status-badge muted">{explanation.status}</span>
+          {explanation.badges.slice(0, 4).map((badge) => (
+            <span className="status-badge muted" key={badge}>
+              {badge}
+            </span>
+          ))}
+        </div>
+      </div>
+      {compact &&
+      (explanation.boundaryWord?.length || explanation.rows.length) ? (
+        <details className="advanced-details compact-details">
+          <summary>Selection details</summary>
+          {detailContent}
+        </details>
+      ) : (
+        detailContent
+      )}
+    </div>
+  );
+}
+
+function CompactWhatAmISeeingPanel({
+  summary,
+}: {
+  summary: WhatAmISeeingSummary;
+}) {
+  const headlineIndexes = new Set([0, 1, 2, 3, summary.facts.length - 1]);
+  const headlineFacts = summary.facts.filter((_, index) =>
+    headlineIndexes.has(index),
+  );
+  const remainingFacts = summary.facts.filter(
+    (_, index) => !headlineIndexes.has(index),
+  );
+
+  return (
+    <div className="reader-summary">
+      <p className="math-note">
+        <strong>{summary.title}</strong>
+      </p>
+      <ul className="plain-list story-list compact-story-list">
+        {headlineFacts.map((fact) => (
+          <li key={fact}>{fact}</li>
+        ))}
+      </ul>
+      {remainingFacts.length > 0 ? (
+        <details className="advanced-details compact-details">
+          <summary>More context</summary>
+          <ul className="plain-list story-list compact-story-list">
+            {remainingFacts.map((fact) => (
+              <li key={fact}>{fact}</li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function DefiningGraphPanel({
+  system,
+  scene,
+}: {
+  system: CoxeterSystemInput;
+  scene: DefiningGraphScene;
+}) {
+  return (
+    <div className="topology-inspector">
+      <div className="status-row">
+        <span className="status-badge">Gamma</span>
+        <span className="status-badge muted">defining graph</span>
+      </div>
+      <h3>Coxeter defining graph</h3>
+      <p className="math-note">
+        Vertices are the Coxeter generators of {system.name}. Drawn edges are
+        exactly the non-right entries of the Coxeter matrix.
+      </p>
+      <table className="inspector-table">
+        <tbody>
+          <tr>
+            <th>Generators</th>
+            <td>
+              {system.generators.map((generator) => generator.label).join(", ")}
+            </td>
+          </tr>
+          <tr>
+            <th>Drawn edges</th>
+            <td>{scene.records.length}</td>
+          </tr>
+          <tr>
+            <th>Omitted m=2 pairs</th>
+            <td>{scene.omittedRightAnglePairs}</td>
+          </tr>
+        </tbody>
+      </table>
+      {scene.legend.length > 0 ? (
+        <div className="gamma-legend" aria-label="Gamma relation color legend">
+          {scene.legend.map((entry) => (
+            <span className="gamma-legend-item" key={entry.label}>
+              <span
+                className="gamma-legend-swatch"
+                style={{ backgroundColor: entry.color }}
+                aria-hidden="true"
+              />
+              <span>
+                {entry.label} ({entry.count})
+              </span>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {scene.records.length > 0 ? (
+        <ul className="plain-list">
+          {scene.records.slice(0, 12).map((record) => {
+            const left =
+              system.generators[record.sourceGenerator]?.label ??
+              `s${record.sourceGenerator}`;
+            const right =
+              system.generators[record.targetGenerator]?.label ??
+              `s${record.targetGenerator}`;
+            return (
+              <li key={record.id}>
+                <span className="matrix-key">
+                  {left}-{right}: {record.label}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="math-note">
+          No non-right relation edges are drawn; this Gamma has only omitted
+          commuting pairs.
+        </p>
+      )}
     </div>
   );
 }
@@ -6715,6 +7830,7 @@ function YGammaAtlasPanel({
   rankThreeFocusEnabled,
   onShowComplex,
   onShowNerve,
+  onShowGamma,
   onFocusPair,
   onFocusRankThree,
   onFocusRankThreePair,
@@ -6726,6 +7842,7 @@ function YGammaAtlasPanel({
   rankThreeFocusEnabled: boolean;
   onShowComplex: () => void;
   onShowNerve: () => void;
+  onShowGamma: () => void;
   onFocusPair: (key: string) => void;
   onFocusRankThree: () => void;
   onFocusRankThreePair: (key: string) => void;
@@ -6779,6 +7896,9 @@ function YGammaAtlasPanel({
         </button>
         <button type="button" className="button" onClick={onShowNerve}>
           Show 2D nerve schematic
+        </button>
+        <button type="button" className="button" onClick={onShowGamma}>
+          Show defining graph Gamma
         </button>
         <button
           type="button"
@@ -7106,10 +8226,22 @@ function WarningGroupsView({
   const allWarnings = groups.flatMap((group) =>
     group.warnings.map((warning) => ({ group, warning })),
   );
-  const visibleWarnings = showAll ? allWarnings : allWarnings.slice(0, 5);
+  const visibleWarnings = showAll ? allWarnings : allWarnings.slice(0, 3);
 
   return (
     <>
+      <div className="compact-warning-summary">
+        <strong>
+          {allWarnings.length} caveat{allWarnings.length === 1 ? "" : "s"}
+        </strong>
+        <div className="warning-chip-row" aria-label="Caveat categories">
+          {groups.map((group) => (
+            <span className="warning-group-label" key={group.id}>
+              {group.label}: {group.warnings.length}
+            </span>
+          ))}
+        </div>
+      </div>
       <ul className="warning-list">
         {visibleWarnings.map(({ group, warning }) => (
           <li key={`${group.id}:${warning}`}>
@@ -7118,9 +8250,9 @@ function WarningGroupsView({
           </li>
         ))}
       </ul>
-      {allWarnings.length > 5 ? (
+      {allWarnings.length > 3 ? (
         <button type="button" className="button" onClick={onToggleShowAll}>
-          {showAll ? "Show fewer warnings" : `Show all ${allWarnings.length}`}
+          {showAll ? "Show fewer caveats" : `Show all ${allWarnings.length}`}
         </button>
       ) : null}
     </>
@@ -7494,6 +8626,152 @@ function maxBoundaryDistance(
   return maxDistance;
 }
 
+function activeIntegerGameAssignment(game: QuotientGameData | undefined) {
+  return (
+    game?.assignments.find(
+      (assignment) => assignment.id === game.activeAssignmentId,
+    ) ?? game?.assignments[0]
+  );
+}
+
+function editableGameAssignmentFromQuotient(
+  quotient: import("../quotient").QuotientComplex,
+): EditableGameAssignment {
+  const rank =
+    quotient.sourceSystem?.rank ??
+    quotient.generatorRank ??
+    Math.max(
+      1,
+      Math.max(-1, ...quotient.edges.map((edge) => edge.generator)) + 1,
+    );
+  const activeAssignment = activeIntegerGameAssignment(quotient.game);
+  const activeCocycle =
+    quotient.game?.cocycles?.find(
+      (cocycle) => cocycle.id === quotient.game?.activeCocycleId,
+    ) ??
+    quotient.game?.cocycles?.find(
+      (cocycle) => cocycle.assignmentId === activeAssignment?.id,
+    );
+  return createGeneratorGameAssignment(
+    rank,
+    activeAssignment?.kind === "integer-generator-labeling"
+      ? activeAssignment.generatorStates
+      : [],
+    {
+      id:
+        activeAssignment?.kind === "integer-generator-labeling"
+          ? activeAssignment.id
+          : "working-generator-cochain",
+      label:
+        activeAssignment?.kind === "integer-generator-labeling"
+          ? (activeAssignment.label ?? activeAssignment.id)
+          : "Working generator cochain",
+      cocycleId:
+        activeCocycle?.id ??
+        (activeAssignment?.kind === "integer-generator-labeling"
+          ? `${activeAssignment.id}-cocycle`
+          : "working-generator-cochain-cocycle"),
+      cocycleLabel: activeCocycle?.label ?? "Working cocycle check",
+    },
+  );
+}
+
+function gameDataWithEditableAssignment(
+  base: QuotientGameData | undefined,
+  editable: EditableGameAssignment,
+): QuotientGameData {
+  const assignments = [
+    editable.assignment,
+    ...(base?.assignments ?? []).filter(
+      (assignment) => assignment.id !== editable.assignment.id,
+    ),
+  ];
+  const cocycles = [
+    editable.cocycle,
+    ...(base?.cocycles ?? []).filter(
+      (cocycle) => cocycle.id !== editable.cocycle.id,
+    ),
+  ];
+
+  return {
+    ...base,
+    activeAssignmentId: editable.assignment.id,
+    activeCocycleId: editable.cocycle.id,
+    assignments,
+    cocycles,
+  };
+}
+
+function updateEditableGameAssignmentValue(
+  assignment: EditableGameAssignment,
+  generator: number,
+  value: number,
+): EditableGameAssignment {
+  return createGeneratorGameAssignment(
+    assignment.generatorValues.length,
+    assignment.generatorValues.map((state) => ({
+      generator: state.generator,
+      value: state.generator === generator ? value : state.value,
+    })),
+    gameAssignmentOptionsFromEditable(assignment),
+  );
+}
+
+function gameAssignmentOptionsFromEditable(assignment: EditableGameAssignment) {
+  return {
+    id: assignment.assignment.id,
+    label: assignment.assignment.label,
+    cocycleId: assignment.cocycle.id,
+    cocycleLabel: assignment.cocycle.label,
+  };
+}
+
+function decorateSceneEdgesForGame(input: {
+  edges: SceneEdge[];
+  enabled: boolean;
+  yGamma: boolean;
+  flowByEdgeId: Map<string, { classification: string }>;
+  generatorValueById: Map<number, number>;
+}): SceneEdge[] {
+  if (!input.enabled) {
+    return input.edges;
+  }
+
+  return input.edges.map((edge) => {
+    const flow = input.flowByEdgeId.get(edge.id);
+    const value = input.generatorValueById.get(edge.generator);
+    const classification = input.yGamma
+      ? value === undefined
+        ? undefined
+        : value > 0
+          ? "ascending"
+          : value < 0
+            ? "descending"
+            : "level"
+      : flow?.classification;
+
+    if (!classification) {
+      return edge;
+    }
+
+    return {
+      ...edge,
+      colorHint: gameFlowColor(classification),
+      selectedHighlight: "outline",
+    };
+  });
+}
+
+function gameFlowColor(classification: string) {
+  if (classification === "ascending") {
+    return "#16a34a";
+  }
+  if (classification === "descending") {
+    return "#dc2626";
+  }
+  return "#64748b";
+}
+
 function groupSphericalSubsetsByRank<T extends { rank: number }>(
   subsets: T[],
 ): Array<[number, T[]]> {
@@ -7504,40 +8782,268 @@ function groupSphericalSubsetsByRank<T extends { rank: number }>(
   return [...groups.entries()].sort(([left], [right]) => left - right);
 }
 
+function GameWorkflowModelCards() {
+  return (
+    <div className="game-model-cards" aria-label="Game model choices">
+      <article className="game-model-card">
+        <strong>Generator-Uniform Cochain</strong>
+        <span>
+          One integer value per generator, propagated to every edge with that
+          generator label.
+        </span>
+      </article>
+      <article className="game-model-card">
+        <strong>JNW Legal-System Game</strong>
+        <span>
+          State/move directions. Theorem-level JNW claims require faithful RACG
+          checks.
+        </span>
+      </article>
+    </div>
+  );
+}
+
 function QuotientGamePanel({
   quotient,
   selectedVertexId,
+  workflowKind,
+  onWorkflowKindChange,
+  editableAssignment,
+  summary,
+  usingEditableAssignment,
+  jnwSourceSystem,
+  jnwMoveSystem,
+  jnwInitialState,
+  jnwSummary,
+  onGeneratorValueChange,
+  onPreset,
+  onJnwInitialStateChange,
+  onJnwMoveToggle,
+  onJnwPreset,
+  onOpenJnwStateQuotient,
+  onFocusJnwDiagnostic,
+  onFocusCell,
 }: {
   quotient: import("../quotient").QuotientComplex;
   selectedVertexId?: string;
+  workflowKind: GameWorkflowKind;
+  onWorkflowKindChange: (kind: GameWorkflowKind) => void;
+  editableAssignment?: EditableGameAssignment;
+  summary?: GameCocycleSummary;
+  usingEditableAssignment: boolean;
+  jnwSourceSystem: CoxeterSystemInput;
+  jnwMoveSystem: JnwMoveSystem;
+  jnwInitialState: JnwState;
+  jnwSummary: JnwLegalOrbitSummary;
+  onGeneratorValueChange: (generator: number, value: number) => void;
+  onPreset: (preset: "zero" | "height" | "invert" | "clear") => void;
+  onJnwInitialStateChange: (generator: number, enabled: boolean) => void;
+  onJnwMoveToggle: (
+    moveGenerator: number,
+    toggledGenerator: number,
+    enabled: boolean,
+  ) => void;
+  onJnwPreset: (
+    preset: "singletons" | "bipartite" | "clear" | "invert-state",
+  ) => void;
+  onOpenJnwStateQuotient: () => void;
+  onFocusJnwDiagnostic: (diagnosticId: string) => void;
+  onFocusCell: (cellId: string) => void;
 }) {
   const status = quotientManifoldStatus(quotient);
-  const assignment = resolveIntegerEdgeAssignment(
-    quotient.game,
-    quotient.edges,
-    quotient.sourceSystem?.rank ?? quotient.generatorRank,
+  const tabs: Array<{ id: GameWorkflowKind; label: string }> = [
+    { id: "generator-uniform-cochain", label: "Generator-Uniform Cochain" },
+    { id: "jnw-legal-system", label: "JNW Legal-System Game" },
+  ];
+
+  return (
+    <>
+      <GameWorkflowModelCards />
+      <p className="math-note">
+        {status.label}: {status.reason}
+      </p>
+      <div className="segmented" aria-label="Game workflow">
+        {tabs.map((tab) => (
+          <button
+            type="button"
+            key={tab.id}
+            aria-pressed={workflowKind === tab.id}
+            onClick={() => onWorkflowKindChange(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      {workflowKind === "generator-uniform-cochain" ? (
+        <GeneratorUniformCochainPanel
+          quotient={quotient}
+          selectedVertexId={selectedVertexId}
+          editableAssignment={editableAssignment}
+          summary={summary}
+          usingEditableAssignment={usingEditableAssignment}
+          onGeneratorValueChange={onGeneratorValueChange}
+          onPreset={onPreset}
+          onFocusCell={onFocusCell}
+        />
+      ) : (
+        <JnwLegalSystemPanel
+          system={jnwSourceSystem}
+          moveSystem={jnwMoveSystem}
+          initialState={jnwInitialState}
+          summary={jnwSummary}
+          onInitialStateChange={onJnwInitialStateChange}
+          onMoveToggle={onJnwMoveToggle}
+          onPreset={onJnwPreset}
+          onOpenStateQuotient={onOpenJnwStateQuotient}
+          onFocusDiagnostic={onFocusJnwDiagnostic}
+        />
+      )}
+    </>
   );
-  const checks = validateRankTwoCocycle(
-    quotient.twoCells,
-    quotient.edges,
-    assignment.edgeStates,
-  );
-  const flows = selectedVertexId
-    ? classifyIncidentEdges(
-        selectedVertexId,
-        quotient.edges,
-        assignment.edgeStates,
-      )
-    : [];
+}
+
+function GeneratorUniformCochainPanel({
+  quotient,
+  selectedVertexId,
+  editableAssignment,
+  summary,
+  usingEditableAssignment,
+  onGeneratorValueChange,
+  onPreset,
+  onFocusCell,
+}: {
+  quotient: import("../quotient").QuotientComplex;
+  selectedVertexId?: string;
+  editableAssignment?: EditableGameAssignment;
+  summary?: GameCocycleSummary;
+  usingEditableAssignment: boolean;
+  onGeneratorValueChange: (generator: number, value: number) => void;
+  onPreset: (preset: "zero" | "height" | "invert" | "clear") => void;
+  onFocusCell: (cellId: string) => void;
+}) {
+  const generatorLabels =
+    quotient.sourceSystem?.generators.map((generator) => generator.label) ??
+    Array.from(
+      {
+        length:
+          quotient.generatorRank ??
+          editableAssignment?.generatorValues.length ??
+          0,
+      },
+      (_unused, index) => `s${index}`,
+    );
+  const failedEquations =
+    summary?.boundaryEquations.filter((equation) => !equation.ok) ?? [];
+  const visibleEquations =
+    failedEquations.length > 0
+      ? failedEquations
+      : (summary?.boundaryEquations.slice(0, 3) ?? []);
+  const statusLabel =
+    summary?.status === "passed"
+      ? "Cocycle passed"
+      : summary?.status === "failed"
+        ? `${summary.failedCellIds.length} failed rank-two boundary${
+            summary.failedCellIds.length === 1 ? "" : "ies"
+          }`
+        : "Incomplete: quotient cells missing";
 
   return (
     <>
       <p className="math-note">
-        {status.label}: {status.reason}
+        This editor assigns one integer value to each generator and propagates
+        it to every edge with that label. It is a useful 1-cochain check, but it
+        is not the full JNW state/move game.
       </p>
       <p className="math-note">
-        Assignment: {assignment.label} ({assignment.source}).
+        <strong>{statusLabel}</strong>. {summary?.passedCellCount ?? 0}/
+        {summary?.totalCellCount ?? 0} rank-two cells pass.
       </p>
+      {editableAssignment ? (
+        <div
+          className="game-editor"
+          aria-label="Generator-uniform cochain editor"
+        >
+          <div className="button-row">
+            <button
+              type="button"
+              className="button"
+              onClick={() => onPreset("zero")}
+            >
+              Zero
+            </button>
+            <button
+              type="button"
+              className="button"
+              onClick={() => onPreset("height")}
+            >
+              Height from selected signs
+            </button>
+            <button
+              type="button"
+              className="button"
+              onClick={() => onPreset("invert")}
+            >
+              Invert signs
+            </button>
+            <button
+              type="button"
+              className="button"
+              onClick={() => onPreset("clear")}
+            >
+              Clear draft
+            </button>
+          </div>
+          <table className="inspector-table">
+            <tbody>
+              {editableAssignment.generatorValues.map((state) => {
+                const label =
+                  generatorLabels[state.generator] ?? `s${state.generator}`;
+                return (
+                  <tr key={state.generator}>
+                    <th>{label}</th>
+                    <td>
+                      <div className="game-value-controls">
+                        {[-1, 0, 1].map((value) => (
+                          <button
+                            type="button"
+                            className={
+                              state.value === value ? "button active" : "button"
+                            }
+                            key={value}
+                            onClick={() =>
+                              onGeneratorValueChange(state.generator, value)
+                            }
+                          >
+                            {value > 0 ? `+${value}` : value}
+                          </button>
+                        ))}
+                        <input
+                          aria-label={`Value for ${label}`}
+                          type="number"
+                          value={state.value}
+                          onChange={(event) =>
+                            onGeneratorValueChange(
+                              state.generator,
+                              Number.parseInt(event.target.value || "0", 10),
+                            )
+                          }
+                        />
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {!usingEditableAssignment ? (
+            <p className="math-note">
+              The imported active assignment is edge-specific, not
+              generator-uniform. Editing a generator value starts a local
+              generator cochain draft.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <ul className="subset-list">
         <li>
           <span className="subset-rank">
@@ -7558,38 +9064,38 @@ function QuotientGamePanel({
           <span>External verifier summary</span>
         </li>
       </ul>
-      {[...assignment.warnings, ...assignment.errors].length > 0 ? (
+      {[...(summary?.warnings ?? []), ...(summary?.errors ?? [])].length > 0 ? (
         <ul className="warning-list">
-          {[...assignment.warnings, ...assignment.errors].map((message) => (
-            <li key={message}>{message}</li>
-          ))}
-        </ul>
-      ) : null}
-      <p className="math-note">
-        Boundary checks: {checks.checks.filter((check) => check.ok).length}/
-        {checks.checks.length} rank-two cells pass the displayed integer labels.
-      </p>
-      {checks.errors.length > 0 ? (
-        <ul className="warning-list">
-          {checks.errors.slice(0, 6).map((message) => (
-            <li key={message}>{message}</li>
-          ))}
+          {[...(summary?.warnings ?? []), ...(summary?.errors ?? [])]
+            .slice(0, 8)
+            .map((message) => (
+              <li key={message}>{message}</li>
+            ))}
         </ul>
       ) : null}
       <ul className="subset-list">
-        {checks.checks.slice(0, 8).map((check) => (
-          <li key={check.cellId}>
-            <span className="subset-rank">{check.ok ? "closed" : "open"}</span>
-            <span>
-              {check.cellId}: sum {check.boundarySum},{" "}
-              {check.actualBoundaryLength}/{check.expectedBoundaryLength}{" "}
-              boundary vertices
+        {visibleEquations.map((equation) => (
+          <li key={equation.cellId}>
+            <span className="subset-rank">
+              {equation.ok ? "closed" : "open"}
             </span>
+            <span className="game-equation">
+              {equation.cellId}: {equation.valueEquation}
+              <br />
+              <span className="muted">{equation.generatorWord}</span>
+            </span>
+            <button
+              type="button"
+              className="button"
+              onClick={() => onFocusCell(equation.cellId)}
+            >
+              Focus cell
+            </button>
           </li>
         ))}
       </ul>
       <ul className="subset-list">
-        {flows.slice(0, 8).map((flow) => (
+        {(summary?.flows ?? []).slice(0, 8).map((flow) => (
           <li key={flow.edgeId}>
             <span className="subset-rank">{flow.classification}</span>
             <span>
@@ -7598,7 +9104,213 @@ function QuotientGamePanel({
           </li>
         ))}
       </ul>
+      {selectedVertexId ? (
+        <p className="math-note">
+          Incident directions are computed away from {selectedVertexId}.
+        </p>
+      ) : null}
     </>
+  );
+}
+
+function JnwLegalSystemPanel({
+  system,
+  moveSystem,
+  initialState,
+  summary,
+  onInitialStateChange,
+  onMoveToggle,
+  onPreset,
+  onOpenStateQuotient,
+  onFocusDiagnostic,
+}: {
+  system: CoxeterSystemInput;
+  moveSystem: JnwMoveSystem;
+  initialState: JnwState;
+  summary: JnwLegalOrbitSummary;
+  onInitialStateChange: (generator: number, enabled: boolean) => void;
+  onMoveToggle: (
+    moveGenerator: number,
+    toggledGenerator: number,
+    enabled: boolean,
+  ) => void;
+  onPreset: (
+    preset: "singletons" | "bipartite" | "clear" | "invert-state",
+  ) => void;
+  onOpenStateQuotient: () => void;
+  onFocusDiagnostic: (diagnosticId: string) => void;
+}) {
+  const generatorLabels = system.generators.map(
+    (generator, index) => generator.label ?? `s${index}`,
+  );
+  const claimLabel =
+    summary.claimStatus === "jnw-faithful"
+      ? "JNW faithful"
+      : summary.claimStatus === "experimental-non-jnw"
+        ? "Experimental non-JNW generalization"
+        : summary.claimStatus === "incomplete-orbit-cap"
+          ? "Incomplete: orbit cap reached"
+          : "Failed checks";
+  const failedMoves = summary.moveChecks.filter((check) => !check.ok);
+  const failedDiagnostics = summary.rankTwoDiagnostics.filter(
+    (diagnostic) => !diagnostic.ok,
+  );
+  const selectedState = new Set(initialState.generators);
+
+  return (
+    <div className="game-editor" aria-label="JNW legal-system game editor">
+      <p className="math-note">
+        JNW directions are state dependent: applying generator{" "}
+        <span className="matrix-key">s_i</span> changes the state by symmetric
+        difference with <span className="matrix-key">m_i</span>. Only
+        right-angled systems with a passing move property and legal orbit are
+        labeled JNW faithful.
+      </p>
+      <p className="math-note">
+        <strong>{claimLabel}</strong>. Orbit states: {summary.states.length};
+        legal states: {summary.legalStateCount}/{summary.states.length};
+        strongly legal: {summary.stronglyLegalStateCount}/
+        {summary.states.length}.
+      </p>
+      <div className="button-row">
+        <button
+          type="button"
+          className="button"
+          onClick={() => onPreset("singletons")}
+        >
+          Singleton moves
+        </button>
+        <button
+          type="button"
+          className="button"
+          onClick={() => onPreset("bipartite")}
+        >
+          Bipartite/color moves
+        </button>
+        <button
+          type="button"
+          className="button"
+          onClick={() => onPreset("invert-state")}
+        >
+          Invert state
+        </button>
+        <button
+          type="button"
+          className="button"
+          onClick={() => onPreset("clear")}
+        >
+          Clear state
+        </button>
+        <button
+          type="button"
+          className="button primary"
+          onClick={onOpenStateQuotient}
+        >
+          Show state quotient
+        </button>
+      </div>
+      <h4>Initial state</h4>
+      <div className="chip-grid" aria-label="JNW initial state">
+        {generatorLabels.map((label, generator) => (
+          <button
+            type="button"
+            key={generator}
+            className="chip-button"
+            aria-pressed={selectedState.has(generator)}
+            onClick={() =>
+              onInitialStateChange(generator, !selectedState.has(generator))
+            }
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <h4>Moves</h4>
+      <table className="inspector-table">
+        <tbody>
+          {moveSystem.moves.map((move) => {
+            const toggles = new Set(move.toggles);
+            return (
+              <tr key={move.generator}>
+                <th>m_{generatorLabels[move.generator]}</th>
+                <td>
+                  <div className="chip-grid">
+                    {generatorLabels.map((label, generator) => (
+                      <button
+                        type="button"
+                        key={generator}
+                        className="chip-button"
+                        aria-pressed={toggles.has(generator)}
+                        onClick={() =>
+                          onMoveToggle(
+                            move.generator,
+                            generator,
+                            !toggles.has(generator),
+                          )
+                        }
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {failedMoves.length > 0 ? (
+        <ul className="warning-list">
+          {failedMoves.map((check) => (
+            <li key={check.generator}>
+              m_{generatorLabels[check.generator]}{" "}
+              {!check.includesSelf
+                ? "does not contain itself"
+                : "contains adjacent generators"}{" "}
+              {check.adjacentGeneratorViolations
+                .map((generator) => generatorLabels[generator])
+                .join(", ")}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {[...summary.warnings, ...summary.errors].length > 0 ? (
+        <ul className="warning-list">
+          {[...summary.warnings, ...summary.errors]
+            .slice(0, 8)
+            .map((message) => (
+              <li key={message}>{message}</li>
+            ))}
+        </ul>
+      ) : null}
+      <ul className="subset-list">
+        {summary.rankTwoDiagnostics.slice(0, 8).map((diagnostic) => (
+          <li key={diagnostic.id}>
+            <span className="subset-rank">
+              {diagnostic.ok ? "closed" : "failed"}
+            </span>
+            <span>
+              {generatorLabels[diagnostic.generatorPair[0]]}-
+              {generatorLabels[diagnostic.generatorPair[1]]}: {2 * diagnostic.m}
+              -step diagnostic
+            </span>
+            <button
+              type="button"
+              className="button"
+              onClick={() => onFocusDiagnostic(diagnostic.id)}
+            >
+              Focus
+            </button>
+          </li>
+        ))}
+      </ul>
+      {failedDiagnostics.length > 8 ? (
+        <p className="math-note">
+          {failedDiagnostics.length - 8} more failed diagnostics are hidden in
+          the compact list.
+        </p>
+      ) : null}
+    </div>
   );
 }
 

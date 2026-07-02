@@ -62,6 +62,13 @@ async function radiusControl(page: Page): Promise<Locator | null> {
   ]);
 }
 
+async function switchToResearchMode(page: Page): Promise<void> {
+  await page
+    .getByRole("group", { name: /interface mode/i })
+    .getByRole("button", { name: /research/i })
+    .click();
+}
+
 async function visibleNodeCount(page: Page): Promise<Locator | null> {
   return firstVisible([
     page.getByTestId("node-count"),
@@ -124,6 +131,48 @@ test("loads the app shell", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: /coxeter viewer 5d/i }),
   ).toBeVisible();
+});
+
+test("teaching mode keeps model navigation and caveats readable", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  await expect(
+    page.getByRole("heading", { name: /reader controls/i }),
+  ).toBeVisible();
+  await expect(page.getByLabel(/current model/i)).toContainText(/Davis/i);
+  const modelSwitch = page.getByRole("group", {
+    name: /main mathematical view/i,
+  });
+  await expect(modelSwitch).toBeVisible();
+  for (const label of ["Davis", "Y_Gamma", "Gamma", "Projection", "Quotient"]) {
+    await expect(
+      modelSwitch.getByRole("button", { name: new RegExp(`^${label}$`) }),
+    ).toBeVisible();
+  }
+  await expect(
+    page.getByRole("heading", { name: /what is selected/i }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /why is it here/i }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /exact or drawing/i }),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: /caveats/i })).toBeVisible();
+
+  await switchToResearchMode(page);
+  await expect(
+    page.getByRole("heading", { name: /research workflow/i }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /quotient \+ games/i }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Generator-Uniform Cochain/i).first(),
+  ).toBeVisible();
+  await expect(page.getByText(/JNW Legal-System Game/i).first()).toBeVisible();
 });
 
 test("renders a nonblank scene on desktop and mobile viewports", async ({
@@ -237,6 +286,7 @@ test("rank-two cell toggle updates the visible cell count when exposed", async (
   page,
 }) => {
   await page.goto("/");
+  await switchToResearchMode(page);
   await page.getByLabel(/example/i).selectOption("A2");
   await page.getByRole("button", { name: /local chamber/i }).click();
   await page.getByLabel(/local depth/i).selectOption("3");
@@ -385,6 +435,10 @@ test("keyboard shortcuts toggle labels without using form focus", async ({
 
 test("local link and focus controls are exposed", async ({ page }) => {
   await page.goto("/");
+  await page
+    .getByRole("group", { name: /reader focus presets/i })
+    .getByRole("button", { name: /local link/i })
+    .click();
 
   await expect(
     page.getByRole("heading", { name: /local link/i }),
@@ -402,6 +456,7 @@ test("on-graph view exposes a local neighborhood around the selected node", asyn
   page,
 }) => {
   await page.goto("/");
+  await switchToResearchMode(page);
 
   const onGraph = page.getByTestId("view-on-graph");
   await expect(onGraph).toBeVisible();
@@ -424,6 +479,7 @@ test("compact 5-cube defaults to a decluttered local chamber view", async ({
 
   await page.getByLabel(/example/i).selectOption("compact_5_cube_gamma1");
   await expect.poll(async () => (await sceneStats(page)).mode).toBe("on-graph");
+  await switchToResearchMode(page);
   await expect(
     page.getByRole("button", { name: /local chamber/i }),
   ).toHaveAttribute("aria-pressed", "true");
@@ -441,6 +497,7 @@ test("generator stepping updates the selected word breadcrumb", async ({
   page,
 }) => {
   await page.goto("/");
+  await switchToResearchMode(page);
   await page.getByRole("button", { name: /local chamber/i }).click();
 
   await page
@@ -455,6 +512,7 @@ test("generator stepping updates the selected word breadcrumb", async ({
 
 test("local-link chord focuses a rank-two relation", async ({ page }) => {
   await page.goto("/");
+  await switchToResearchMode(page);
   await page.getByLabel(/example/i).selectOption("A2");
   await page.getByRole("button", { name: /local chamber/i }).click();
   await page.getByLabel(/local depth/i).selectOption("3");
@@ -480,6 +538,7 @@ test("rank-two cell focus uses graph-bounded cells and selected pair filtering",
   page,
 }) => {
   await page.goto("/");
+  await switchToResearchMode(page);
   await page.getByLabel(/example/i).selectOption("A2");
   await page
     .getByRole("group", { name: /view presets/i })
@@ -522,25 +581,144 @@ test("opens the one-vertex Y_Gamma base complex for game access", async ({
   await expect(
     page.getByText(/Y_Gamma fundamental-domain cell complex/i).first(),
   ).toBeVisible();
-  await expect(page.getByText(/oriented arrow/i).first()).toBeVisible();
+  await expect(
+    page.getByText(/oriented generator arrows/i).first(),
+  ).toBeVisible();
   await expect
     .poll(async () => (await sceneStats(page)).renderedCells ?? 0)
     .toBeGreaterThan(0);
+  await page
+    .getByRole("group", { name: /interface mode/i })
+    .getByRole("button", { name: /research/i })
+    .click();
   await expect(
     page.getByRole("heading", { name: /Y_Gamma Cell Inventory/i }),
   ).toBeVisible();
   await expect(page.getByText(/not distinct affine vertices/i)).toBeVisible();
-  await expect(page.getByText(/Game \/ Quotient/i)).toBeVisible();
+  await expect(page.getByText(/Quotient \+ Games/i)).toBeVisible();
   await expect(
     page.getByText(/quotient complex: no torsion-free/i),
   ).toBeVisible();
   await expect(page.getByText(/Boundary checks/i).first()).toBeVisible();
 });
 
+test("compact 5-cube Y_Gamma labels every visible semantic edge", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByLabel(/example/i).selectOption("compact_5_cube_gamma1");
+  await page
+    .getByLabel(/viewer controls/i)
+    .getByRole("button", { name: /open 3D y_gamma model/i })
+    .click();
+
+  await expect
+    .poll(async () => {
+      const stats = await sceneStats(page);
+      return stats.renderedEdgeSegments && stats.renderedEdgeLabels
+        ? stats.renderedEdgeLabels === stats.renderedEdgeSegments
+        : false;
+    })
+    .toBe(true);
+
+  const readerControls = page.locator("section.panel").filter({
+    has: page.getByRole("heading", { name: /reader controls/i }),
+  });
+
+  await readerControls.getByRole("button", { name: "All" }).click();
+  await expect
+    .poll(async () => {
+      const stats = await sceneStats(page);
+      return stats.renderedEdgeSegments && stats.renderedEdgeLabels
+        ? stats.renderedEdgeLabels === stats.renderedEdgeSegments
+        : false;
+    })
+    .toBe(true);
+
+  await readerControls.getByRole("button", { name: /one relation/i }).click();
+  await expect
+    .poll(async () => {
+      const stats = await sceneStats(page);
+      return stats.renderedEdgeSegments && stats.renderedEdgeLabels
+        ? stats.renderedEdgeLabels === stats.renderedEdgeSegments
+        : false;
+    })
+    .toBe(true);
+});
+
+test("Y_Gamma game workflows expose cochain and JNW state tools", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .getByLabel(/viewer controls/i)
+    .getByRole("button", { name: /open 3D y_gamma model/i })
+    .click();
+
+  const gamePanel = page.locator("section.panel").filter({
+    has: page.getByRole("heading", { name: /quotient \+ games/i }),
+  });
+  await expect(
+    gamePanel.getByLabel(/generator-uniform cochain editor/i),
+  ).toBeVisible();
+
+  await gamePanel.getByLabel(/value for s0/i).fill("1");
+  await gamePanel.getByLabel(/value for s1/i).fill("-1");
+  await expect(gamePanel.getByText(/cocycle passed/i)).toBeVisible();
+
+  await gamePanel.getByLabel(/value for s1/i).fill("0");
+  await expect(gamePanel.getByText(/failed rank-two boundary/i)).toBeVisible();
+  await gamePanel
+    .getByRole("button", { name: /focus cell/i })
+    .first()
+    .click();
+  await expect
+    .poll(async () => (await sceneStats(page)).renderedCells ?? 0)
+    .toBeGreaterThan(0);
+
+  await gamePanel
+    .getByRole("button", { name: /JNW Legal-System Game/i })
+    .click();
+  await expect(
+    gamePanel.getByLabel(/JNW legal-system game editor/i),
+  ).toBeVisible();
+  await expect(
+    gamePanel.getByText(/Experimental non-JNW|Failed checks/i),
+  ).toBeVisible();
+  await gamePanel.getByRole("button", { name: /show state quotient/i }).click();
+  await expect
+    .poll(async () => (await sceneStats(page)).renderedNodes ?? 0)
+    .toBeGreaterThan(0);
+});
+
+test("opens the Coxeter defining graph Gamma as a third source view", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .getByLabel(/viewer controls/i)
+    .getByRole("button", { name: /open defining graph gamma/i })
+    .click();
+
+  await expect(
+    page.getByRole("group", { name: /main mathematical view/i }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Gamma", pressed: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /coxeter defining graph/i }),
+  ).toBeVisible();
+  await expect(page.getByText(/non-right entries/i)).toBeVisible();
+  await expect(page.getByText(/Omitted m=2 pairs/i)).toBeVisible();
+  await expect(page.getByLabel(/Gamma relation color legend/i)).toBeVisible();
+});
+
 test("research workflow loads the I2(5) quotient/game demo", async ({
   page,
 }) => {
   await page.goto("/");
+  await switchToResearchMode(page);
 
   const workflow = page.locator("section.panel").filter({
     has: page.getByRole("heading", { name: /research workflow/i }),
@@ -577,6 +755,7 @@ test("research workflow rank-three lens opens the A3 Y_Gamma focus", async ({
   page,
 }) => {
   await page.goto("/");
+  await switchToResearchMode(page);
 
   const workflow = page.locator("section.panel").filter({
     has: page.getByRole("heading", { name: /research workflow/i }),
@@ -594,8 +773,8 @@ test("experiment log saves and exports deterministic bundles", async ({
   page,
 }) => {
   await page.goto("/");
+  await switchToResearchMode(page);
   await page.getByRole("button", { name: /local chamber/i }).click();
-  await page.getByRole("button", { name: /show research panels/i }).click();
   await page.getByLabel(/note/i).fill("checking lifted local cell panels");
   await page.getByRole("button", { name: /save run/i }).click();
   await expect(page.getByText(/1 saved run in this browser/i)).toBeVisible();
@@ -615,6 +794,7 @@ test("experiment log saves and exports deterministic bundles", async ({
 
 test("view presets update the storytelling panel", async ({ page }) => {
   await page.goto("/");
+  await switchToResearchMode(page);
 
   await expect(
     page.getByRole("heading", { name: /what am i seeing/i }),
@@ -641,6 +821,7 @@ test("exports local neighborhood and view sidecar metadata", async ({
   page,
 }) => {
   await page.goto("/");
+  await switchToResearchMode(page);
   await page.getByRole("button", { name: /local chamber/i }).click();
 
   const localDownload = page.waitForEvent("download");
@@ -671,6 +852,7 @@ test("geometric mode reports a disabled warning when the selected example has no
   page,
 }) => {
   await page.goto("/");
+  await switchToResearchMode(page);
 
   const geometricMode = await firstPresent([
     page.getByRole("tab", { name: /geometric/i }),
@@ -709,6 +891,7 @@ test("toy hyperbolic example enables geometric projection mode", async ({
   page,
 }) => {
   await page.goto("/");
+  await switchToResearchMode(page);
 
   await page.getByLabel(/example/i).selectOption("hyperbolic_toy_rank2");
   const geometricMode = page.getByTestId("mode-geometric");
@@ -726,6 +909,7 @@ test("invalid JSON import shows a validation error when import UI is exposed", a
   page,
 }) => {
   await page.goto("/");
+  await switchToResearchMode(page);
 
   const importInput = await firstPresent([
     page.getByTestId("import-json-input"),

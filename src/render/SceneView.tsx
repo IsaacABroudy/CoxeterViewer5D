@@ -32,11 +32,7 @@ import {
 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-import {
-  compactLabelText,
-  selectLabelBudget,
-  selectSegmentLabelBudget,
-} from "./labels";
+import { compactLabelText, selectLabelBudget } from "./labels";
 
 export type LabelScope = "off" | "focused" | "budgeted";
 export type LocalCellRenderMode =
@@ -64,8 +60,11 @@ export interface SceneEdge {
   target: string;
   generator: number;
   compactLabel?: string;
+  colorHint?: string;
+  alwaysLabel?: boolean;
   isRelationBoundary?: boolean;
   emphasis?: "readable-boundary";
+  selectedHighlight?: "color" | "outline";
   ghost?: boolean;
   directed?: boolean;
 }
@@ -464,6 +463,7 @@ interface CellVisualBucket {
 
 interface ArrowHeadBucket {
   generator: number;
+  color: string;
   ghost: boolean;
   matrices: Matrix4[];
 }
@@ -920,24 +920,29 @@ class SceneRuntime {
   }
 
   private addEdges(update: GraphUpdate): number {
+    const renderEdges = selectRenderableEdges(update);
     const edgeBuckets = new Map<
       string,
-      { generator: number; coordinates: number[] }
+      { generator: number; color: string; coordinates: number[] }
     >();
     const arrowBuckets = new Map<string, ArrowHeadBucket>();
     const arrowDirection = new Vector3();
     const arrowObject = new Object3D();
     let renderedEdgeSegments = 0;
 
-    for (const edge of update.edges) {
+    for (const edge of renderEdges) {
       const source = update.nodePositions.get(edge.source);
       const target = update.nodePositions.get(edge.target);
       if (!source || !target) {
         continue;
       }
-      const bucketKey = `${edge.generator}:${edge.ghost ? "ghost" : "main"}`;
+      const color = edgeColor(edge, update);
+      const bucketKey = `${edge.generator}:${color}:${
+        edge.ghost ? "ghost" : "main"
+      }`;
       const bucket = edgeBuckets.get(bucketKey) ?? {
         generator: edge.generator,
+        color,
         coordinates: [],
       };
       bucket.coordinates.push(
@@ -963,6 +968,7 @@ class SceneRuntime {
           const arrowKey = `${edge.generator}:${edge.ghost ? "ghost" : "main"}`;
           const arrowBucket = arrowBuckets.get(arrowKey) ?? {
             generator: edge.generator,
+            color,
             ghost: Boolean(edge.ghost),
             matrices: [],
           };
@@ -982,17 +988,17 @@ class SceneRuntime {
       );
       const ghost = bucketKey.endsWith(":ghost");
       const material = new LineBasicMaterial({
-        color: generatorColor(update.generators, bucket.generator),
+        color: bucket.color,
         transparent: true,
         opacity: ghost ? 0.14 : 0.72,
       });
-      this.edgeGroup.add(new LineSegments(geometry, material));
+      this.edgeGroup.add(createStableLineSegments(geometry, material));
     }
 
     for (const bucket of arrowBuckets.values()) {
       const geometry = new ConeGeometry(0.055, 0.18, 12);
       const material = new MeshBasicMaterial({
-        color: generatorColor(update.generators, bucket.generator),
+        color: bucket.color,
         transparent: true,
         opacity: bucket.ghost ? 0.18 : 0.92,
       });
@@ -1005,6 +1011,10 @@ class SceneRuntime {
         mesh.setMatrixAt(index, matrix),
       );
       mesh.instanceMatrix.needsUpdate = true;
+      // Instanced arrowheads are tiny meshes spread across the whole graph.
+      // Three.js bounds them by the source cone unless we opt out, which can
+      // make directed edges disappear while orbiting dense local views.
+      mesh.frustumCulled = false;
       mesh.userData.kind = "edge-arrowheads";
       this.edgeGroup.add(mesh);
     }
@@ -1014,6 +1024,7 @@ class SceneRuntime {
 
   private addEdgeOverlays(update: GraphUpdate): void {
     const highlightCoordinates: number[] = [];
+    const outlineHighlightCoordinates: number[] = [];
     const boundaryCoordinates: number[] = [];
     const readableBoundaryCoordinates: number[] = [];
 
@@ -1025,7 +1036,7 @@ class SceneRuntime {
       }
       const coordinates = edgeCoordinates(edge, source, target, update);
 
-      if (edge.isRelationBoundary) {
+      if (edge.isRelationBoundary && !edge.colorHint) {
         boundaryCoordinates.push(...coordinates);
         if (edge.emphasis === "readable-boundary") {
           readableBoundaryCoordinates.push(...coordinates);
@@ -1037,7 +1048,11 @@ class SceneRuntime {
         (edge.source === update.selectedNodeId ||
           edge.target === update.selectedNodeId)
       ) {
-        highlightCoordinates.push(...coordinates);
+        if (edge.selectedHighlight === "outline") {
+          outlineHighlightCoordinates.push(...coordinates);
+        } else {
+          highlightCoordinates.push(...coordinates);
+        }
       }
     }
 
@@ -1048,13 +1063,10 @@ class SceneRuntime {
         new BufferAttribute(new Float32Array(boundaryCoordinates), 3),
       );
       this.edgeOverlayGroup.add(
-        new LineSegments(
+        createStableLineSegments(
           geometry,
-          new LineBasicMaterial({
-            color: "#b42318",
-            transparent: true,
-            opacity: 0.98,
-          }),
+          edgeOverlayMaterial("#b42318", 0.98),
+          20,
         ),
       );
     }
@@ -1066,13 +1078,10 @@ class SceneRuntime {
         new BufferAttribute(new Float32Array(readableBoundaryCoordinates), 3),
       );
       this.edgeOverlayGroup.add(
-        new LineSegments(
+        createStableLineSegments(
           geometry,
-          new LineBasicMaterial({
-            color: "#111827",
-            transparent: true,
-            opacity: 1,
-          }),
+          edgeOverlayMaterial(readableBoundaryEdgeColor(update), 1),
+          21,
         ),
       );
     }
@@ -1084,13 +1093,25 @@ class SceneRuntime {
         new BufferAttribute(new Float32Array(highlightCoordinates), 3),
       );
       this.edgeOverlayGroup.add(
-        new LineSegments(
+        createStableLineSegments(
           geometry,
-          new LineBasicMaterial({
-            color: "#0f6b5f",
-            transparent: true,
-            opacity: 0.95,
-          }),
+          edgeOverlayMaterial("#0f6b5f", 0.95),
+          22,
+        ),
+      );
+    }
+
+    if (outlineHighlightCoordinates.length > 0) {
+      const geometry = new BufferGeometry();
+      geometry.setAttribute(
+        "position",
+        new BufferAttribute(new Float32Array(outlineHighlightCoordinates), 3),
+      );
+      this.edgeOverlayGroup.add(
+        createStableLineSegments(
+          geometry,
+          edgeOverlayMaterial(selectedEdgeOutlineColor(update), 0.96, 3),
+          23,
         ),
       );
     }
@@ -1206,7 +1227,7 @@ class SceneRuntime {
         continue;
       }
 
-      const color = generatorColor(update.generators, edge.generator);
+      const color = edgeColor(edge, update);
       const sprite = createTextSprite(label, {
         textColor: edge.isRelationBoundary ? "#b42318" : color,
         backgroundColor: edge.isRelationBoundary
@@ -1395,7 +1416,7 @@ class SceneRuntime {
         opacity: cellOutlineOpacity(bucket.styleCell, update, false),
         linewidth: cellOutlineWidth(bucket.styleCell, update, false),
       });
-      const outline = new LineSegments(geometry, material);
+      const outline = createStableLineSegments(geometry, material);
       this.cellBuckets.push({
         pairKey: bucket.pairKey,
         pair: bucket.pair,
@@ -1522,14 +1543,10 @@ class SceneRuntime {
       "position",
       new BufferAttribute(new Float32Array(outlineCoordinates), 3),
     );
-    const outline = new LineSegments(
+    const outline = createStableLineSegments(
       outlineGeometry,
-      new LineBasicMaterial({
-        color: "#f85149",
-        transparent: true,
-        opacity: 1,
-        linewidth: 4,
-      }),
+      edgeOverlayMaterial("#f85149", 1, 4),
+      13,
     );
     outline.renderOrder = 13;
     this.cellOverlayGroup.add(outline);
@@ -2543,9 +2560,11 @@ class ScreenLabelOccupancy {
 /**
  * Prioritizes labels before screen-space collision checks.
  *
- * Y_Gamma can have several semantic edges drawn on the same segment. The
- * segment budget picks the best label for that segment; the occupancy pass then
- * prevents separate nearby labels from covering each other.
+ * Ordinary graph views use a label budget because full Cayley balls quickly
+ * become unreadable. In semantic Y_Gamma views, edge labels are part of the
+ * 1-skeleton data, so the renderer keeps one generator-labeled representative
+ * for each drawn segment instead of letting several relation cells place
+ * competing labels on the same edge.
  */
 function edgeLabelPriority(edge: SceneEdge, update: GraphUpdate): number {
   const source = update.nodePositions.get(edge.source);
@@ -2579,7 +2598,8 @@ function selectEdgeLabelCandidates(update: GraphUpdate): EdgeLabelCandidate[] {
     return [];
   }
 
-  const candidates = update.edges
+  const labelEdges = selectRenderableEdges(update);
+  const candidates = labelEdges
     .map((edge): EdgeLabelCandidate | undefined => {
       const label = edgeLabelText(edge, update);
       if (!label) {
@@ -2594,19 +2614,92 @@ function selectEdgeLabelCandidates(update: GraphUpdate): EdgeLabelCandidate[] {
     .filter((candidate): candidate is EdgeLabelCandidate => Boolean(candidate));
 
   if (update.semanticLabelsOnly) {
-    return selectSegmentLabelBudget(
-      candidates.map((candidate) => ({
-        ...candidate,
-        id: candidate.edge.id,
-        segmentKey: edgeLabelSegmentKey(candidate.edge, update),
-      })),
-      update.maxEdgeLabels,
-    );
+    return selectSemanticEdgeLabelCandidates(candidates);
   }
 
   return candidates
     .sort(compareEdgeLabelCandidates)
     .slice(0, update.maxEdgeLabels);
+}
+
+function selectRenderableEdges(update: GraphUpdate): SceneEdge[] {
+  if (!update.semanticLabelsOnly) {
+    return update.edges;
+  }
+
+  const selectedBySegment = new Map<string, SceneEdge>();
+  for (const edge of update.edges) {
+    if (!(edge.directed || edge.isRelationBoundary)) {
+      continue;
+    }
+
+    const key = semanticEdgeSegmentKey(edge, update);
+    if (!key) {
+      continue;
+    }
+
+    const previous = selectedBySegment.get(key);
+    if (
+      !previous ||
+      compareSemanticEdgeRepresentatives(edge, previous, update) < 0
+    ) {
+      selectedBySegment.set(key, edge);
+    }
+  }
+
+  return [...selectedBySegment.values()].sort((left, right) =>
+    left.id.localeCompare(right.id),
+  );
+}
+
+function compareSemanticEdgeRepresentatives(
+  left: SceneEdge,
+  right: SceneEdge,
+  update: GraphUpdate,
+): number {
+  const priorityDifference =
+    edgeLabelPriority(right, update) - edgeLabelPriority(left, update);
+  if (priorityDifference !== 0) {
+    return priorityDifference;
+  }
+
+  const generatorDifference = left.generator - right.generator;
+  return generatorDifference === 0
+    ? left.id.localeCompare(right.id)
+    : generatorDifference;
+}
+
+function semanticEdgeSegmentKey(
+  edge: SceneEdge,
+  update: GraphUpdate,
+): string | undefined {
+  const source = update.nodePositions.get(edge.source);
+  const target = update.nodePositions.get(edge.target);
+  if (!source || !target) {
+    return undefined;
+  }
+
+  if (source.equals(target)) {
+    return `loop:${vectorLabelKey(source)}:${edge.generator}`;
+  }
+
+  const sourceKey = vectorLabelKey(source);
+  const targetKey = vectorLabelKey(target);
+  return sourceKey < targetKey
+    ? `${sourceKey}|${targetKey}`
+    : `${targetKey}|${sourceKey}`;
+}
+
+function vectorLabelKey(position: Vector3): string {
+  return [position.x, position.y, position.z]
+    .map((value) => value.toFixed(3))
+    .join(",");
+}
+
+function selectSemanticEdgeLabelCandidates(
+  candidates: EdgeLabelCandidate[],
+): EdgeLabelCandidate[] {
+  return [...candidates].sort(compareEdgeLabelCandidates);
 }
 
 function edgeLabelText(
@@ -2620,9 +2713,10 @@ function edgeLabelText(
   const generatorLabel =
     update.generators[edge.generator]?.label ?? `s${edge.generator}`;
 
-  // In Y_Gamma, generator arrows are the semantic 1-cells. Boundary labels may
-  // share the same drawn segment, so the arrow keeps the generator name.
-  if (update.semanticLabelsOnly && edge.directed && !edge.isRelationBoundary) {
+  // In Y_Gamma, every drawn edge label names the generator of that 1-cell.
+  // Relation-walk step numbers live in the inspector/overlay text, not on the
+  // edge label itself; otherwise several cells can compete for the same edge.
+  if (update.semanticLabelsOnly) {
     return generatorLabel;
   }
 
@@ -2649,29 +2743,10 @@ function compareEdgeLabelCandidates(
     : priorityDifference;
 }
 
-function edgeLabelSegmentKey(edge: SceneEdge, update: GraphUpdate): string {
-  const source = update.nodePositions.get(edge.source);
-  const target = update.nodePositions.get(edge.target);
-  const sourceKey = source ? vectorLabelKey(source) : edge.source;
-  const targetKey = target ? vectorLabelKey(target) : edge.target;
-  const endpoints =
-    sourceKey < targetKey
-      ? `${sourceKey}|${targetKey}`
-      : `${targetKey}|${sourceKey}`;
-  return endpoints;
-}
-
-function vectorLabelKey(position: Vector3): string {
-  return [position.x, position.y, position.z]
-    .map((value) => value.toFixed(2))
-    .join(",");
-}
-
 function importantEdgeLabel(edge: SceneEdge, update: GraphUpdate): boolean {
   return (
     update.semanticLabelsOnly &&
-    edge.directed === true &&
-    (edge.isRelationBoundary !== true || edge.emphasis === "readable-boundary")
+    (edge.directed === true || edge.isRelationBoundary === true)
   );
 }
 
@@ -2712,24 +2787,39 @@ function edgeLabelCandidates(
   }
 
   const along = direction.clone();
-  const baseLift = edge.directed ? 0.22 : edge.isRelationBoundary ? 0.16 : 0.1;
-  const sideLift = edge.isRelationBoundary ? 0.2 : 0.14;
-  const fractions = edge.directed ? [0.58, 0.48, 0.68] : [0.5, 0.42, 0.58];
+  const labelLane = semanticLabelLane(edge.generator);
+  const laneLift = edge.isRelationBoundary ? labelLane * 0.055 : 0;
+  const laneAlong = edge.isRelationBoundary ? labelLane * 0.025 : 0;
+  const baseLift =
+    (edge.directed ? 0.22 : edge.isRelationBoundary ? 0.16 : 0.1) +
+    Math.abs(laneLift) * 0.5;
+  const sideLift = (edge.isRelationBoundary ? 0.2 : 0.14) + Math.abs(laneLift);
+  const fractions = edge.directed
+    ? [0.58 + laneAlong, 0.48 - laneAlong, 0.68 + laneAlong]
+    : [0.5 + laneAlong, 0.42 - laneAlong, 0.58 + laneAlong];
   return fractions.flatMap((fraction, index) => {
-    const anchor = source.clone().lerp(target, fraction);
+    const clampedFraction = Math.max(0.18, Math.min(0.82, fraction));
+    const anchor = source.clone().lerp(target, clampedFraction);
     const lift = baseLift + index * 0.06;
     return [
-      anchor.clone().addScaledVector(outward, lift),
-      anchor.clone().addScaledVector(side, sideLift + index * 0.05),
-      anchor.clone().addScaledVector(side, -sideLift - index * 0.05),
+      anchor
+        .clone()
+        .addScaledVector(outward, lift)
+        .addScaledVector(side, laneLift),
+      anchor.clone().addScaledVector(side, sideLift + index * 0.05 + laneLift),
+      anchor.clone().addScaledVector(side, -sideLift - index * 0.05 + laneLift),
       anchor
         .clone()
         .addScaledVector(outward, lift + 0.14)
-        .addScaledVector(side, index % 2 === 0 ? sideLift : -sideLift),
+        .addScaledVector(
+          side,
+          (index % 2 === 0 ? sideLift : -sideLift) + laneLift,
+        ),
       anchor
         .clone()
         .addScaledVector(along, 0.12)
-        .addScaledVector(outward, lift),
+        .addScaledVector(outward, lift)
+        .addScaledVector(side, laneLift),
     ];
   });
 }
@@ -2737,16 +2827,28 @@ function edgeLabelCandidates(
 function loopEdgeLabelCandidates(edge: SceneEdge, source: Vector3): Vector3[] {
   const side = stableLabelSide(edge.generator);
   const up = new Vector3(0, 0, 1);
+  const lane = semanticLabelLane(edge.generator);
+  const laneOffset = lane * 0.08;
   return [
-    source.clone().addScaledVector(side, 0.36).addScaledVector(up, 0.2),
-    source.clone().addScaledVector(side, -0.36).addScaledVector(up, 0.2),
-    source.clone().addScaledVector(up, 0.45),
+    source
+      .clone()
+      .addScaledVector(side, 0.36 + laneOffset)
+      .addScaledVector(up, 0.2),
+    source
+      .clone()
+      .addScaledVector(side, -0.36 + laneOffset)
+      .addScaledVector(up, 0.2),
+    source.clone().addScaledVector(side, laneOffset).addScaledVector(up, 0.45),
   ];
 }
 
 function stableLabelSide(generator: number): Vector3 {
   const angle = generator * GOLDEN_ANGLE;
   return new Vector3(Math.cos(angle), Math.sin(angle), 0.35).normalize();
+}
+
+function semanticLabelLane(generator: number): number {
+  return [-2, -1, 0, 1, 2][Math.abs(generator) % 5] ?? 0;
 }
 
 function arrowHeadMatrix(
@@ -2790,6 +2892,48 @@ function clearGroup(group: Group | Scene) {
       }
     }
   }
+}
+
+function createStableLineSegments(
+  geometry: BufferGeometry,
+  material: LineBasicMaterial,
+  renderOrder = 0,
+) {
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  const line = new LineSegments(geometry, material);
+  // Edge and outline batches often span several non-contiguous relation
+  // segments. Per-batch frustum culling saves little here, and stale or tiny
+  // bounds are visually disastrous: edges appear to pop while orbiting.
+  line.frustumCulled = false;
+  line.renderOrder = renderOrder;
+  return line;
+}
+
+function edgeOverlayMaterial(color: string, opacity: number, linewidth = 1) {
+  const material = new LineBasicMaterial({
+    color,
+    transparent: true,
+    opacity,
+    linewidth,
+  });
+  // Relation outlines are explanatory overlays. They should sit above the
+  // graph instead of z-fighting with the base generator-colored line.
+  material.depthTest = false;
+  material.depthWrite = false;
+  return material;
+}
+
+function readableBoundaryEdgeColor(update: GraphUpdate) {
+  return update.colorScheme === "dark" ? "#f8fafc" : "#111827";
+}
+
+function selectedEdgeOutlineColor(update: GraphUpdate) {
+  return update.colorScheme === "dark" ? "#f8fafc" : "#0f172a";
+}
+
+function edgeColor(edge: SceneEdge, update: GraphUpdate) {
+  return edge.colorHint ?? generatorColor(update.generators, edge.generator);
 }
 
 interface TextSpriteOptions {

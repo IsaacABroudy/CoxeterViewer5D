@@ -233,6 +233,8 @@ textarea {
 .app-shell[data-theme="dark"] .advanced-details,
 .app-shell[data-theme="dark"] .guide-card,
 .app-shell[data-theme="dark"] .topology-inspector,
+.app-shell[data-theme="dark"] .compact-warning-summary,
+.app-shell[data-theme="dark"] .gamma-legend-item,
 .app-shell[data-theme="dark"] .label-legend,
 .app-shell[data-theme="dark"] .topology-lens-readout {
   border-color: #263348;
@@ -395,6 +397,37 @@ textarea {
   cursor: pointer;
   font-weight: 700;
   color: #233044;
+}
+
+.compact-details {
+  margin-bottom: 0;
+}
+
+.reader-control-group,
+.reader-summary {
+  display: grid;
+  gap: 8px;
+}
+
+.reader-control-group {
+  margin-bottom: 10px;
+}
+
+.reader-control-row {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.focus-button-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.focus-button-grid .button {
+  min-height: 38px;
+  justify-content: center;
 }
 
 .pair-matrix {
@@ -1180,6 +1213,24 @@ textarea {
   list-style: none;
 }
 
+.compact-warning-summary {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #e0e6ee;
+  border-radius: 7px;
+  background: #f8fafc;
+  padding: 8px;
+  margin-bottom: 8px;
+  color: #374254;
+  font-size: 0.84rem;
+}
+
+.warning-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
 .warning-list li {
   border-left: 3px solid #b88700;
   background: #fff8df;
@@ -1227,6 +1278,78 @@ textarea {
   margin-bottom: 8px;
 }
 
+.current-model-badge {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #d7e0ec;
+  border-radius: 8px;
+  color: #374254;
+  display: inline-grid;
+  gap: 1px;
+  min-width: 145px;
+  padding: 6px 10px;
+}
+
+.current-model-badge span {
+  color: #6b7280;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.current-model-badge strong {
+  color: #172033;
+  font-size: 0.9rem;
+}
+
+.current-model-badge em {
+  color: #5d6878;
+  font-size: 0.74rem;
+  font-style: normal;
+}
+
+.app-shell[data-theme="dark"] .current-model-badge {
+  background: #101828;
+  border-color: #334155;
+  color: #dbeafe;
+}
+
+.app-shell[data-theme="dark"] .current-model-badge strong {
+  color: #f8fafc;
+}
+
+.app-shell[data-theme="dark"] .current-model-badge span,
+.app-shell[data-theme="dark"] .current-model-badge em {
+  color: #cbd5e1;
+}
+
+.gamma-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+
+.gamma-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #d7e0ec;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #374254;
+  padding: 3px 8px;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.gamma-legend-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+}
+
 .guide-card,
 .topology-inspector {
   border: 1px solid #e0e6ee;
@@ -1239,6 +1362,18 @@ textarea {
 .topology-inspector h3 {
   margin: 4px 0 6px;
   font-size: 0.94rem;
+}
+
+.inspector-question {
+  border-bottom: 1px solid #e6eaf0;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+}
+
+.inspector-question:last-of-type {
+  border-bottom: 0;
+  margin-bottom: 4px;
+  padding-bottom: 0;
 }
 
 .status-badge {
@@ -1255,6 +1390,11 @@ textarea {
   color: #374254;
   font-size: 0.86rem;
   line-height: 1.42;
+}
+
+.compact-story-list {
+  display: grid;
+  gap: 6px;
 }
 
 .label-legend {
@@ -1334,6 +1474,67 @@ textarea {
   line-height: 1.45;
 }
 
+.game-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.game-model-cards {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 10px;
+}
+
+.game-model-card {
+  border: 1px solid #dbe5f2;
+  border-radius: 7px;
+  background: #f8fbff;
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+}
+
+.game-model-card strong {
+  color: #172033;
+  font-size: 0.88rem;
+}
+
+.game-model-card span {
+  color: #374254;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.app-shell[data-theme="dark"] .game-model-card {
+  background: #111827;
+  border-color: #334155;
+}
+
+.app-shell[data-theme="dark"] .game-model-card strong {
+  color: #f8fafc;
+}
+
+.app-shell[data-theme="dark"] .game-model-card span {
+  color: #dbeafe;
+}
+
+.game-value-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.game-value-controls input {
+  max-width: 72px;
+}
+
+.game-equation {
+  display: inline-block;
+  min-width: 0;
+}
+
 @media (max-width: 1180px) {
   .app-shell {
     grid-template-columns: minmax(260px, 330px) minmax(0, 1fr);
@@ -1393,6 +1594,10 @@ textarea {
 
   .right-rail {
     display: flex;
+  }
+
+  .game-model-cards {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .sidebar,

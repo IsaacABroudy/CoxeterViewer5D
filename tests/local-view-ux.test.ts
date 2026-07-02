@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import A3 from "../public/examples/A3.json";
 import I2_5 from "../public/examples/I2_5.json";
+import compact5CubeGamma1 from "../public/examples/compact_5_cube_gamma1.json";
 import { generateViewerBall } from "../src/app/generationPipeline";
 import {
   baseOrbicomplexForSystem,
   quotientToGeneratedBall,
 } from "../src/app/viewerDataset";
+import { buildDefiningGraphScene } from "../src/app/definingGraphScene";
 import {
   buildYGammaCellAtlas,
   isYGammaBaseComplex,
@@ -394,6 +396,7 @@ describe("local chamber UX helpers", () => {
     expect(base?.position).toEqual([0, 0, 0]);
     expect(arrowEdges).toHaveLength(system.rank);
     expect(arrowEdges.every((edge) => edge.directed)).toBe(true);
+    expect(arrowEdges.every((edge) => edge.alwaysLabel)).toBe(true);
     expect(
       scene.nodes
         .filter((node) => node.id.startsWith("Y:arrow-end:"))
@@ -515,6 +518,24 @@ describe("local chamber UX helpers", () => {
     expect(
       rankThreeFocus.nodes.filter((node) => !node.hidden).length,
     ).toBeGreaterThan(system.rank + 1);
+  });
+
+  it("marks every compact 5-cube Y_Gamma generator arrow as a required label", () => {
+    const system = compact5CubeGamma1 as CoxeterSystemInput;
+    const atlas = buildYGammaCellAtlas(system);
+    const scene = buildYGamma2SkeletonScene(atlas, {
+      faceMode: "one-skeleton",
+      includeRankThreeCells: false,
+    });
+    const arrowEdges = scene.edges.filter((edge) =>
+      edge.id.startsWith("Y:arrow:"),
+    );
+
+    expect(arrowEdges).toHaveLength(system.rank);
+    expect(arrowEdges.map((edge) => edge.compactLabel)).toEqual(
+      system.generators.map((generator) => generator.label),
+    );
+    expect(arrowEdges.every((edge) => edge.alwaysLabel)).toBe(true);
   });
 
   it("draws finite Y_Gamma relation polygons as simple lifted 3D faces for every m", () => {
@@ -893,6 +914,82 @@ describe("local chamber UX helpers", () => {
     expect(selectedFace.nodes.some((node) => node.id === "Y:arrow-end:2")).toBe(
       true,
     );
+  });
+
+  it("builds the Coxeter defining graph Gamma from source labels and matrix entries", () => {
+    const system: CoxeterSystemInput = {
+      ...(A3 as CoxeterSystemInput),
+      name: "Relabeled A3",
+      generators: [
+        { id: "a", label: "p0", colorHint: "#2563eb" },
+        { id: "b", label: "p1", colorHint: "#16a34a" },
+        { id: "c", label: "p2", colorHint: "#dc2626" },
+      ],
+    };
+    const scene = buildDefiningGraphScene(system);
+
+    expect(scene.nodes.map((node) => node.compactLabel)).toEqual([
+      "p0",
+      "p1",
+      "p2",
+    ]);
+    expect(scene.records.map((record) => record.id).sort()).toEqual([
+      "Gamma:e:0-1",
+      "Gamma:e:1-2",
+    ]);
+    expect(scene.edges.map((edge) => edge.compactLabel)).toEqual([
+      "m=3",
+      "m=3",
+    ]);
+    expect(scene.edges.map((edge) => edge.colorHint)).toEqual([
+      "#2563eb",
+      "#2563eb",
+    ]);
+    expect(
+      scene.edges.every((edge) => edge.selectedHighlight === "outline"),
+    ).toBe(true);
+    expect(scene.legend).toEqual([
+      { label: "m=3", color: "#2563eb", count: 2 },
+    ]);
+    expect(scene.omittedRightAnglePairs).toBe(1);
+    expect(scene.warnings.join(" ")).toContain("m=2");
+    expect(scene.edges.every((edge) => edge.isRelationBoundary)).toBe(true);
+  });
+
+  it("colors Coxeter defining graph Gamma edges by relation type", () => {
+    const system: CoxeterSystemInput = {
+      schemaVersion: 1,
+      name: "Gamma relation color fixture",
+      rank: 4,
+      generators: [
+        { id: "s0", label: "s0" },
+        { id: "s1", label: "s1" },
+        { id: "s2", label: "s2" },
+        { id: "s3", label: "s3" },
+      ],
+      coxeterMatrix: [
+        [1, 3, 4, 5],
+        [3, 1, "inf", 2],
+        [4, "inf", 1, 2],
+        [5, 2, 2, 1],
+      ],
+    };
+
+    const scene = buildDefiningGraphScene(system);
+    const colorsByLabel = new Map(
+      scene.records.map((record) => [record.label, record.color]),
+    );
+
+    expect(colorsByLabel.get("m=3")).toBe("#2563eb");
+    expect(colorsByLabel.get("m=4")).toBe("#16a34a");
+    expect(colorsByLabel.get("m=5")).toBe("#f59e0b");
+    expect(colorsByLabel.get("m=inf")).toBe("#ec4899");
+    expect(scene.legend.map((entry) => entry.label)).toEqual([
+      "m=3",
+      "m=4",
+      "m=5",
+      "m=inf",
+    ]);
   });
 
   it("numbers active Y_Gamma relation edges while leaving construction vertices unlabeled", () => {

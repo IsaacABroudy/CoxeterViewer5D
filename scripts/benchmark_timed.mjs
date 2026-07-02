@@ -147,24 +147,32 @@ async function ensureBenchmarkServer() {
 }
 
 async function waitForStats(page, expected) {
-  await page.waitForFunction(
-    (target) => {
-      const stats = globalThis.__coxeterSceneStats;
-      if (!stats || stats.renderedNodes <= 0) {
-        return false;
-      }
-      if (!target) {
-        return true;
-      }
-      return (
-        stats.renderedNodes === target.renderedNodes &&
-        stats.renderedEdgeSegments === target.renderedEdgeSegments &&
-        stats.renderedCells === target.renderedCells
-      );
-    },
-    expected,
-    { timeout: 15000 },
-  );
+  try {
+    await page.waitForFunction(
+      (target) => {
+        const stats = globalThis.__coxeterSceneStats;
+        if (!stats || stats.renderedNodes <= 0) {
+          return false;
+        }
+        if (!target) {
+          return true;
+        }
+        return (
+          stats.renderedNodes === target.renderedNodes &&
+          stats.renderedEdgeSegments === target.renderedEdgeSegments &&
+          stats.renderedCells === target.renderedCells
+        );
+      },
+      expected,
+      { timeout: 30000 },
+    );
+  } catch (error) {
+    const stats = await page.evaluate(() => globalThis.__coxeterSceneStats);
+    throw new Error(
+      `scene stats did not reach ${JSON.stringify(expected)}; last stats were ${JSON.stringify(stats)}`,
+      { cause: error },
+    );
+  }
   return page.evaluate(() => globalThis.__coxeterSceneStats);
 }
 
@@ -182,6 +190,17 @@ async function resetPage(page) {
     .catch(() => undefined);
   await page.goto(BENCHMARK_URL, { waitUntil: "domcontentloaded" });
   await waitForStats(page);
+}
+
+async function switchToResearchMode(page) {
+  const research = page
+    .getByRole("group", { name: /interface mode/i })
+    .getByRole("button", { name: /research/i });
+  if (
+    (await research.getAttribute("aria-pressed").catch(() => null)) !== "true"
+  ) {
+    await research.click();
+  }
 }
 
 async function ensureChecked(locator) {
@@ -309,6 +328,7 @@ async function runRankTwoPairFocusInteraction(page) {
     "rank-two-pair-focus",
     async () => {
       await resetPage(page);
+      await switchToResearchMode(page);
       await page.locator("#example-select").selectOption("A2");
       await page.getByRole("button", { name: /local chamber/i }).click();
       await page.getByLabel(/local depth/i).selectOption("3");
@@ -400,6 +420,7 @@ async function runScreenshotExportInteraction(page) {
     "screenshot-export",
     async () => {
       await resetPage(page);
+      await switchToResearchMode(page);
       await waitForStats(page);
     },
     async () => {
@@ -424,6 +445,7 @@ async function runQuotientLinkLensInteraction(page) {
     "quotient-link-lens",
     async () => {
       await resetPage(page);
+      await switchToResearchMode(page);
       const workflow = page.locator(".workflow-panel");
       await workflow.getByRole("button", { name: /quotient/i }).click();
       await workflow
@@ -469,6 +491,7 @@ async function runTopologyGeneratorStarInteraction(page) {
     "topology-generator-star",
     async () => {
       await resetPage(page);
+      await switchToResearchMode(page);
       await page.locator("#example-select").selectOption("A3");
       await waitForStats(page);
     },
@@ -498,6 +521,7 @@ async function runEdgeStarInteraction(page) {
     "edge-star",
     async () => {
       await resetPage(page);
+      await switchToResearchMode(page);
       await page.locator("#example-select").selectOption("A3");
       await waitForStats(page);
     },
@@ -532,6 +556,7 @@ async function runCellStarInteraction(page) {
     "cell-star",
     async () => {
       await resetPage(page);
+      await switchToResearchMode(page);
       await page.locator("#example-select").selectOption("A3");
       await waitForStats(page);
     },
@@ -567,6 +592,7 @@ async function runRankKLensInteraction(page) {
     "rank-k-lens",
     async () => {
       await resetPage(page);
+      await switchToResearchMode(page);
       await page.locator("#example-select").selectOption("A3");
       await waitForStats(page);
     },
@@ -596,6 +622,7 @@ async function runComparisonViewInteraction(page) {
     "comparison-view",
     async () => {
       await resetPage(page);
+      await switchToResearchMode(page);
       await waitForStats(page);
     },
     async () => {
@@ -624,6 +651,7 @@ async function runAnnotationToggleInteraction(page) {
     "annotation-toggle",
     async () => {
       await resetPage(page);
+      await switchToResearchMode(page);
       await page.getByRole("button", { name: /budgeted/i }).click();
       await ensureChecked(
         page.getByRole("checkbox", { name: /group-element labels/i }),
@@ -705,6 +733,7 @@ async function runProgressiveQuotientLoadInteraction(page) {
     "progressive-quotient-load",
     async () => {
       await resetPage(page);
+      await switchToResearchMode(page);
       await waitForStats(page);
     },
     async () => {
@@ -739,6 +768,7 @@ async function runImportRepairInteraction(page) {
     "import-repair",
     async () => {
       await resetPage(page);
+      await switchToResearchMode(page);
       await waitForStats(page);
     },
     async () => {
@@ -827,6 +857,7 @@ async function runInteractions(page) {
 async function runCase(page, testCase, expected) {
   const startedAt = performance.now();
 
+  await page.locator("#radius-input").fill(String(testCase.radius));
   await page.locator("#example-select").selectOption(testCase.exampleId);
   await page.locator("#radius-input").fill(String(testCase.radius));
   const stats = await waitForStats(page, expected ?? testCase.expected);

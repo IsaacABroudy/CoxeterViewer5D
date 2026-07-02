@@ -46,14 +46,16 @@ export function buildWhatAmISeeingSummary(input: {
   geometryCertified: boolean;
   exactIncidenceCount: number;
   isYGammaBaseComplex?: boolean;
-  yGammaMainView?: "complex" | "nerve";
+  yGammaMainView?: "complex" | "gamma" | "nerve";
 }): WhatAmISeeingSummary {
   const radius = input.ball?.metadata.radius ?? "?";
   const selected = input.selectedNode?.id ?? "none";
   const viewFact = input.isYGammaBaseComplex
-    ? input.yGammaMainView === "nerve"
-      ? "Nerve diagnostic: the main viewer shows generator vertices, finite rank-two chords, and spherical simplices derived from Y_Gamma. This is not the complex itself."
-      : "Y_Gamma complex view: the main 3D viewer shows the 2-skeleton as one object: a base vertex, oriented generator arrows, and filled rank-two relation sheets glued to those arrows."
+    ? input.yGammaMainView === "gamma"
+      ? "Defining graph Gamma: vertices are Coxeter generators and edges record the non-right Coxeter matrix entries. This is the presentation diagram, not a cell complex."
+      : input.yGammaMainView === "nerve"
+        ? "Nerve diagnostic: the main viewer shows generator vertices, finite rank-two chords, and spherical simplices derived from Y_Gamma. This is not the complex itself."
+        : "Y_Gamma complex view: the main 3D viewer shows the 2-skeleton as one object: a base vertex, oriented generator arrows, and filled rank-two relation sheets glued to those arrows."
     : input.graphView === "on-graph"
       ? `Local Chamber 3D: selected chamber ${selected} is centered; only the distance-${input.localDepth} graph neighborhood is drawn with visual cell-panel offsets when cells are enabled.`
       : "Global view: the full generated finite-radius ball is drawn subject to render budgets.";
@@ -61,18 +63,22 @@ export function buildWhatAmISeeingSummary(input: {
     input.mode === "geometric"
       ? input.geometryCertified
         ? "Geometric mode uses certified interval diagnostics for reflections; the 3D projection is still a visualization."
-        : "Geometric mode projects hyperbolic chamber barycenters to 3D for inspection."
+        : "Geometric mode is a projection, not exact hyperbolic geometry; it places chamber barycenters in 3D for inspection."
       : "Shell mode is a deterministic drawing convention for the Cayley graph, not hyperbolic geometry.";
   const davisFact =
-    input.visibleHigherProxyCount > 0
-      ? `${input.visibleRankTwoCellCount} exact rank-two Davis cells and ${input.visibleHigherProxyCount} higher-rank visual proxies are visible.`
-      : `${input.visibleRankTwoCellCount} exact rank-two Davis cells are visible.`;
+    input.isYGammaBaseComplex && input.yGammaMainView === "gamma"
+      ? `${input.visibleEdgeCount} defining-graph relation edges are visible; m=2 commuting pairs are omitted by diagram convention.`
+      : input.visibleHigherProxyCount > 0
+        ? `${input.visibleRankTwoCellCount} exact rank-two Davis cells and ${input.visibleHigherProxyCount} higher-rank visual proxies are visible.`
+        : `${input.visibleRankTwoCellCount} exact rank-two Davis cells are visible.`;
 
   return {
     title: input.isYGammaBaseComplex
-      ? input.yGammaMainView === "nerve"
-        ? "Nerve diagnostic derived from Y_Gamma"
-        : "Y_Gamma fundamental-domain cell complex"
+      ? input.yGammaMainView === "gamma"
+        ? "Coxeter defining graph Gamma"
+        : input.yGammaMainView === "nerve"
+          ? "Nerve diagnostic derived from Y_Gamma"
+          : "Y_Gamma fundamental-domain cell complex"
       : input.graphView === "on-graph"
         ? "Local chamber neighborhood"
         : "Finite-radius Cayley ball",

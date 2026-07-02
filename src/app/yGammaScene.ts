@@ -149,6 +149,7 @@ export function buildYGamma2SkeletonScene(
       generator,
       compactLabel: cell.label,
       directed: true,
+      alwaysLabel: true,
     });
   }
 
