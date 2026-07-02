@@ -922,6 +922,78 @@ describe("local chamber UX helpers", () => {
     ).toBe(true);
   });
 
+  it("uses source generator labels on every Y_Gamma relation-edge drawing", () => {
+    const system: CoxeterSystemInput = {
+      ...(A3 as CoxeterSystemInput),
+      name: "A3 with compact-style labels",
+      generators: (A3 as CoxeterSystemInput).generators.map(
+        (generator, index) => ({
+          ...generator,
+          label: `p${index}`,
+        }),
+      ),
+    };
+    const atlas = buildYGammaCellAtlas(system);
+
+    const relationScene = buildYGamma2SkeletonScene(atlas, {
+      activeGeneratorPairKey: "0-1",
+      faceMode: "active-pair",
+      includeRankThreeCells: false,
+    });
+    expect(
+      relationScene.edges
+        .filter((edge) => edge.id.startsWith("Y:cell:0-1:boundary:"))
+        .map((edge) => edge.compactLabel),
+    ).toEqual(["0: p0", "1: p1", "2: p0", "3: p1", "4: p0", "5: p1"]);
+
+    const focusBase = {
+      cellId: "Y:higher:0-1-2",
+      generatorSet: [0, 1, 2],
+      pairKeys: ["0-2", "0-1"],
+      exposeConstructionVertices: true,
+    };
+    const hingeScene = buildYGamma2SkeletonScene(atlas, {
+      includeRankThreeCells: true,
+      rankThreeFocus: {
+        ...focusBase,
+        showOnlyFundamentalFaces: true,
+        mode: "hinge-witness",
+      },
+    });
+    const fundamentalScene = buildYGamma2SkeletonScene(atlas, {
+      activeGeneratorPairKey: "0-1",
+      includeRankThreeCells: true,
+      rankThreeFocus: {
+        ...focusBase,
+        showOnlyFundamentalFaces: true,
+        mode: "full-cell",
+      },
+    });
+    const fullCellScene = buildYGamma2SkeletonScene(atlas, {
+      activeGeneratorPairKey: "0-1",
+      includeRankThreeCells: true,
+      rankThreeFocus: {
+        ...focusBase,
+        showOnlyFundamentalFaces: false,
+        mode: "full-cell",
+      },
+    });
+
+    const relationLabels = [
+      ...hingeScene.edges,
+      ...fundamentalScene.edges,
+      ...fullCellScene.edges,
+    ]
+      .filter((edge) => edge.isRelationBoundary)
+      .map((edge) => edge.compactLabel)
+      .filter((label): label is string => Boolean(label));
+
+    expect(relationLabels.length).toBeGreaterThan(0);
+    expect(relationLabels.every((label) => !/\bs\d+\b/.test(label))).toBe(true);
+    expect(relationLabels.some((label) => label.includes("p0"))).toBe(true);
+    expect(relationLabels.some((label) => label.includes("p1"))).toBe(true);
+  });
+
   it("can keep the full generator spine visible around a focused Y_Gamma 3-cell", () => {
     const rankFourWithA3Cell: CoxeterSystemInput = {
       schemaVersion: 1,

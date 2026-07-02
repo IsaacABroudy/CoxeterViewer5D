@@ -58,7 +58,7 @@ interface PendingRequest {
 
 const yGammaSceneSchemaVersion = 2;
 const yGammaSceneNamespace = "ygamma-scene";
-const yGammaSceneBuilderVersion = "relation-face-lift-v2";
+const yGammaSceneBuilderVersion = "relation-source-labels-v3";
 
 /**
  * Factory for the off-main-thread Y_Gamma scene builder.

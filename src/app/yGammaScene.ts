@@ -101,6 +101,7 @@ export function buildYGamma2SkeletonScene(
     rankThreeFocus,
     pairOrders,
   );
+  const generatorLabels = yGammaGeneratorLabels(atlas);
   const focusGenerator =
     options.focusGenerator !== undefined &&
     Number.isInteger(options.focusGenerator) &&
@@ -180,6 +181,7 @@ export function buildYGamma2SkeletonScene(
       index,
       atlas.rankTwoCells.length,
       directions,
+      generatorLabels,
       active,
     );
     nodes.push(...relation.nodes);
@@ -190,6 +192,7 @@ export function buildYGamma2SkeletonScene(
     const rankThree = buildRankThreeCellSurfaces({
       cells: atlas.higherCells.filter((cell) => cell.rank === 3),
       generatorDirections: directions,
+      generatorLabels,
       pairOrders,
       faceMode,
       activePair,
@@ -241,6 +244,7 @@ function buildRelationFace(
   index: number,
   relationCount: number,
   generatorDirections: Vec3[],
+  generatorLabels: string[],
   active: boolean,
 ): {
   nodes: SceneNode[];
@@ -301,7 +305,7 @@ function buildRelationFace(
         generator,
         compactLabel: `${step}: ${
           cell.attachingWord[step % cell.attachingWord.length] ??
-          `s${generator}`
+          labelForGenerator(generatorLabels, generator)
         }`,
         isRelationBoundary: true,
         emphasis: "readable-boundary",
@@ -344,6 +348,26 @@ function arrowEndNodeId(generator: number): string {
 
 function hiddenCornerNodeId(cellId: string, cornerIndex: number): string {
   return `${cellId}:sheet-corner:${cornerIndex}`;
+}
+
+function yGammaGeneratorLabels(atlas: YGammaCellAtlas): string[] {
+  const labels: string[] = [];
+  for (const cell of atlas.generatorCells) {
+    const generator = cell.generators[0];
+    if (generator === undefined) {
+      continue;
+    }
+    labels[generator] =
+      cell.generatorLabels[0] ?? cell.label ?? `s${generator}`;
+  }
+  return Array.from(
+    { length: atlas.generatorCount },
+    (_entry, generator) => labels[generator] ?? `s${generator}`,
+  );
+}
+
+function labelForGenerator(labels: string[], generator: number): string {
+  return labels[generator] ?? `s${generator}`;
 }
 
 function buildGeneratorDirections(
@@ -455,6 +479,7 @@ function rankThreeFocusCoxeterDirections(
 function buildRankThreeCellSurfaces(input: {
   cells: YGammaCellRecord[];
   generatorDirections: Vec3[];
+  generatorLabels: string[];
   pairOrders: Map<string, number>;
   faceMode: YGamma2SkeletonSceneOptions["faceMode"];
   activePair?: [number, number];
@@ -495,7 +520,11 @@ function buildRankThreeCellSurfaces(input: {
       : undefined;
     const useHingeWitness = input.focus && input.focus.mode === "hinge-witness";
     if (useHingeWitness && hinge) {
-      const focused = buildRankThreeFocusHingeGeometry(cell, hinge);
+      const focused = buildRankThreeFocusHingeGeometry(
+        cell,
+        hinge,
+        input.generatorLabels,
+      );
       nodes.push(...focused.nodes);
       edges.push(...focused.edges);
       surfaces.push(...focused.cells);
@@ -520,6 +549,7 @@ function buildRankThreeCellSurfaces(input: {
       coxeterCell,
       globalGenerators: generators as [number, number, number],
       generatorDirections: input.generatorDirections,
+      generatorLabels: input.generatorLabels,
       pairOrders: localOrders,
       faceMode: input.faceMode,
       focus: input.focus,
@@ -615,6 +645,7 @@ function rankThreeFocusHinge(
 function buildRankThreeFocusHingeGeometry(
   cell: YGammaCellRecord,
   hinge: RankThreeFocusHinge,
+  generatorLabels: string[],
 ): RankThreeSceneGeometry {
   const first = buildHingeFace({
     cell,
@@ -623,6 +654,7 @@ function buildRankThreeFocusHingeGeometry(
     otherGenerator: hinge.first.other,
     plane: "xy",
     faceIndex: 0,
+    generatorLabels,
   });
   const second = buildHingeFace({
     cell,
@@ -631,6 +663,7 @@ function buildRankThreeFocusHingeGeometry(
     otherGenerator: hinge.second.other,
     plane: "xz",
     faceIndex: 1,
+    generatorLabels,
   });
 
   return {
@@ -648,6 +681,7 @@ function buildHingeFace(input: {
   otherGenerator: number;
   plane: "xy" | "xz";
   faceIndex: number;
+  generatorLabels: string[];
 }): { nodes: SceneNode[]; edges: SceneEdge[]; cell: SceneCell } {
   const [left, right] = input.pair;
   const boundaryLength = 2 * input.m;
@@ -686,7 +720,10 @@ function buildHingeFace(input: {
       source: nodeId,
       target: boundaryNodeIds[(step + 1) % boundaryNodeIds.length],
       generator: step % 2 === 0 ? left : right,
-      compactLabel: `${step}: s${step % 2 === 0 ? left : right}`,
+      compactLabel: `${step}: ${labelForGenerator(
+        input.generatorLabels,
+        step % 2 === 0 ? left : right,
+      )}`,
       isRelationBoundary: true,
       emphasis: "readable-boundary",
       directed: true,
@@ -792,6 +829,7 @@ function embedRankThreeCoxeterCell(input: {
   coxeterCell: RankThreeCoxeterCell;
   globalGenerators: [number, number, number];
   generatorDirections: Vec3[];
+  generatorLabels: string[];
   pairOrders: [number, number, number];
   faceMode?: YGamma2SkeletonSceneOptions["faceMode"];
   focus?: YGammaRankThreeFocus;
@@ -914,6 +952,7 @@ function embedRankThreeCoxeterCell(input: {
       faces: visibleFaces,
       globalGenerators,
       generatorDirections,
+      generatorLabels: input.generatorLabels,
       activePair: input.activePair,
       exposeConstructionVertices: input.focus.exposeConstructionVertices,
     });
@@ -973,8 +1012,8 @@ function embedRankThreeCoxeterCell(input: {
               target: nodeIds[boundary[(step + 1) % boundary.length]],
               generator: globalGenerator,
               compactLabel: active
-                ? `${step}: s${globalGenerator}`
-                : `s${globalGenerator}`,
+                ? `${step}: ${labelForGenerator(input.generatorLabels, globalGenerator)}`
+                : labelForGenerator(input.generatorLabels, globalGenerator),
               isRelationBoundary: true,
               emphasis: active ? "readable-boundary" : undefined,
               directed: true,
@@ -1256,6 +1295,7 @@ function embedFundamentalRankThreeFaces(input: {
   faces: RankThreeFaceCycle[];
   globalGenerators: [number, number, number];
   generatorDirections: Vec3[];
+  generatorLabels: string[];
   activePair?: [number, number];
   exposeConstructionVertices?: boolean;
 }): { nodes: SceneNode[]; edges: SceneEdge[]; cells: SceneCell[] } {
@@ -1325,7 +1365,7 @@ function embedFundamentalRankThreeFaces(input: {
           source: boundaryNodeIds[step],
           target: boundaryNodeIds[(step + 1) % boundaryNodeIds.length],
           generator,
-          compactLabel: `s${generator}`,
+          compactLabel: labelForGenerator(input.generatorLabels, generator),
           isRelationBoundary: true,
           emphasis: active ? "readable-boundary" : undefined,
           directed: true,
