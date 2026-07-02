@@ -466,12 +466,48 @@ warnings. The in-repo torsion-free certificate is explicitly scoped as
 `visible-spherical-stabilizer`; external Sage/GAP or published-reference
 certificates are required before the UI may use manifold language.
 
-Game/PL Morse preparation stores integer edge labels, named cocycles, and
-experiment logs. A named cocycle points to one integer assignment and records
-its coefficient ring, currently `Z`. Experiment logs record the assignment or
-cocycle id, optional selected vertex, input hash, diagnostics, and certificate
-summary. Boundary-sum checks around rank-two cells are the first in-repo
-cocycle certificate.
+Game/PL Morse preparation now has two browser workflows. The
+`generator-uniform-cochain` workflow stores integer generator labels, named
+cocycles, and experiment logs. A named cocycle points to one integer
+assignment and records its coefficient ring, currently `Z`. Boundary-sum
+checks around rank-two cells are the first in-repo cocycle certificate.
+
+The `jnw-legal-system` workflow stores Jankiewicz-Norin-Wise style state/move
+data. A state is a subset of generators; each move `m_i` is a subset containing
+`i`; applying generator `i` changes the state by symmetric difference with
+`m_i`. Edge directions are derived from the endpoint state, not from a global
+orientation for all edges of one generator. Right-angled systems can be labeled
+`jnw-faithful` when the move property, legal orbit, and rank-two diagnostics
+pass. Non-right-angled systems are allowed as `experimental-non-jnw`
+diagnostics only.
+
+Project sessions and experiment bundles record the active game block with:
+
+```json
+{
+  "workflowKind": "generator-uniform-cochain",
+  "claimStatus": "experimental-non-jnw",
+  "generatorUniformCochain": {
+    "generatorValues": [{ "generator": 0, "value": 1 }],
+    "cocycleStatus": "passed",
+    "failedCellIds": []
+  },
+  "jnwLegalSystem": {
+    "sourceSystemName": "A right-angled example",
+    "initialState": [0, 2],
+    "moves": [{ "generator": 0, "toggles": [0] }],
+    "orbitStateCount": 4,
+    "legalStateCount": 4,
+    "stronglyLegalStateCount": 4
+  }
+}
+```
+
+The `generatorUniformCochain` and `jnwLegalSystem` blocks may both be present
+so a saved run can preserve both tabs. `claimStatus` is one of
+`jnw-faithful`, `experimental-non-jnw`, `failed`, or `incomplete-orbit-cap`.
+No browser-side game block is a theorem-level fibering or manifold certificate
+unless an external certificate says so.
 
 Experiment notebook bundles use the existing experiment bundle schema: saved
 runs include dataset identity, view/filter state, render stats, topology

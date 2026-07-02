@@ -2,7 +2,8 @@
 
 An offline-capable local web app for inspecting finite Coxeter Cayley balls,
 Davis cells, hyperbolic chamber projections, the one-vertex base complex
-`Y_Gamma`, and quotient/game diagnostics.
+`Y_Gamma`, the defining Coxeter graph `Gamma`, quotient diagnostics, and
+state/cochain game experiments.
 
 The app is an educational and research workflow tool, not a theorem prover. It
 keeps exact data, numerical geometry, and drawing conventions visibly separate.
@@ -71,17 +72,22 @@ installers and app packages live under `src-tauri/target/release/bundle/`.
 
 ## One-Click Desktop Download
 
-Yes. The public alpha release includes desktop artifacts on GitHub:
+Yes. The research-preview releases include desktop artifacts on GitHub:
 
-- [CoxeterViewer5D v0.1.0 research preview](https://github.com/hgfjh/CoxeterViewer5D/releases/tag/v0.1.0)
-- `CoxeterViewer5D_0.1.0_x64-setup.exe`: easiest Windows installer-style
-  download.
-- `CoxeterViewer5D_0.1.0_x64_en-US.msi`: Windows MSI package.
-- macOS `.dmg` and `.app.tar.gz` artifacts for Apple Silicon and Intel Macs.
-- Linux `.AppImage`, `.deb`, and `.rpm` artifacts for x64 Linux systems.
-- `CoxeterViewer5D-v0.1.0-web.zip`: static web build for people who want to
+- [CoxeterViewer5D v0.2.0 research preview](https://github.com/hgfjh/CoxeterViewer5D/releases/tag/v0.2.0)
+- Windows x64: installer-style `.exe` and MSI `.msi` artifacts when the release
+  workflow completes.
+- macOS: `.dmg` and `.app.tar.gz` artifacts for Apple Silicon and Intel Macs
+  when the release workflow completes.
+- Linux x64: `.AppImage`, `.deb`, and `.rpm` artifacts when the release
+  workflow completes.
+- `CoxeterViewer5D-v0.2.0-web.zip`: static web build for people who want to
   host or inspect the built app.
-- `v0.1.0-public-alpha.coxeter-session.json`: a sample session file.
+- A sample `.coxeter-session.json` file for trying the saved-session workflow.
+
+The older [v0.1.0 public alpha](https://github.com/hgfjh/CoxeterViewer5D/releases/tag/v0.1.0)
+remains available as a historical snapshot. The rest of this README describes
+the current source tree and the next tagged research-preview behavior.
 
 The desktop artifacts are unsigned, and macOS artifacts are not notarized yet.
 Windows and macOS may show a warning the first time you launch them; that is
@@ -102,13 +108,21 @@ checking some research artifacts.
   Compact high-dimensional examples use local PCA for readability.
 - **`Y_Gamma`**: the fundamental-domain style one-vertex complex with oriented
   generator arrows and relation faces shown as one cohesive 3D object.
-- **Quotient/game mode**: imported quotient-style complexes with Schreier,
-  cocycle, and ascending/descending-link diagnostics.
+- **Defining graph `Gamma`**: the Coxeter presentation graph with generator
+  vertices and non-right relation edges labeled by `m`.
+- **Quotient/game mode**: imported or derived quotient-style complexes with
+  Schreier checks, generator-uniform cochains, JNW state/move diagnostics, and
+  ascending/descending-link views.
 
 Use the **Guided Inspection** panel for one-click tours: one Coxeter relation,
 one rank-three cell, local link, `Y_Gamma` 2-skeleton, and quotient/game
 experiment. See [docs/walkthroughs.md](docs/walkthroughs.md) for short scripts
 that explain what to inspect and what each view does not claim.
+
+The interface starts in **Teaching** mode: example choice, reader focus buttons,
+basic labels/cells, the viewer, a focus inspector, and a short explanation. Use
+**Research** mode when you want imports, backend status, certificates,
+notebooks, detailed cell budgets, quotient builders, and raw topology panels.
 
 ## Public Alpha Demo Path
 
@@ -121,21 +135,23 @@ For a first public pass, use these four demos in order:
 3. **Inspect `Y_Gamma` for P2**: load **Compact 5-prism P2 Makarov**, open the
    3D `Y_Gamma` model, and use one-relation or around-generator focus before
    showing the full two-skeleton.
-4. **Run `I2(5)` quotient/game**: open the Research Workflow demo, choose the
-   `s0 = +1, s1 = -1` cocycle, and show the zero boundary-sum diagnostic on the
-   decagon.
+4. **Run `I2(5)` quotient/game**: open the Research Workflow demo, inspect the
+   **Generator-Uniform Cochain** with `s0 = +1, s1 = -1`, and show the zero
+   boundary-sum diagnostic on the decagon. Then open the **JNW Legal-System
+   Game** tab to see how state/move directions differ from uniform generator
+   signs.
 
 Presenter scripts live in [docs/walkthroughs.md](docs/walkthroughs.md). Capture
 and caption guidance lives in [docs/demo-media.md](docs/demo-media.md).
 The checked-in stills live in [docs/screenshots](docs/screenshots) and can be
 regenerated with `corepack pnpm demo:screenshots`.
 
-| Demo                          | Reference Capture                                                                                                                                               |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Find a hexagon                | ![A rank-two Davis hexagon for the A2 m=3 relation, shown as a filled six-sided cell with boundary context.](docs/screenshots/hexagon-a2-rank-two-m3.png)       |
-| Inspect an A3 rank-three cell | ![A3 Y_Gamma rank-three focus with square and hexagon face families visible as one 3D incidence object.](docs/screenshots/a3-rank-three-square-hexagon.png)     |
-| Inspect `Y_Gamma` for P2      | ![Y_Gamma for the certified P2 compact 5-prism, focused on an m=5 relation sheet attached to the generator spine.](docs/screenshots/y-gamma-p2-m5-relation.png) |
-| Run `I2(5)` quotient/game     | ![I2(5) quotient/game workflow with the named cocycle and decagon boundary-sum diagnostic visible.](docs/screenshots/i2-5-quotient-game-cocycle.png)            |
+| Demo                          | Reference Capture                                                                                                                                                |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Find a hexagon                | ![A rank-two Davis hexagon for the A2 m=3 relation, shown as a filled six-sided cell with boundary context.](docs/screenshots/hexagon-a2-rank-two-m3.png)        |
+| Inspect an A3 rank-three cell | ![A3 Y_Gamma rank-three focus with square and hexagon face families visible as one 3D incidence object.](docs/screenshots/a3-rank-three-square-hexagon.png)      |
+| Inspect `Y_Gamma` for P2      | ![Y_Gamma for the certified P2 compact 5-prism, focused on an m=5 relation sheet attached to the generator spine.](docs/screenshots/y-gamma-p2-m5-relation.png)  |
+| Run `I2(5)` quotient/game     | ![I2(5) quotient/game workflow with the generator-uniform cochain and decagon boundary-sum diagnostic visible.](docs/screenshots/i2-5-quotient-game-cocycle.png) |
 
 ## What Is Exact?
 
@@ -184,6 +200,11 @@ and the full 2-skeleton. The 2D nerve/local-link schematic is available as a
 separate topology view; it explains spherical subsets but is not `Y_Gamma`
 itself.
 
+Use the top view switch to move among **Davis complex**, **Y_Gamma**, and
+**Gamma**. Gamma is the defining Coxeter graph: it omits `m = 2` commuting pairs
+by diagram convention and labels the drawn relation edges by their Coxeter
+matrix entry.
+
 ## How Do I Run A Quotient/Game Experiment?
 
 Use the **Research Workflow** panel. It is a five-step path:
@@ -194,9 +215,12 @@ Use the **Research Workflow** panel. It is a five-step path:
    identity subgroup, so all ten cosets of `I2(5)` are visible.
 3. **Quotient Complex**: load or import the quotient artifact with Schreier
    action, permutation data, and rank-two quotient cells.
-4. **Cocycle/Game**: choose a named integer cocycle. The demo uses
+4. **Cocycle/Game**: choose either a **Generator-Uniform Cochain** or a
+   **JNW Legal-System Game**. The I2(5) demo uses the cochain
    `s0 = +1, s1 = -1`, so the decagon boundary sum is zero while ascending and
-   descending edges are both visible.
+   descending edges are both visible. The JNW tab builds a state quotient from
+   an initial state and moves `m_i`; for non-right-angled systems it is labeled
+   as an experimental non-JNW generalization.
 5. **Local Topology + Export**: inspect topology lenses and export a
    reproducible experiment bundle.
 
@@ -208,6 +232,15 @@ so the topology is visible before opening the full inspector. Importing
 quotient JSON still works, and the old raw builder remains available under
 advanced controls, but the intended research path now lives in the workflow
 panel.
+
+The game panel deliberately separates two models. **Generator-Uniform
+Cochain** is a simple integer 1-cochain editor: one integer per generator,
+propagated to every edge with that label. **JNW Legal-System Game** follows the
+Jankiewicz-Norin-Wise state/move convention: a state is a subset of defining
+graph vertices, each move acts by symmetric difference, and an edge direction
+depends on the current state. Only right-angled systems with passing move and
+legal-orbit checks are labeled JNW faithful; non-right-angled examples remain
+exploratory diagnostics.
 
 The **Experiment Notebook** saves named runs with notes, warnings, scene stats,
 selected objects, topology diagnostics, data hashes, and optional screenshots.

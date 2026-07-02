@@ -180,6 +180,13 @@ Coxeter pair. Higher spherical subsets are recorded as higher-cell
 incidence/proxy data when the viewer can enumerate them. `Y_Gamma` is not a
 torsion-free quotient manifold.
 
+The defining graph `Gamma` is a different object. It has one vertex for each
+Coxeter generator and an edge for each non-right Coxeter matrix entry. The app
+labels every drawn edge by `m`; `m=2` commuting pairs are omitted by Coxeter
+diagram convention. `Gamma` is useful for reading the presentation, but it is
+not the Davis complex, not the `Y_Gamma` fundamental-domain complex, and not the
+nerve/local-link diagnostic.
+
 The app represents `Y_Gamma` primarily as a 3D 2-skeleton scene in the main
 viewer and as a cell inventory in the side panel: a base vertex, generator
 arrows, rank-two relation cells, higher spherical cells, and attaching-word
@@ -214,11 +221,23 @@ fixing a quotient vertex is a torsion witness. Passing this in-repo guard is
 useful evidence, but manifold language is reserved for external Sage/GAP or
 published torsion-free certificates.
 
-PL Morse/game experiments can assign named integer cocycles to oriented edges
-or generators. Boundary sums around rank-two cells are the first consistency
-check; a nonzero sum means the assignment is not a cocycle on the displayed
-cell structure. Experiment logs record the assignment, input hash, diagnostics,
-and certificate summary for reproducibility.
+PL Morse/game experiments have two distinct exploratory editors. The
+**Generator-Uniform Cochain** editor assigns one integer to each generator and
+propagates that value to every edge with that generator label. Boundary sums
+around rank-two cells are the first consistency check; a nonzero sum means the
+assignment is not a cocycle on the displayed cell structure.
+
+The **JNW Legal-System Game** editor follows the state/move model from
+Jankiewicz-Norin-Wise. A state is a subset of defining-graph vertices, a move
+`m_i` acts by symmetric difference, and the direction of an `s_i` edge depends
+on whether `i` lies in the current state. This is not the same as assigning one
+global orientation to all `s_i` edges. For right-angled Coxeter systems, the
+viewer can label a passing move property and legal orbit as JNW faithful. For
+non-right-angled examples, the same state-orbit drawing is available only as an
+experimental diagnostic and does not carry the JNW theorem.
+
+Experiment logs record the assignment or state/move system, input hash,
+diagnostics, and certificate summary for reproducibility.
 
 Local-link topology is computed as finite simplicial homology over `F2` in the
 first version. The summary reports rank counts, reduced `H0`, and `H1`; it is a

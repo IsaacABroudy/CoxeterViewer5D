@@ -156,13 +156,15 @@ function reportSkipped(reason, detail, readiness) {
 const args = new Set(process.argv.slice(2));
 const checkOnly = args.has("--check") || args.has("--skip-build");
 const srcTauri = resolve(process.cwd(), "src-tauri");
+const packageJson = readPackageJson();
+const packageVersion = packageJson.version ?? "unknown";
 const readiness = {
   config: existsSync(join(srcTauri, "tauri.conf.json")),
   contract: existsSync(join(srcTauri, "desktop-contract.json")),
   cargoToml: existsSync(join(srcTauri, "Cargo.toml")),
   cargo: commandExists("cargo"),
   corepack: commandExists("corepack"),
-  tauriCliDependency: hasTauriCliDependency(readPackageJson()),
+  tauriCliDependency: hasTauriCliDependency(packageJson),
 };
 
 if (!readiness.config) {
@@ -254,6 +256,10 @@ if (result.status !== 0) {
 }
 
 const bundleDir = resolve(srcTauri, "target", "release", "bundle");
+const files = listBundleFiles(bundleDir);
+const currentVersionFiles = files.filter((file) =>
+  file.path.includes(packageVersion),
+);
 const report = {
   ok: true,
   status: "passed",
@@ -265,7 +271,9 @@ const report = {
     command: "corepack pnpm exec tauri build",
     status: "passed",
   },
-  files: listBundleFiles(bundleDir),
+  packageVersion,
+  currentVersionFiles,
+  files,
 };
 
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

@@ -58,6 +58,19 @@ The viewer still validates the artifact before rendering it.
 One element of the Coxeter generating set `S`. The app labels them by stable
 ids such as `s0`, `s1`, and uses generator colors for edges and cells.
 
+## Generator-Uniform Cochain
+
+An exploratory integer 1-cochain that assigns one value to each generator and
+uses that value on every edge with the corresponding generator label. It is
+useful for quick boundary-sum checks, but it is not the same thing as the
+Jankiewicz-Norin-Wise state/move game.
+
+## Defining Graph `Gamma`
+
+The Coxeter presentation graph. Its vertices are the generators, and its drawn
+edges are the non-right Coxeter matrix entries labelled by `m`. Commuting
+`m = 2` pairs are omitted by diagram convention.
+
 ## Geometric Projection
 
 A 3D view produced from hyperbolic reflection data. The underlying chamber
@@ -120,6 +133,15 @@ spatial(x) / (x0 + 1)
 
 The full-dimensional map is conformal, but a later 3D axis choice or PCA step
 can still distort what the viewer shows.
+
+## JNW Legal-System Game
+
+The state/move game model from Jankiewicz-Norin-Wise. A state is a subset of
+defining-graph vertices; a move `m_i` acts by symmetric difference; and the
+direction of an `s_i` edge depends on whether `i` lies in the current state.
+The viewer labels this workflow JNW faithful only for right-angled Coxeter
+systems with passing move and legal-orbit diagnostics. Non-right-angled uses
+are explicitly experimental.
 
 ## Quotient Complex
 

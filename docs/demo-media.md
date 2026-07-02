@@ -17,8 +17,9 @@ the repo as screenshots and specific enough to teach the main inspection habits.
   around-generator focus first, then the full two-skeleton if it remains
   readable.
 - Run `I2(5)` quotient/game: identity-subgroup workflow with ten cosets, one
-  decagon quotient cell, the `s0 = +1`, `s1 = -1` cocycle, and the boundary-sum
-  diagnostic visible.
+  decagon quotient cell, the `s0 = +1`, `s1 = -1` generator-uniform cochain,
+  and the boundary-sum diagnostic visible. The JNW Legal-System tab can be
+  shown separately when explaining state-dependent directions.
 
 Other views, such as geometric projection or a full compact-example overview,
 belong in later release notes unless the screenshot makes the projection caveat
@@ -72,8 +73,8 @@ Use captions that identify both the object and the drawing layer:
 - "`Y_Gamma(P2)` one-relation view. The visible face is a singular relation
   sheet attached to the one-vertex generator spine for the certified P2 source
   system."
-- "`I2(5)` quotient/game demo. The decagon boundary sum vanishes for the named
-  integer cocycle."
+- "`I2(5)` quotient/game demo. The decagon boundary sum vanishes for the
+  generator-uniform cochain `s0 = +1`, `s1 = -1`."
 - "Hyperbolic chamber barycenters projected to 3D by PCA. Distances and
   intersections in the image are not exact hyperbolic data."
 

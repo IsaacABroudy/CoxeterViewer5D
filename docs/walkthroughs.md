@@ -18,7 +18,8 @@ Suggested order:
 1. `A2`: find a hexagon for one `m = 3` rank-two relation.
 2. `A3`: inspect one rank-three spherical cell.
 3. `compact_5_prism_makarov_p2`: inspect `Y_Gamma` for the certified P2 prism.
-4. `I2(5)` quotient/game workflow: run the cocycle and link diagnostics.
+4. `I2(5)` quotient/game workflow: compare the generator-uniform cochain with
+   the JNW state/move diagnostics.
 
 Keep labels focused, not global. A radius that is too small may clip a cell
 boundary; a radius that is too large can make labels and cells visually noisy.
@@ -163,8 +164,8 @@ system being inspected.
 
 ## Quotient And Game Demo: Run I2(5)
 
-Goal: follow a small quotient experiment from group data to cocycle and local
-topology diagnostics.
+Goal: follow a small quotient experiment from group data to a cochain, then
+compare it with the separate JNW state/move game model.
 
 Public-alpha path:
 
@@ -172,10 +173,14 @@ Public-alpha path:
 2. Choose the `I2(5)` identity-subgroup demo.
 3. Confirm that the quotient has ten visible cosets and one rank-two decagon
    cell.
-4. Select the named cocycle with `s0 = +1` and `s1 = -1`.
+4. Open **Generator-Uniform Cochain** and select the named cochain with
+   `s0 = +1` and `s1 = -1`.
 5. Inspect the boundary-sum diagnostic for the decagon.
-6. Switch between ascending, descending, level, and full local-link lenses.
-7. Save an experiment notebook run if a reproducible inspection record is
+6. Open **JNW Legal-System Game**. Explain that this is a state/move model:
+   moves act by symmetric difference, and edge directions depend on the
+   endpoint state rather than a global generator sign.
+7. Switch between ascending, descending, level, and full local-link lenses.
+8. Save an experiment notebook run if a reproducible inspection record is
    needed.
 
 What to say:
@@ -184,9 +189,12 @@ What to say:
   elements visible as quotient vertices.
 - Generator actions should be involutions on quotient vertices.
 - The finite relation should close around the decagon.
-- The named cocycle has zero boundary sum on that decagon.
-- Ascending and descending views are filters for the selected integer
-  assignment.
+- The named generator-uniform cochain has zero boundary sum on that decagon.
+- The JNW tab is a different model. It is faithful only for right-angled
+  systems with passing move-property and legal-orbit checks; for `I2(5)` it is
+  an experimental non-JNW diagnostic.
+- Ascending and descending views are filters for the active assignment or
+  state-dependent direction model.
 
 Exact when supplied by the artifact:
 
@@ -200,8 +208,10 @@ Still not claimed:
 - A quotient complex is not automatically a manifold.
 - The in-repo visible stabilizer guard is useful evidence, not a published
   torsion-free proof.
-- A game or PL Morse label assignment should not be called a cocycle until its
+- A generator-uniform label assignment should not be called a cocycle until its
   boundary checks pass on the displayed cell structure.
+- A JNW state/move diagnostic should not be cited as a JNW fibering claim for a
+  non-right-angled Coxeter system.
 
 Use "quotient complex" until a torsion-free certificate is present and its
 scope is clear.

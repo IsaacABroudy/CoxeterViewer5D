@@ -1,6 +1,6 @@
 [package]
 name = "coxeter-viewer-5d"
-version = "0.1.0"
+version = "0.2.0"
 description = "Desktop shell for CoxeterViewer5D"
 authors = ["CoxeterViewer5D contributors"]
 edition = "2021"

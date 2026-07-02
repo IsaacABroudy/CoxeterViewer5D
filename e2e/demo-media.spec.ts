@@ -42,11 +42,19 @@ async function capture(page: Page, path: string): Promise<void> {
   await page.screenshot({ path, animations: "disabled" });
 }
 
+async function switchToResearchMode(page: Page): Promise<void> {
+  await page
+    .getByRole("group", { name: /interface mode/i })
+    .getByRole("button", { name: /research/i })
+    .click();
+}
+
 test.describe("public alpha demo screenshots", () => {
   test.use({ viewport: { width: 1440, height: 920 } });
 
   test("records the A2 hexagon relation demo", async ({ page }) => {
     await page.goto("/");
+    await switchToResearchMode(page);
     await page.getByLabel(/example/i).selectOption("A2");
     await page
       .getByRole("group", { name: /view presets/i })
@@ -65,6 +73,7 @@ test.describe("public alpha demo screenshots", () => {
 
   test("records the A3 rank-three cell demo", async ({ page }) => {
     await page.goto("/");
+    await switchToResearchMode(page);
     await page.getByLabel(/example/i).selectOption("A3");
     await page
       .getByLabel(/viewer controls/i)
@@ -106,6 +115,7 @@ test.describe("public alpha demo screenshots", () => {
 
   test("records the I2(5) quotient/game demo", async ({ page }) => {
     await page.goto("/");
+    await switchToResearchMode(page);
     const workflow = page.locator("section.panel").filter({
       has: page.getByRole("heading", { name: /research workflow/i }),
     });

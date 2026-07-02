@@ -293,8 +293,14 @@ then `make`.
 ## Quotient/Game Workflow Exports
 
 The primary quotient/game demo is the identity-subgroup quotient of `I2(5)`.
-It carries ten cosets, one decagon quotient cell, and the named cocycle
-`s0=+1, s1=-1`. The workflow scripts are:
+It carries ten cosets, one decagon quotient cell, and the named
+generator-uniform cochain `s0=+1, s1=-1`. The browser also has a separate JNW
+Legal-System Game tab for state/move diagnostics. That JNW tab can derive a
+state quotient for inspection, but only right-angled systems with passing
+move-property and legal-orbit checks are labeled JNW faithful; non-right-angled
+systems are marked as experimental diagnostics.
+
+The quotient export workflow scripts are:
 
 ```bash
 pnpm quotient:sage:export:i2-5-demo

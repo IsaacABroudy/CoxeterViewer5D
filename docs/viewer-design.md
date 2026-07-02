@@ -82,6 +82,15 @@ boundary.
 
 ## Panels And Controls
 
+The app has two interface modes. Teaching mode is the default and keeps the
+first read small: example selection, reader focus buttons, generator stepping,
+label/cell toggles, the main viewer, the focus inspector, a short What Am I
+Seeing summary, and compact warnings. Research mode exposes imports, backend
+and certificate status, notebooks, quotient builders, detailed view/cell
+budgets, raw local-link panels, and artifact-oriented workflows. A feature that
+is useful but not needed to understand the current picture should usually start
+in Research mode rather than crowding Teaching mode.
+
 Expected panels:
 
 - Input panel: example picker, JSON import, radius, backend, and export buttons.
@@ -93,7 +102,7 @@ Expected panels:
 - Local Link panel: selected-chamber link, generator stepping, and synchronized rank-two pair filters.
 - What Am I Seeing panel: concise facts about the active dataset, radius, view, visible counts, exact cells, visual proxies, and geometry status.
 - Math notes panel: short context for the current mode.
-- Warnings panel: grouped approximation, truncation, invalid geometry, omitted-view, backend, and placeholder notices.
+- Caveats panel: grouped approximation, truncation, invalid geometry, omitted-view, backend, and placeholder notices.
 
 On desktop-size viewports, the central Three.js viewer should stay fixed in the
 visible workspace. The left control rail and right inspector rail scroll
@@ -261,7 +270,7 @@ edges that explain where the focused relation sits in the larger ball. Ghost
 objects do not appear in exported generated graph data. View exports may record
 that ghost context was enabled so screenshots can be reproduced.
 
-## What Am I Seeing And Warnings
+## What Am I Seeing And Caveats
 
 The What Am I Seeing panel is the short narrative contract for the current
 view. It reports the dataset, radius, view preset, global versus local view,
@@ -271,7 +280,8 @@ geometric projection is available. It should distinguish deterministic shell
 layout from hyperbolic geometry and distinguish exact rank-two cells from
 proxy drawings.
 
-Warnings are grouped before display:
+Caveats are grouped before display. The underlying exported field is still
+named `warnings`, because warnings are part of the data and release artifacts:
 
 - Important: placeholders, invalid data, explicit errors, and "must not" caveats.
 - Approximation: rounded matrix keys, numerical geometry, projections, and
@@ -281,9 +291,9 @@ Warnings are grouped before display:
 - Backend/status: worker status, unavailable exact backends, and other
   operational messages.
 
-Duplicate warnings are removed. The panel may initially show a short prefix of
-the grouped list, but all warning text must remain available and included in
-exports.
+Duplicate warning strings are removed. The Caveats panel may initially show a
+short prefix of the grouped list, but all warning text must remain available
+and included in exports.
 
 Research-only panels such as detailed status, experiment logs, and higher-cell
 proxy controls are hidden behind the "Show research panels" toggle. The default
@@ -394,6 +404,13 @@ for each generator/facet direction, rank-two quotient cells for finite Coxeter
 entries, and higher spherical incidence/proxy records when available. It is
 rendered as a quotient/game dataset, not as a universal Cayley ball.
 
+The main view switch exposes three related objects from the same source system:
+the finite-radius Davis/Cayley view, the fundamental-domain complex `Y_Gamma`,
+and the Coxeter defining graph `Gamma`. `Gamma` is deliberately lighter than
+the other two: it renders generator vertices and non-right relation edges
+labelled by `m`, omitting `m=2` pairs by Coxeter diagram convention. The 2D
+nerve schematic remains a diagnostic, not one of these three primary views.
+
 The primary `Y_Gamma` display is now a main-stage 3D 2-skeleton scene. It shows
 the base vertex, oriented generator arrows, and filled rank-two relation faces
 glued directly to the corresponding generator arrows. The cell inventory panel
@@ -467,16 +484,21 @@ cell coverage, duplicate cells, and visible spherical stabilizers. These checks
 are displayed and stored as diagnostics; only external or published torsion-free
 certificates unlock manifold wording.
 
-`src/game/` defines integer edge/generator labels, named integer cocycles, and
-experiment logs for PL Morse or game experiments. Current helpers check boundary
-sums around rank-two cells and classify incident edges as ascending, descending,
-or level at a selected vertex.
+`src/game/` now has two related but distinct game layers. The
+generator-uniform cochain helpers define integer edge/generator labels, named
+integer cocycles, boundary-sum checks around rank-two cells, and
+ascending/descending/level classifications at a selected vertex. The JNW
+legal-system helpers define state subsets, moves acting by symmetric
+difference, state-dependent edge directions, legal-orbit diagnostics, and a
+derived quotient-style state graph. The renderer treats both as quotient-style
+data, but the inspector and exports keep their claim status separate.
 
 The Research Workflow panel is the primary quotient/game path. It bundles the
-source system, subgroup/coset request, quotient artifact, cocycle choice,
-topology lens, notebook save, comparison, and export actions into one sequence.
-The built-in golden path is the identity-subgroup quotient of `I2(5)` with the
-nonzero cocycle `s0=+1, s1=-1`; `A3` remains the rank-three topology-lens demo.
+source system, subgroup/coset request, quotient artifact, cochain or JNW game
+choice, topology lens, notebook save, comparison, and export actions into one
+sequence. The built-in golden path is the identity-subgroup quotient of
+`I2(5)` with the generator-uniform cochain `s0=+1, s1=-1`; `A3` remains the
+rank-three topology-lens demo.
 Topology lenses are scene filters, not new mathematical data. Ascending,
 descending, level, and full-local-link lenses render the selected quotient
 vertex and the incident edges of that class as first-class 3D objects.
