@@ -382,6 +382,7 @@ Recommended examples:
 - `A2.json`: rank-two spherical example of order `6`.
 - `A3.json`: finite rank-three example of order `24`.
 - `universal_rank3.json`: all off-diagonal entries infinite; useful for tree-like Cayley balls and absence of rank-two cells.
+- `jnw_cube_graph.json`: verified-source right-angled Coxeter system whose defining graph is the 1-skeleton of a 3-cube. It is the guiding example for the JNW Legal-System Game: the bipartition color-class moves start from the legal state `{v000, v001, v010, v101}`.
 - `hyperbolic_toy_rank2.json`: explicit hyperboloid normals and basepoint for exercising geometric mode; toy data only.
 - `compact_5_cube_gamma1.json`: certified compact hyperbolic Coxeter 5-cube graph from Jacquemet-Tschantz Figure 3. The bundled certificate checks the Gamma_1 source transcription table, the algebraic dotted values, and exact normal Gram rank/signature. Geometric coordinates and basepoint are still numerical visualization data derived from `normalGram`, not part of the certificate.
 - `compact_5_prism_makarov.json`: certified compact hyperbolic Coxeter 5-prism `P0` graph from Bredon-Kellerhals Example 8 and Emery-Kellerhals diagram (1-2). The bundled certificate checks the source graph based on `[5,3,3,3,3]`, the algebraic dotted value, and exact normal Gram rank/signature. Geometric coordinates and basepoint are still numerical visualization data derived from `normalGram`, not part of the certificate.
@@ -480,6 +481,29 @@ orientation for all edges of one generator. Right-angled systems can be labeled
 `jnw-faithful` when the move property, legal orbit, and rank-two diagnostics
 pass. Non-right-angled systems are allowed as `experimental-non-jnw`
 diagnostics only.
+
+The bundled `jnw_cube_graph.json` file is intentionally small but source
+located: its eight generators are the binary vertices of the 3-cube, and
+commuting pairs are exactly cube edges. The app's preset preloads the cube
+bipartition/color-class moves from JNW21. The resulting state quotient is a
+browser diagnostic for the legal-system workflow, not an external
+subgroup/coset certificate.
+
+JNW-derived quotients should be read through the layer stack:
+`Gamma` source graph -> `Y_Gamma` fundamental domain -> JNW state quotient ->
+link at selected state. Vertex display labels in the state quotient are short
+names `S_1`, `S_2`, ... so the 3D view stays readable. The corresponding state
+subset still uses source generator labels, such as `{v000, v001, v010, v101}`
+for the cube demo, and is shown in the panel/inspector. Internally, the state
+ids remain stable normalized generator-index ids.
+The serialized quotient has no extra generator-endpoint vertices: an edge
+labeled `i` connects a state directly to the state reached by applying move
+`m_i`. The 3D reader may draw small generator beads and separated rails around
+each state to show the local `Y_Gamma` charts. Those beads are not written as
+quotient vertices and are not certificate data.
+Ascending, descending, and level links are classified at a selected state
+vertex in this quotient-style state graph; they are not serialized as Davis
+chamber links.
 
 Project sessions and experiment bundles record the active game block with:
 

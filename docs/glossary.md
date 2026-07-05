@@ -3,6 +3,22 @@
 This glossary favors the meanings used inside CoxeterViewer5D. Some terms have
 broader meanings in the literature.
 
+## Visual Quick Reference
+
+The screenshots below are orientation aids, not certificates. Use them to match
+words in the UI to the kind of object being shown.
+
+| Term             | What to look for                                                                                                                                                                       |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cayley graph     | Generator-labeled edges between group elements; in a Davis view this is the 1-skeleton around the selected chamber.                                                                    |
+| Davis cell       | A filled rank-two polygon such as the `A2` hexagon: ![A2 rank-two hexagon.](screenshots/hexagon-a2-rank-two-m3.png)                                                                    |
+| `Y_Gamma`        | One base vertex with oriented generator arrows and relation sheets, as in the P2 relation view: ![P2 Y_Gamma relation.](screenshots/y-gamma-p2-m5-relation.png)                        |
+| Gamma            | The defining Coxeter graph: generator vertices and finite rank-two relation edges labeled by `m`, including `m = 2`; `m = inf` pairs are omitted.                                      |
+| Quotient complex | A finite quotient-style scene with vertices, generator actions, and relation cells, as in the I2(5) demo: ![I2(5) quotient and game demo.](screenshots/i2-5-quotient-game-cocycle.png) |
+| Cocycle/cochain  | Integer edge data whose boundary sums can be checked around rank-two cells.                                                                                                            |
+| JNW legal system | A state/move workflow where edge direction depends on a state subset, not one global generator sign. The guiding bundled example is the 3-cube defining graph.                         |
+| Projection       | Chamber barycenters drawn in 3D from reflection data; the 3D picture is a projection unless explicitly certified.                                                                      |
+
 ## Barycenter
 
 The point used to represent a chamber in geometric mode. In hyperbolic examples
@@ -68,8 +84,9 @@ Jankiewicz-Norin-Wise state/move game.
 ## Defining Graph `Gamma`
 
 The Coxeter presentation graph. Its vertices are the generators, and its drawn
-edges are the non-right Coxeter matrix entries labelled by `m`. Commuting
-`m = 2` pairs are omitted by diagram convention.
+edges are the finite off-diagonal Coxeter matrix entries labelled by `m`. This
+viewer includes commuting `m = 2` pairs, but omits `m = inf` pairs because they
+do not represent finite rank-two relations.
 
 ## Geometric Projection
 
@@ -142,6 +159,17 @@ direction of an `s_i` edge depends on whether `i` lies in the current state.
 The viewer labels this workflow JNW faithful only for right-angled Coxeter
 systems with passing move and legal-orbit diagnostics. Non-right-angled uses
 are explicitly experimental.
+
+The easiest example is **JNW cube graph RACG**. Its defining graph is the
+1-skeleton of a 3-cube, and the bipartition/color-class moves give the legal
+system used by the app's guided JNW workflow.
+
+The viewer inspects JNW links in a derived state quotient:
+`Gamma -> Y_Gamma -> JNW state quotient -> link at selected state`. The
+rendered quotient state vertices use short labels such as `S_1` and `S_2`;
+the inspector then expands the selected state as a subset of defining-graph
+vertices, for example `S_1 = {v000, v001, v010, v101}`. These
+ascending/descending/level links are not ambient Davis-complex links.
 
 ## Quotient Complex
 

@@ -4,10 +4,11 @@ Demo media should teach inspection habits. A good screenshot or short clip
 shows the selected mathematical object, the relevant warnings, and enough UI
 context to tell exact data from drawing convention.
 
-## Public-Alpha Demo Set
+## Research-Preview Demo Set
 
-The public alpha uses four primary captures. They are small enough to keep in
-the repo as screenshots and specific enough to teach the main inspection habits.
+The research preview uses four primary captures. They are small enough to keep
+in the repo as screenshots and specific enough to teach the main inspection
+habits.
 
 - Find a hexagon: `A2`, rank-two pair `s0-s1` with `m = 3`, one filled
   six-sided Davis cell, and the selected-cell inspector visible.
@@ -42,7 +43,7 @@ The repository has three useful capture paths:
   config, which records traces on first retry. Traces are useful for debugging a
   failed capture path, but they are not polished demo videos.
 
-There is no checked-in public-alpha video recorder beyond the storyboard
+There is no checked-in research-preview video recorder beyond the storyboard
 manifest. For motion, use a local screen recorder or a temporary Playwright
 video configuration, keep clips short, and publish large videos as release
 artifacts instead of committing them to the repo.
@@ -130,7 +131,7 @@ Avoid screenshots that:
 - Use dense all-face `Y_Gamma` views when a local reader preset would explain
   the same idea more clearly.
 - Crop away the selected-object inspector.
-- Mix `A3` and P2 labels in the same `Y_Gamma` capture. The public-alpha P2
+- Mix `A3` and P2 labels in the same `Y_Gamma` capture. The research-preview P2
   demo should visibly be the P2 source, not a generic `Y_Gamma` scene.
 
 The demo should make the viewer more honest, not more dramatic.

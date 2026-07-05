@@ -28,9 +28,11 @@ explicitly labels it as a 2D schematic. The main viewer should use non-coplanar
 vertex placement, separated face planes, depth cues, outlines, and camera
 presets that make shared edges and incident faces readable.
 
-This is especially important for `Y_Gamma`: a rank-three cell such as the
-`m=2/m=3` A3-style example should read as a small 3D object with a square face
-and a hexagon face meeting along a shared generator direction. If a fallback
+This is especially important for `Y_Gamma`: a rank-three cell focused around a
+chosen relation face should read as a small 3D object whose rank-two faces meet
+along shared generator directions. For example, the A3-style square/hexagon
+case should show a square face and a hexagon face meeting along one shared
+generator direction. If a fallback
 construction produces a flat or nearly flat picture, treat that as a rendering
 bug or an unfinished readability prototype, not as an acceptable final view.
 
@@ -84,25 +86,35 @@ boundary.
 
 The app has two interface modes. Teaching mode is the default and keeps the
 first read small: example selection, reader focus buttons, generator stepping,
-label/cell toggles, the main viewer, the focus inspector, a short What Am I
-Seeing summary, and compact warnings. Research mode exposes imports, backend
-and certificate status, notebooks, quotient builders, detailed view/cell
-budgets, raw local-link panels, and artifact-oriented workflows. A feature that
-is useful but not needed to understand the current picture should usually start
-in Research mode rather than crowding Teaching mode.
+label/cell toggles, the main viewer, the focus inspector with a short current
+view summary, and compact warnings. Research mode exposes imports, backend and
+certificate status, notebooks, quotient builders, detailed view/cell budgets,
+raw local-link panels, and artifact-oriented workflows. A feature that is useful
+but not needed to understand the current picture should usually start in
+Research mode rather than crowding Teaching mode.
 
-Expected panels:
+First-layer Teaching surfaces:
 
-- Input panel: example picker, JSON import, radius, backend, and export buttons.
-- View preset panel: Global, Local Chamber, Rank-Two Cells, and Geometric Projection presets.
-- Graph size control: Small, Medium, Large, and Experimental presets that tune radius, node, edge, label, cell, and proxy budgets.
-- Mode panel: shell layout, force layout if available, and geometric projection when valid.
-- Davis cells panel: rank-two cell toggle, generator-pair filters, local-link summary, higher-rank proxy count, and visible cell counts.
-- Inspector panel: selected node, edge, or cell details.
-- Local Link panel: selected-chamber link, generator stepping, and synchronized rank-two pair filters.
-- What Am I Seeing panel: concise facts about the active dataset, radius, view, visible counts, exact cells, visual proxies, and geometry status.
-- Math notes panel: short context for the current mode.
-- Caveats panel: grouped approximation, truncation, invalid geometry, omitted-view, backend, and placeholder notices.
+- Choose Example: example picker and the single model switch.
+- View: model presets such as See all, Look near a chamber, Rank-Two Cells, and
+  Projection drawing.
+- Start Here: goal-first entry points that choose a model and focus.
+- Focus: relation, cell, local-link, or `Y_Gamma` reader controls that match the
+  active model.
+- Labels: compact group-element labels and generator edge labels.
+- Focus Inspector: the three required answers, plus a short current-view
+  summary.
+- Caveats: grouped warnings with counts and the most important message visible.
+
+Research mode keeps the same viewer but exposes four lanes:
+
+- Workflow: Research Workflow and Guided Inspection.
+- Data/files: example catalogue, imports, sessions, workspaces, generation, and
+  quotient builder.
+- Notebook/export: experiment notebook, figure bundles, screenshots, and view
+  bookmarks.
+- Status/tools: certificates, backend/tool status, diagnostics, and full
+  caveats.
 
 On desktop-size viewports, the central Three.js viewer should stay fixed in the
 visible workspace. The left control rail and right inspector rail scroll
@@ -125,7 +137,8 @@ Expected scene controls:
   inspection adjustments instead of jumping across the model.
 - Reset view.
 - Focus selected node.
-- Switch between global view and a local chamber view around the selected node.
+- Switch between global view and a chamber-centered local view around the
+  selected node.
 - Toggle labels.
 - Toggle compact vertex labels and generator edge labels independently.
 - Choose label scope: off, focused, or budgeted.
@@ -145,15 +158,15 @@ Geometric mode renders a reference ball for axis-based Klein or Poincare project
 
 The current label implementation uses Three.js sprites built from canvas textures. Node labels prefer selected and shallow-shell vertices; edge labels prefer edges incident to the selected node and are generator-colored. Both have hard budgets, draw over geometry for readability, and dispose their textures when the graph updates.
 
-## Local Chamber View
+## Look Near A Chamber
 
-Local Chamber is an on-graph, cell-first 3D view centered at the selected
-chamber. It filters the rendered scene to the distance-`d` Cayley-graph
-neighborhood of that chamber, with `d` chosen from the local-depth control. The
-selected chamber is drawn at the local origin. Generator-neighbor chambers are
-placed on stable 3D directions on a small sphere, and distance-two-or-deeper
-chambers move to separated shells keyed by their shortest visible generator
-path.
+**Look near a chamber** is the user-facing name for the on-graph, cell-first 3D
+view centered at the selected chamber. It filters the rendered scene to the
+distance-`d` Cayley-graph neighborhood of that chamber, with `d` chosen from the
+local-depth control. The selected chamber is drawn at the local origin.
+Generator-neighbor chambers are placed on stable 3D directions on a small
+sphere, and distance-two-or-deeper chambers move to separated shells keyed by
+their shortest visible generator path.
 
 This view is a local inspection tool. It does not alter stored group words,
 word lengths, generated-ball metadata, rank-two Davis cells, or quotient data.
@@ -161,14 +174,14 @@ Cells whose full boundary is outside the visible local neighborhood are hidden
 from the scene rather than filled as if they were complete. The warning surface
 must say when global cells or labels are omitted by the local view.
 
-Rank-two Davis cells in Local Chamber default to `in-graph`, so the filled
+Rank-two Davis cells in this view default to `in-graph`, so the filled
 polygon uses the displayed boundary vertices of the 1-skeleton. Optional
 `lifted-panels` and `petals` modes remain available as explicit readability
 drawings when the graph embedding is too cluttered. `outline-only` suppresses
 fills. Any off-graph transform is visual only: exactness refers to the
 combinatorial boundary and incidence data, not to the Euclidean panel shape.
 
-The cell-focus control chooses whether Local Chamber shows all local cells,
+The cell-focus control chooses whether the local view shows all nearby cells,
 only cells incident to the selected chamber, or only the active generator pair.
 Far-shell controls can hide, fade, or x-ray deeper shells. Bringing focused
 cells forward is a deterministic display offset, not a geometric assertion.
@@ -179,14 +192,14 @@ identity.
 
 ## Dense Example Defaults
 
-Dense examples currently auto-enter the Local Chamber preset once per dataset
+Dense examples currently auto-enter the Look near a chamber preset once per dataset
 when the system rank is at least `7` or the generated ball has more than `500`
 nodes. This default is a usability choice for high-rank or visually crowded
 examples, not a mathematical classification. The preset uses shell mode, 3D
-Local Chamber rendering, local depth `2`, focused labels, visible node and edge
-labels, rank-two cells, hidden far shells, and graph-bounded cells.
+chamber-centered local rendering, local depth `2`, focused labels, visible node
+and edge labels, rank-two cells, hidden far shells, and graph-bounded cells.
 
-Graph size presets still control generation and render budgets. Local Chamber
+Graph size presets still control generation and render budgets. The local view
 may raise the effective label cap up to the smaller of the visible local count
 and `180`, so the nearby neighborhood can be read without enabling labels for
 the whole ball.
@@ -215,7 +228,7 @@ subsets are link edges, and higher spherical subsets may be drawn as filled
 link faces for orientation.
 
 The rank-two chips in the Davis cells panel are visibility toggles. The Local
-Link chords and the pair matrix are focus controls: clicking a finite pair
+Link chords and the Relation atlas are focus controls: clicking a finite pair
 activates that pair, selects a representative `DavisTwoCell` when one is
 available, expands the local drawing enough to include its boundary, and snaps
 the camera toward the relation panel. Clicking a link vertex steps by that
@@ -229,7 +242,7 @@ the generated ball even when the filled shape is only a drawing proxy.
 ## Rank-Two Relation Focus
 
 Rank-Two Cells is the preset for reading one Coxeter relation at a time. It
-uses the same generated `DavisTwoCell` records as Local Chamber, but the
+uses the same generated `DavisTwoCell` records as Look near a chamber, but the
 controls are organized around generator pairs and individual cell boundaries.
 
 Pair controls should include:
@@ -241,7 +254,7 @@ Pair controls should include:
   scanning simply-laced examples such as `A3`.
 - Custom: records the manual state after individual pair toggles.
 
-The pair matrix is a compact upper-triangular view of the Coxeter matrix. Each
+The Relation atlas is a compact upper-triangular view of the Coxeter matrix. Each
 finite entry shows the pair key, the Coxeter value `m`, whether the pair is
 enabled, visible filled-cell count, and clipped or budgeted-cell count. Infinite
 entries are shown as non-spherical for rank-two Davis cells and should not
@@ -270,15 +283,17 @@ edges that explain where the focused relation sits in the larger ball. Ghost
 objects do not appear in exported generated graph data. View exports may record
 that ghost context was enabled so screenshots can be reproduced.
 
-## What Am I Seeing And Caveats
+## Focus Inspector And Caveats
 
-The What Am I Seeing panel is the short narrative contract for the current
-view. It reports the dataset, radius, view preset, global versus local view,
-visible node and edge counts, label scope, exact rank-two Davis-cell count,
-higher-rank proxy count, available Davis incidence records, and whether
-geometric projection is available. It should distinguish deterministic shell
-layout from hyperbolic geometry and distinguish exact rank-two cells from
-proxy drawings.
+The Focus Inspector is the short narrative contract for the current view. Its
+default surface answers three questions: what is selected, why it is here, and
+whether it is exact data or a drawing convention. In Teaching mode, a compact
+Current view summary sits inside the inspector rather than in a separate panel.
+It reports the dataset, radius, view preset, global versus local view, visible
+node and edge counts, label scope, exact rank-two Davis-cell count, higher-rank
+proxy count, available Davis incidence records, and whether geometric projection
+is available. It should distinguish deterministic shell layout from hyperbolic
+geometry and distinguish exact rank-two cells from proxy drawings.
 
 Caveats are grouped before display. The underlying exported field is still
 named `warnings`, because warnings are part of the data and release artifacts:
@@ -295,10 +310,10 @@ Duplicate warning strings are removed. The Caveats panel may initially show a
 short prefix of the grouped list, but all warning text must remain available
 and included in exports.
 
-Research-only panels such as detailed status, experiment logs, and higher-cell
-proxy controls are hidden behind the "Show research panels" toggle. The default
-screen keeps the central viewer, local link or cell focus, and current
-explanation visible without forcing every diagnostic surface onto the page.
+Research-only surfaces such as detailed status, experiment logs, and higher-cell
+proxy controls are hidden in the Research lanes. The default Teaching screen
+keeps the central viewer, the active focus controls, and the Focus Inspector
+visible without forcing every diagnostic surface onto the page.
 
 ## Export Workflows
 
@@ -356,11 +371,19 @@ Implemented guardrails:
 - Cap rendered node and edge labels separately.
 - Surface truncation in warnings and exported metadata.
 - In relation-focus mode, prefer selected-cell-only or selected-pair rendering
-  before increasing radius; the pair matrix should report hidden, ghosted, and
+  before increasing radius; the Relation atlas should report hidden, ghosted, and
   budgeted cells instead of forcing every panel into the scene.
 - Ghost context must share the same render budgets as ordinary context. If the
   budget is exceeded, keep the selected relation boundary and drop ghosted far
   shells first.
+
+The renderer now tracks separate revision tokens for topology, layout,
+cell-geometry, appearance, labels, picking, and camera state. Those tokens let
+the Three.js layer update labels, colors, or camera state without treating every
+change as a full graph rebuild. Benchmarks guard both speed and meaning: the
+timed gate checks elapsed time and graph-update time, while the machine baseline
+also enforces floors for rendered cells, semantic edge labels, label leaders,
+and other objects that would be easy to drop accidentally during optimization.
 
 Future asynchronous exact backends should cancel stale generation requests if a
 newer radius or example is selected before the external process returns.
@@ -407,9 +430,11 @@ rendered as a quotient/game dataset, not as a universal Cayley ball.
 The main view switch exposes three related objects from the same source system:
 the finite-radius Davis/Cayley view, the fundamental-domain complex `Y_Gamma`,
 and the Coxeter defining graph `Gamma`. `Gamma` is deliberately lighter than
-the other two: it renders generator vertices and non-right relation edges
-labelled by `m`, omitting `m=2` pairs by Coxeter diagram convention. The 2D
-nerve schematic remains a diagnostic, not one of these three primary views.
+the other two: it renders generator vertices and finite rank-two Coxeter
+relations labelled by `m`. We include `m=2` commuting pairs even though a
+standard Coxeter diagram usually omits them, but omit `m=inf` pairs because
+they do not represent finite relation cells. The 2D nerve schematic remains a
+diagnostic, not one of these three primary views.
 
 The primary `Y_Gamma` display is now a main-stage 3D 2-skeleton scene. It shows
 the base vertex, oriented generator arrows, and filled rank-two relation faces
@@ -441,16 +466,16 @@ generators and rank-two face references. In dense views the rank-three fills
 are restricted to triples incident to the active generator pair unless the user
 turns on the all-faces overview.
 
-The full `m=2/m=3 3-cell` focus mode searches the current `Y_Gamma` cell
-inventory for a rank-three spherical cell containing a square relation face and a hexagon
-relation face that share one generator. That hinge fixes a readable 3D
-orientation and is the default normal inspection view whenever such a hinge is
-available, including compact examples. The full generator spine remains visible
-around the focused 3-cell, so this is still one `Y_Gamma` object rather than a
-detached diagram. The normal view draws the square and hexagon face families
-together; the square/hexagon buttons only rotate the camera and emphasize one
-family. They do not filter the other family out of the object. Each square or
-hexagon is drawn in its cyclic geometric order so the relation sheets are
+The rank-three focus mode searches the current `Y_Gamma` cell inventory for a
+rank-three spherical cell containing the active rank-two relation. That active
+relation is kept as the anchor, so selecting an `m=5` face and then focusing a
+3-cell shows a rank-three cell containing that decagon family when such a cell
+exists. The full generator spine remains visible around the focused 3-cell, so
+this is still one `Y_Gamma` object rather than a detached diagram. The normal
+view draws all rank-two face families in the focused rank-three cell together.
+The relation picker chooses which finite generator pair is emphasized. Each
+square, hexagon, decagon, or other finite relation polygon is
+drawn in its cyclic geometric order so the relation sheets are
 simply embedded inside one cohesive object, instead of becoming star polygons
 from the alternating word traversal. Camera offsets are intentionally oblique
 so the object does not collapse into a flat face-on drawing. The generator
@@ -462,21 +487,59 @@ The Y_Gamma reader is the default human-readable control surface for this
 object. Its narrated presets coordinate scene visibility, labels, opacity,
 camera target, and explanatory text:
 
-- One relation: isolate one finite rank-two relation cell and number its
+- Read one relation: isolate one finite rank-two relation cell and number its
   alternating boundary edges.
-- One rank-three cell: show the full boundary of the selected finite
+- Read one rank-three cell: show the full boundary of the selected finite
   rank-three Coxeter cell.
-- Around generator: show all visible relation faces incident to a chosen
+- Show cells around one generator: show all visible relation faces incident to a chosen
   generator arrow.
 - m=2 squares and m=3 hexagons: filter by Coxeter relation order while keeping
   the common generator spine.
-- Full Y_Gamma 2-skeleton: show the complete derived two-skeleton.
+- Show all relation faces: show the complete derived two-skeleton.
 
 Cell peeling controls reduce the 3D object to a selected face, adjacent faces,
 or the same rank-three cell. Transparent topology mode lowers fill opacity and
 emphasizes outlines and generator arrows. The relation picker beside the viewer
 is a compact Coxeter-pair grid; finite entries focus the corresponding relation,
 and infinite entries are shown as absent rank-two cells.
+
+The `Separate cells for reading` control changes only readability coordinates. `Coherent`
+keeps relation sheets close to their shared generator spine, `Readable` gives
+the usual separated local picture, and `Expanded` pulls construction corners
+and face layers farther apart for dense all-relations views. All three modes
+use the same `Y_Gamma` cell IDs, generator arrows, and boundary incidence; they
+are different drawings of the same complex, not different mathematical data.
+
+The final readability layer treats dense `Y_Gamma` scenes like a topology
+reader rather than one perfect static embedding. The reader now has cutaway
+modes for generator families, relation order, rank-three faces, selected-edge
+stars, and selected-relation stars. These modes never rewrite cell ids,
+generator pairs, or `boundaryNodeIds`; they only mark scene cells as focus,
+incident, context, or hidden-by-cutaway before rendering. Relation-star
+extraction is the most important focused mode: it keeps the selected relation
+family, incident rank-three surfaces, boundary edges, and a faint context
+layer, then records that focus in figure and experiment exports.
+
+Dense `Y_Gamma` edge labels use short leader ticks. The label text is still
+only the generator label; relation-step numbering lives in the inspector. A
+leader tick points from the label lane back to the semantic edge anchor so a
+reader can tell which generator arrow or relation-boundary segment the label
+names. Leaders are batched as one line-segment object during appearance
+updates, so they do not introduce a continuous render loop.
+
+`Compare shared vs separated drawing` creates two synchronized viewer panes: coherent shared-spine
+drawing on the left and expanded readability drawing on the right. Both panes
+come from the same atlas and options, with different separation values only.
+This is intended for teaching why a single literal-looking 3D view is not
+always the clearest way to read a dense quotient-style cell complex. The
+relation atlas remains a linked controller: finite pair cards focus the
+matching relation family in 3D, while infinite pairs stay disabled because
+they do not contribute rank-two cells.
+
+Camera paths are short focus actions, not a separate animation system. They
+snap toward the selected relation, square family, hexagon family, shared
+generator, or relation star and then return to the demand-driven idle renderer.
+The app should continue to report zero idle rendering after the path settles.
 
 `src/quotient/` also exposes a bounded in-repo certification layer. It checks
 Schreier-style generator actions, finite Coxeter relations, rank-two quotient

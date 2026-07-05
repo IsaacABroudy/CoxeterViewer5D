@@ -16,6 +16,74 @@ references cited in the data remain the property of their respective
 authors/publishers; this project licenses only its own transcriptions, code,
 and generated artifacts.
 
+## What Is This App For?
+
+CoxeterViewer5D is for looking at Coxeter-group topology before turning it into
+formulas. It helps you inspect finite Cayley balls, Davis cells, the
+fundamental-domain style complex `Y_Gamma`, the defining graph `Gamma`,
+quotient/game experiments, and projected chamber barycenters in one offline
+viewer.
+
+The app is deliberately conservative about claims. It can show certified source
+data, exact incidence records, numerical projections, and readability drawings,
+but it keeps those categories visibly separate.
+
+## What Can I Click First?
+
+Start in **Teaching** mode. Use **Start Here** for one of five entry points:
+
+- **Explore a Coxeter example**: open a local Davis view around one chamber.
+- **Find a relation cell**: focus one finite relation polygon.
+- **Understand Y_Gamma**: switch to the one-vertex fundamental-domain model.
+- **Study a quotient/game**: open the JNW cube graph legal-system demo, with
+  the I2(5) quotient/cocycle demo nearby in Research Workflow.
+- **Inspect exactness and data status**: move to Research mode for examples,
+  caveats, and backend status.
+
+The top model switch always means the same thing:
+
+- **Davis complex**: Cayley graph plus Davis cells.
+- **Y_Gamma**: one fundamental-domain model.
+- **Defining graph Gamma**: defining graph of the Coxeter system.
+- **Projection drawing**: chamber barycenters drawn in 3D.
+- **Quotient + Games**: imported/generated quotient complex and game
+  diagnostics.
+
+## What Is Exact?
+
+Bundled compact 5-cube, Makarov `P0` 5-prism, Emery-Kellerhals `P1 = D P0`
+double, and Makarov `P2 = [5,3,3,3,4]` data are certified for source
+transcription, algebraic dotted values, and exact Gram/signature diagnostics.
+`P1` is still described as a double of the prism, not as a simplicial prism.
+Generated Sage and GAP fixtures carry backend metadata and certification
+summaries. Finite quotient exports can be produced by native Sage or GAP
+subgroup/coset exporters when those tools are available; otherwise the scripts
+fall back to clearly labeled in-repo finite checks.
+
+The **Focus Inspector** reports whether the selected object is certified,
+exact incidence, a visual proxy, a projection, or uncertified.
+
+## What Is Only A Drawing?
+
+Shell layouts, chamber-centered local layouts, `Y_Gamma` readability
+embeddings, higher Davis proxy hulls, label leader lanes, **Show only...**
+filters, side-by-side drawing comparison, and PCA projections are drawings. They are
+designed to make incidence and local topology legible; they are not claims of
+exact Euclidean or hyperbolic embedding.
+
+Axis-based Klein/Poincare views draw a scaled reference ball. PCA views hide the
+ball because PCA coordinates are not ball-model coordinates.
+
+For the project-wide vocabulary, see
+[docs/exact-vs-drawing.md](docs/exact-vs-drawing.md) and
+[docs/glossary.md](docs/glossary.md).
+
+## How Do I Run Web/Desktop?
+
+Use the web app when you want the quickest local run from source. Use the
+desktop app when you want native windows, local session files, menus, and
+packaged release artifacts.
+
 ## Run The App From Source
 
 These commands are for someone who has just cloned or downloaded the repository
@@ -87,7 +155,7 @@ Yes. The research-preview releases include desktop artifacts on GitHub:
 
 The older [v0.1.0 public alpha](https://github.com/hgfjh/CoxeterViewer5D/releases/tag/v0.1.0)
 remains available as a historical snapshot. The rest of this README describes
-the current source tree and the next tagged research-preview behavior.
+the current source tree and current research-preview behavior.
 
 The desktop artifacts are unsigned, and macOS artifacts are not notarized yet.
 Windows and macOS may show a warning the first time you launch them; that is
@@ -96,37 +164,36 @@ installation, and the bundled examples work without Sage, GAP, KBMAG, or
 CoxIter. Those external tools are only needed for regenerating or independently
 checking some research artifacts.
 
-## What Am I Seeing?
+## How To Read The Viewer
 
-- **Cayley graph ball**: a finite-radius neighborhood of the identity, with
-  generator-colored edges and reduced-word labels.
-- **Davis cells**: rank-two `2m`-gons from finite Coxeter pairs, plus exact
-  visible incidence records and visual proxies for higher spherical cells.
-- **Local chamber view**: a selected chamber-centered view for understanding
-  local topology without global graph clutter.
-- **Geometric projection**: hyperbolic chamber barycenters projected to 3D.
-  Compact high-dimensional examples use local PCA for readability.
-- **`Y_Gamma`**: the fundamental-domain style one-vertex complex with oriented
-  generator arrows and relation faces shown as one cohesive 3D object.
-- **Defining graph `Gamma`**: the Coxeter presentation graph with generator
-  vertices and non-right relation edges labeled by `m`.
-- **Quotient/game mode**: imported or derived quotient-style complexes with
-  Schreier checks, generator-uniform cochains, JNW state/move diagnostics, and
-  ascending/descending-link views.
+The app is organized around a simple routine:
 
-Use the **Guided Inspection** panel for one-click tours: one Coxeter relation,
-one rank-three cell, local link, `Y_Gamma` 2-skeleton, and quotient/game
-experiment. See [docs/walkthroughs.md](docs/walkthroughs.md) for short scripts
-that explain what to inspect and what each view does not claim.
+1. Choose an example.
+2. Choose a model: **Davis complex**, **Y_Gamma**, **Defining graph Gamma**,
+   **Projection drawing**, or **Quotient + Games**.
+3. Choose a focus, then read the **Focus Inspector**.
 
-The interface starts in **Teaching** mode: example choice, reader focus buttons,
-basic labels/cells, the viewer, a focus inspector, and a short explanation. Use
-**Research** mode when you want imports, backend status, certificates,
-notebooks, detailed cell budgets, quotient builders, and raw topology panels.
+The inspector is the safest place to start. It always answers three questions:
 
-## Public Alpha Demo Path
+- **What is selected?**
+- **Why is it here?**
+- **Exact or drawing?**
 
-For a first public pass, use these four demos in order:
+For the JNW workflow, keep the layers separate:
+**Coxeter system Gamma -> Y_Gamma fundamental domain -> JNW state quotient ->
+local link at the selected state**. Ascending, descending, and level links are
+state-quotient diagnostics at a selected state vertex. They are not ambient
+links inside the universal Davis complex.
+
+Use **Start Here** in Teaching mode for one-click tours. Use **Research** mode
+when you want imports, backend status, certificates, notebooks, detailed cell
+budgets, quotient builders, and raw topology panels. See
+[docs/walkthroughs.md](docs/walkthroughs.md) for scripts that explain what to
+inspect and what each view does not claim.
+
+## Guided Demo Path
+
+For a first research-preview pass, use these five demos in order:
 
 1. **Find a hexagon**: load `A2`, start **Find a hexagon**, and inspect the
    filled `m = 3` rank-two Davis cell.
@@ -137,9 +204,11 @@ For a first public pass, use these four demos in order:
    showing the full two-skeleton.
 4. **Run `I2(5)` quotient/game**: open the Research Workflow demo, inspect the
    **Generator-Uniform Cochain** with `s0 = +1, s1 = -1`, and show the zero
-   boundary-sum diagnostic on the decagon. Then open the **JNW Legal-System
-   Game** tab to see how state/move directions differ from uniform generator
-   signs.
+   boundary-sum diagnostic on the decagon.
+5. **Play the JNW cube game**: use **Start Here** -> **Study a quotient/game**
+   or **Load JNW cube game** in Research Workflow. The defining graph is the
+   1-skeleton of a 3-cube, and the preset uses the bipartition move system from
+   Jankiewicz-Norin-Wise.
 
 Presenter scripts live in [docs/walkthroughs.md](docs/walkthroughs.md). Capture
 and caption guidance lives in [docs/demo-media.md](docs/demo-media.md).
@@ -152,8 +221,9 @@ regenerated with `corepack pnpm demo:screenshots`.
 | Inspect an A3 rank-three cell | ![A3 Y_Gamma rank-three focus with square and hexagon face families visible as one 3D incidence object.](docs/screenshots/a3-rank-three-square-hexagon.png)      |
 | Inspect `Y_Gamma` for P2      | ![Y_Gamma for the certified P2 compact 5-prism, focused on an m=5 relation sheet attached to the generator spine.](docs/screenshots/y-gamma-p2-m5-relation.png)  |
 | Run `I2(5)` quotient/game     | ![I2(5) quotient/game workflow with the generator-uniform cochain and decagon boundary-sum diagnostic visible.](docs/screenshots/i2-5-quotient-game-cocycle.png) |
+| Play the JNW cube game        | Use **Study a quotient/game** to open the 3-cube defining graph with bipartition moves, a derived JNW state quotient, and state-centered link diagnostics.       |
 
-## What Is Exact?
+## Certification Status
 
 Bundled compact 5-cube, Makarov `P0` 5-prism, Emery-Kellerhals `P1 = D P0`
 double, and Makarov `P2 = [5,3,3,3,4]` data are certified for source
@@ -166,9 +236,6 @@ the scripts fall back to a clearly labeled in-repo finite checker. Quotient
 imports are validated for generator actions, involutions, relation closure, and
 rank-two cells when the relevant data is supplied.
 
-The **Topology Inspector** reports whether the selected object is certified,
-exact incidence, a visual proxy, a projection, or uncertified.
-
 The example gallery also includes a searchable catalogue for Tumarkin's 15
 compact 5D eight-facet `G11411` cases from Table 4.10. Those diagrams are now
 manually transcribed from the arXiv EPS source, generated as loadable bundled
@@ -176,41 +243,38 @@ examples, and certified for source transcription, exact algebraic dotted
 weights, and normal-Gram rank/signature diagnostics. They live in the catalogue
 instead of the main gallery so the first screen stays readable.
 
-## What Is A Drawing Convention?
-
-Shell layouts, local chamber layouts, `Y_Gamma` readability embeddings, higher
-Davis proxy hulls, and PCA projections are drawings. They are designed to make
-incidence and local topology legible; they are not claims of exact Euclidean or
-hyperbolic embedding.
-
-Axis-based Klein/Poincare views draw a scaled reference ball. PCA views hide the
-ball because PCA coordinates are not ball-model coordinates.
-
-For the project-wide vocabulary, see
-[docs/exact-vs-drawing.md](docs/exact-vs-drawing.md) and
-[docs/glossary.md](docs/glossary.md).
-
 ## How Do I Study `Y_Gamma`?
 
-Click **Open 3D Y_Gamma model** or use the guided `Y_Gamma 2-skeleton` mode. The
-viewer shows one base vertex, oriented generator arrows, and rank-two relation
-faces. The `Y_Gamma 3D Reader` offers narrated presets for one relation,
-rank-three cells, square families, hexagon families, cells around a generator,
-and the full 2-skeleton. The 2D nerve/local-link schematic is available as a
-separate topology view; it explains spherical subsets but is not `Y_Gamma`
-itself.
+Click **Y_Gamma** in the top view switch, or use the guided
+`Y_Gamma 2-skeleton` mode. The viewer shows one base vertex, oriented generator
+arrows, and rank-two relation faces. The `Y_Gamma Reader` offers narrated
+presets to read one relation, read one rank-three cell, show square or hexagon
+families, show cells around one generator, and show all relation faces. The 2D nerve/local-link
+schematic is available as a separate topology view; it explains spherical
+subsets but is not `Y_Gamma` itself.
+
+Dense examples are meant to be read with focus tools, not by staring at every
+cell at once. Use **Show only...** for generator families, relation orders, ranks,
+edge stars, or relation stars; use **Extract relation star** to isolate one
+relation with its incident higher cells; use **Separate cells for reading** and
+**Compare shared vs separated drawing** to switch between the coherent
+shared-spine picture and a more expanded readability drawing. Edge labels name
+generators, and short leader ticks point labels back to their semantic edges.
 
 Use the top view switch to move among **Davis complex**, **Y_Gamma**, and
-**Gamma**. Gamma is the defining Coxeter graph: it omits `m = 2` commuting pairs
-by diagram convention and labels the drawn relation edges by their Coxeter
-matrix entry.
+**Gamma**. Gamma is the defining Coxeter graph. This viewer deliberately draws
+finite rank-two relation edges, including `m = 2` commuting pairs that standard
+Coxeter diagrams usually omit. Pairs with `m = inf` are absent because they do
+not give finite rank-two relation cells, and every drawn edge is labeled by its
+Coxeter matrix entry.
 
 ## How Do I Run A Quotient/Game Experiment?
 
 Use the **Research Workflow** panel. It is a five-step path:
 
-1. **Source System**: start from a Coxeter system. The bundled demo uses
-   `I2(5)`.
+1. **Source System**: start from a Coxeter system. The quotient/cocycle demo
+   uses `I2(5)`. The JNW legal-system demo uses the right-angled Coxeter group
+   whose defining graph is the 1-skeleton of a 3-cube.
 2. **Subgroup/Cosets**: record subgroup generator words. The demo uses the
    identity subgroup, so all ten cosets of `I2(5)` are visible.
 3. **Quotient Complex**: load or import the quotient artifact with Schreier
@@ -218,15 +282,35 @@ Use the **Research Workflow** panel. It is a five-step path:
 4. **Cocycle/Game**: choose either a **Generator-Uniform Cochain** or a
    **JNW Legal-System Game**. The I2(5) demo uses the cochain
    `s0 = +1, s1 = -1`, so the decagon boundary sum is zero while ascending and
-   descending edges are both visible. The JNW tab builds a state quotient from
-   an initial state and moves `m_i`; for non-right-angled systems it is labeled
-   as an experimental non-JNW generalization.
+   descending edges are both visible. The JNW cube demo preloads the JNW21 cube
+   bipartition/color-class move system and the initial state
+   `{v000, v001, v010, v101}`, so the browser diagnostics open on a
+   right-angled legal orbit. In the state quotient, vertices are named `S_1`,
+   `S_2`, ... for readability; the panel and inspector show the underlying
+   subset next to the name. The **Choose state** control changes the active
+   `S_i`; **Show JNW state quotient** draws the derived state quotient.
+   The quotient vertices are exactly the states `S_i`. A generator edge labeled
+   `g` runs from `S_i` to the state obtained by applying the move `m_g`; there
+   are no extra generator-endpoint quotient vertices. The cube demo has four state
+   vertices, sixteen generator-labeled edges, and twelve square relation cells.
+   The reader builds this view in stages: state vertices, generator edges,
+   relation-cycle boundaries, glass faces, and state-dependent directions. Use
+   **Outlines only** or **Glass faces** when the 1-skeleton should dominate.
+   **Choose relation** selects one alternating rank-two boundary, **Next
+   relation** advances through the list, and **Focus selected relation** ghosts
+   unrelated quotient edges; these controls do not add a separate central
+   relation face. **Mirror selected state on Gamma** highlights the same subset
+   directly on the defining graph. For non-right-angled systems, the same
+   state/move panel is labeled as an experimental non-JNW generalization.
 5. **Local Topology + Export**: inspect topology lenses and export a
    reproducible experiment bundle.
 
 The topology lenses make quotient/game mode primary: generator star,
-rank-three spherical cell, cells incident to an edge, ascending link,
-descending link, level link, and full local link. The workflow readout reports
+rank-three spherical cell, cells incident to an edge, **Ascending link at
+selected state**, **Descending link at selected state**, **Level link at
+selected state**, and full local link. In the JNW cube demo those links live in
+the derived state quotient, while `Y_Gamma` remains the fundamental-domain
+source object. The workflow readout reports
 the visible vertices, edges, cells, local-link F2 homology, and flag-link status
 so the topology is visible before opening the full inspector. Importing
 quotient JSON still works, and the old raw builder remains available under
@@ -242,7 +326,12 @@ depends on the current state. Only right-angled systems with passing move and
 legal-orbit checks are labeled JNW faithful; non-right-angled examples remain
 exploratory diagnostics.
 
-The **Experiment Notebook** saves named runs with notes, warnings, scene stats,
+The bundled **JNW cube graph** example is the clean playground for this second
+model. Its generators are the eight binary vertices of a 3-cube, commuting
+pairs are exactly cube edges, and the **Bipartite/color moves** preset is the
+JNW legal system described in the paper.
+
+The **Notebook/export** lane saves named runs with notes, warnings, scene stats,
 selected objects, topology diagnostics, data hashes, and optional screenshots.
 Bundles can be exported, imported, duplicated, and compared.
 
@@ -315,9 +404,13 @@ SageMath, GAP/KBMAG, and a stable CoxIter executable path for artifact checks.
 - [docs/math.md](docs/math.md): Coxeter, Davis, quotient, game, and projection conventions.
 - [docs/data-format.md](docs/data-format.md): JSON schemas and import/export behavior.
 - [docs/viewer-design.md](docs/viewer-design.md): rendering, interaction, performance, and UI decisions.
+- [docs/ui-controls.md](docs/ui-controls.md): plain-language map of the main controls and what they change.
 - [docs/tooling.md](docs/tooling.md): exact exporter contracts, scripts, runtime checks, and CI policy.
 - [docs/desktop-ux.md](docs/desktop-ux.md): native wrapper UX, workspace layout, diagnostics, signing, and updater status.
-- [docs/walkthroughs.md](docs/walkthroughs.md): guided readings for hexagon, rank-three, `Y_Gamma`, and quotient/game views.
+- [docs/walkthroughs.md](docs/walkthroughs.md): guided readings for hexagon, rank-three, Gamma, `Y_Gamma`, and quotient/game views.
+- [docs/jnw-state-quotient.md](docs/jnw-state-quotient.md): the state-quotient convention used by the JNW cube workflow.
+- [docs/ui-map.md](docs/ui-map.md): one annotated map of the main UI regions.
+- [docs/known-limits.md](docs/known-limits.md): density, projection, non-planarity, and external-tool caveats.
 - [docs/exact-vs-drawing.md](docs/exact-vs-drawing.md): how to separate exact incidence, numerical geometry, and readable drawings.
 - [docs/glossary.md](docs/glossary.md): project vocabulary for Coxeter, Davis, geometry, quotient, and game terms.
 - [docs/demo-media.md](docs/demo-media.md): screenshot, caption, sidecar, and demo-media guidance.

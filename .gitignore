@@ -8,6 +8,7 @@ src-tauri/gen
 playwright-report
 test-results
 coverage
+.benchmark-current
 __pycache__
 *.pyc
 *.tsbuildinfo

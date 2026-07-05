@@ -16,6 +16,11 @@ This file records sources that support the viewer's mathematical and engineering
   - Supports future normal-form and exact-word-reduction context.
   - Exact bibliographic details should be filled in before this source is used for an implementation claim.
 
+- Kasia Jankiewicz, Sergey Norin, and Daniel T. Wise, "Virtually Fibering Right-Angled Coxeter Groups," arXiv:1711.11505.
+  - Supports `jnw_cube_graph.json`: Section 2 defines systems of moves, legal states, legal orbits, and strongly legal states; Section 4 explains the state-dependent edge directions used for ascending/descending links; Section 5.a.1 uses the 1-skeleton of the 3-cube and the bipartition move system as a legal-system example.
+  - The bundled example stores the cube graph as a right-angled Coxeter system, with `m=2` exactly along cube edges. The app's JNW workflow checks the move property and legal orbit in-browser; it does not attach an external subgroup/coset certificate.
+  - arXiv page: https://arxiv.org/abs/1711.11505
+
 - Matthieu Jacquemet and Steven T. Tschantz, "All hyperbolic Coxeter n-cubes," arXiv:1803.10462; Journal of Combinatorial Theory, Series A 158 (2018), 387-406.
   - Supports `compact_5_cube_gamma1.json`: Theorem 1 states that there is a unique compact hyperbolic Coxeter 5-cube, Figure 3 gives its Coxeter graph, and Section 4.2.2 gives the two dotted-edge weights for the compact graph Gamma_1.
   - The source LaTeX for Figure 3 was used to transcribe the graph coordinates and edges rather than copying the diagram by eye.

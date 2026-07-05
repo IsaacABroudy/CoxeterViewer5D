@@ -5,6 +5,7 @@ dist
 AGENTS.md
 playwright-report
 test-results
+.benchmark-current
 src-tauri/gen
 src-tauri/target
 pnpm-lock.yaml

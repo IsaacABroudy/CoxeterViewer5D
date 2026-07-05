@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">CoxeterViewer5D UI map</title>
+  <desc id="desc">Annotated schematic showing the model switch, focus controls, main viewer, inspector, caveats, research tools, and export notebook area.</desc>
+  <rect width="1200" height="720" fill="#f5f7fb"/>
+  <rect x="36" y="36" width="260" height="648" rx="14" fill="#ffffff" stroke="#cbd5e1"/>
+  <rect x="320" y="36" width="560" height="648" rx="14" fill="#ffffff" stroke="#cbd5e1"/>
+  <rect x="904" y="36" width="260" height="648" rx="14" fill="#ffffff" stroke="#cbd5e1"/>
+
+  <text x="58" y="75" font-family="Inter, Segoe UI, sans-serif" font-size="24" font-weight="800" fill="#172033">Controls</text>
+  <rect x="58" y="102" width="216" height="70" rx="10" fill="#eef6ff" stroke="#93c5fd"/>
+  <text x="76" y="132" font-family="Inter, Segoe UI, sans-serif" font-size="17" font-weight="800" fill="#1e3a8a">Example</text>
+  <text x="76" y="154" font-family="Inter, Segoe UI, sans-serif" font-size="13" fill="#334155">Choose the Coxeter source.</text>
+
+  <rect x="58" y="190" width="216" height="84" rx="10" fill="#f0fdf4" stroke="#86efac"/>
+  <text x="76" y="220" font-family="Inter, Segoe UI, sans-serif" font-size="17" font-weight="800" fill="#166534">Model switch</text>
+  <text x="76" y="242" font-family="Inter, Segoe UI, sans-serif" font-size="13" fill="#334155">Davis, Y_Gamma, Gamma,</text>
+  <text x="76" y="260" font-family="Inter, Segoe UI, sans-serif" font-size="13" fill="#334155">Projection, Quotient + Games.</text>
+
+  <rect x="58" y="292" width="216" height="92" rx="10" fill="#fff7ed" stroke="#fdba74"/>
+  <text x="76" y="322" font-family="Inter, Segoe UI, sans-serif" font-size="17" font-weight="800" fill="#9a3412">Start Here + Focus</text>
+  <text x="76" y="344" font-family="Inter, Segoe UI, sans-serif" font-size="13" fill="#334155">Pick a goal, then adjust</text>
+  <text x="76" y="362" font-family="Inter, Segoe UI, sans-serif" font-size="13" fill="#334155">relation, star, or labels.</text>
+
+  <rect x="58" y="520" width="216" height="110" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="76" y="550" font-family="Inter, Segoe UI, sans-serif" font-size="17" font-weight="800" fill="#334155">Research tools</text>
+  <text x="76" y="572" font-family="Inter, Segoe UI, sans-serif" font-size="13" fill="#475569">Imports, backend status,</text>
+  <text x="76" y="590" font-family="Inter, Segoe UI, sans-serif" font-size="13" fill="#475569">notebooks, certificates,</text>
+  <text x="76" y="608" font-family="Inter, Segoe UI, sans-serif" font-size="13" fill="#475569">exports. Hidden in Teaching.</text>
+
+  <text x="348" y="75" font-family="Inter, Segoe UI, sans-serif" font-size="24" font-weight="800" fill="#172033">Viewer</text>
+  <rect x="352" y="104" width="496" height="430" rx="16" fill="#111827"/>
+  <circle cx="600" cy="315" r="132" fill="none" stroke="#38bdf8" stroke-width="3" opacity="0.65"/>
+  <path d="M520 360 C565 250 660 250 710 360" fill="none" stroke="#f97316" stroke-width="8" opacity="0.85"/>
+  <path d="M500 300 L700 300" stroke="#e5e7eb" stroke-width="4" opacity="0.7"/>
+  <circle cx="500" cy="300" r="9" fill="#60a5fa"/>
+  <circle cx="700" cy="300" r="9" fill="#34d399"/>
+  <rect x="362" y="548" width="218" height="56" rx="10" fill="#eef2ff" stroke="#a5b4fc"/>
+  <text x="380" y="581" font-family="Inter, Segoe UI, sans-serif" font-size="15" font-weight="800" fill="#3730a3">Caveats drawer</text>
+  <rect x="600" y="548" width="248" height="56" rx="10" fill="#fefce8" stroke="#fde047"/>
+  <text x="618" y="581" font-family="Inter, Segoe UI, sans-serif" font-size="15" font-weight="800" fill="#854d0e">Current model badge</text>
+
+  <text x="928" y="75" font-family="Inter, Segoe UI, sans-serif" font-size="24" font-weight="800" fill="#172033">Inspector</text>
+  <rect x="928" y="104" width="212" height="96" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="946" y="134" font-family="Inter, Segoe UI, sans-serif" font-size="16" font-weight="800" fill="#172033">What is selected?</text>
+  <text x="946" y="158" font-family="Inter, Segoe UI, sans-serif" font-size="13" fill="#475569">Names the object.</text>
+  <rect x="928" y="220" width="212" height="96" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="946" y="250" font-family="Inter, Segoe UI, sans-serif" font-size="16" font-weight="800" fill="#172033">Why is it here?</text>
+  <text x="946" y="274" font-family="Inter, Segoe UI, sans-serif" font-size="13" fill="#475569">Gives the Coxeter reason.</text>
+  <rect x="928" y="336" width="212" height="96" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="946" y="366" font-family="Inter, Segoe UI, sans-serif" font-size="16" font-weight="800" fill="#172033">Exact or drawing?</text>
+  <text x="946" y="390" font-family="Inter, Segoe UI, sans-serif" font-size="13" fill="#475569">Separates claims from views.</text>
+  <rect x="928" y="520" width="212" height="110" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="946" y="550" font-family="Inter, Segoe UI, sans-serif" font-size="16" font-weight="800" fill="#172033">Export + notebook</text>
+  <text x="946" y="574" font-family="Inter, Segoe UI, sans-serif" font-size="13" fill="#475569">Save a reproducible</text>
+  <text x="946" y="592" font-family="Inter, Segoe UI, sans-serif" font-size="13" fill="#475569">inspection record.</text>
+</svg>

@@ -67,7 +67,7 @@ inspection labels rather than a new algebraic normal form. For `m_ij = 3`, the
 filled cell is a hexagon recording `(s_i s_j)^3 = 1`; for `m_ij = 2`, it is the
 commuting square.
 
-The pair matrix in the UI is just the Coxeter matrix restricted to rank-two
+The Relation atlas in the UI is just the Coxeter matrix restricted to rank-two
 subsets, decorated with view state such as enabled, hidden, clipped, or
 ghosted. A ghosted boundary edge or shell node is context from the same finite
 ball. It is not an extra Davis cell and it should not be counted as visible
@@ -181,11 +181,11 @@ incidence/proxy data when the viewer can enumerate them. `Y_Gamma` is not a
 torsion-free quotient manifold.
 
 The defining graph `Gamma` is a different object. It has one vertex for each
-Coxeter generator and an edge for each non-right Coxeter matrix entry. The app
-labels every drawn edge by `m`; `m=2` commuting pairs are omitted by Coxeter
-diagram convention. `Gamma` is useful for reading the presentation, but it is
-not the Davis complex, not the `Y_Gamma` fundamental-domain complex, and not the
-nerve/local-link diagnostic.
+Coxeter generator and an edge for each off-diagonal Coxeter matrix entry. The
+app labels every drawn edge by `m`; `m=2` commuting pairs are included even
+though standard Coxeter diagrams usually omit them. `Gamma` is useful for
+reading the full presentation matrix, but it is not the Davis complex, not the
+`Y_Gamma` fundamental-domain complex, and not the nerve/local-link diagnostic.
 
 The app represents `Y_Gamma` primarily as a 3D 2-skeleton scene in the main
 viewer and as a cell inventory in the side panel: a base vertex, generator
@@ -235,6 +235,37 @@ global orientation to all `s_i` edges. For right-angled Coxeter systems, the
 viewer can label a passing move property and legal orbit as JNW faithful. For
 non-right-angled examples, the same state-orbit drawing is available only as an
 experimental diagnostic and does not carry the JNW theorem.
+
+The guiding bundled example is `jnw_cube_graph.json`. Its defining graph is the
+1-skeleton of a 3-cube, with generators labeled by binary cube vertices. The
+JNW preset preloads the cube bipartition/color-class move system from JNW21 and
+starts from the legal state `{v000, v001, v010, v101}`. The resulting state
+quotient is small enough to inspect directly while still showing the key point:
+edge directions depend on the current state, not on a single global sign
+attached to a generator. In the 3D scene those quotient vertices are named
+`S_1`, `S_2`, ...; the inspector displays the underlying subset next to the
+state name.
+
+The quotient vertex set is the state orbit itself. A generator-labeled edge
+from `S_i` ends at the state obtained by applying the corresponding move
+`m_i`. For the bundled 3-cube move system this produces four state vertices,
+sixteen generator edges, and twelve square commuting-relation cells.
+
+The 3D JNW reader separates this exact quotient data with drawing handles:
+small generator beads around each state and labeled rails between beads. These
+handles are not additional quotient vertices. They are there because the cube
+example has only two move classes, so many generator edges and square cells
+would otherwise lie on top of the same state cycle. This makes the four local
+`Y_Gamma` charts visible inside one glued quotient object while preserving the
+underlying state/move incidence.
+
+The JNW view is layered. `Gamma` is the source Coxeter defining graph;
+`Y_Gamma` is the one-vertex fundamental-domain complex for that source; the
+JNW state quotient is a derived finite orbit of states under the selected move
+system; and the ascending, descending, or level link is the local link at one
+selected state vertex in that derived quotient. Those links are not rendered as
+ambient local links in the universal Davis complex, even though the Davis
+complex is the covering/source object for the broader story.
 
 Experiment logs record the assignment or state/move system, input hash,
 diagnostics, and certificate summary for reproducibility.
