@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "name": "JNW cube graph RACG",
+  "dataStatus": "verified-source",
+  "description": "Right-angled Coxeter system whose defining graph is the 1-skeleton of a 3-cube, used by Jankiewicz-Norin-Wise as a legal-system example.",
+  "rank": 8,
+  "generators": [
+    {
+      "id": "v000",
+      "label": "v000",
+      "colorHint": "#2563eb"
+    },
+    {
+      "id": "v001",
+      "label": "v001",
+      "colorHint": "#16a34a"
+    },
+    {
+      "id": "v010",
+      "label": "v010",
+      "colorHint": "#dc2626"
+    },
+    {
+      "id": "v011",
+      "label": "v011",
+      "colorHint": "#9333ea"
+    },
+    {
+      "id": "v100",
+      "label": "v100",
+      "colorHint": "#ea580c"
+    },
+    {
+      "id": "v101",
+      "label": "v101",
+      "colorHint": "#0891b2"
+    },
+    {
+      "id": "v110",
+      "label": "v110",
+      "colorHint": "#65a30d"
+    },
+    {
+      "id": "v111",
+      "label": "v111",
+      "colorHint": "#be123c"
+    }
+  ],
+  "coxeterMatrix": [
+    [1, 2, 2, "inf", 2, "inf", "inf", "inf"],
+    [2, 1, "inf", 2, "inf", 2, "inf", "inf"],
+    [2, "inf", 1, 2, "inf", "inf", 2, "inf"],
+    ["inf", 2, 2, 1, "inf", "inf", "inf", 2],
+    [2, "inf", "inf", "inf", 1, 2, 2, "inf"],
+    ["inf", 2, "inf", "inf", 2, 1, "inf", 2],
+    ["inf", "inf", 2, "inf", 2, "inf", 1, 2],
+    ["inf", "inf", "inf", 2, "inf", 2, 2, 1]
+  ],
+  "sourceRefs": [
+    {
+      "id": "jankiewicz-norin-wise-2017-legal-systems",
+      "citation": "Kasia Jankiewicz, Sergey Norin, and Daniel T. Wise, Virtually Fibering Right-Angled Coxeter Groups, arXiv:1711.11505.",
+      "url": "https://arxiv.org/abs/1711.11505",
+      "locator": "Section 2 for systems of moves and legal states; Section 5.a.1 for the cube graph example.",
+      "notes": "Section 5.a.1 uses the 1-skeleton of the 3-cube and the bipartition move system as a legal-system example."
+    }
+  ],
+  "notes": [
+    "The generators are the binary vertices of the 3-cube.",
+    "The Coxeter entry is m=2 exactly when the corresponding cube vertices differ in one coordinate; otherwise it is infinite.",
+    "The JNW Legal-System Game preset preloads the JNW21 bipartition color-class moves and the legal initial state {v000, v001, v010, v101}.",
+    "The derived state quotient displays vertices as S_1, S_2, ... while the panel/inspector expands each name as a subset of cube vertices.",
+    "The app's JNW orbit and link diagnostics are browser checks for exploration, not an external certificate."
+  ]
+}

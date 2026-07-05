@@ -13,6 +13,15 @@ import type {
 
 const defaultOrbitCap = 512;
 
+export interface JnwLayerBreadcrumb {
+  sourceSystemName: string;
+  selectedStateId: string;
+  selectedStateLabel: string;
+  selectedStateSubsetLabel: string;
+  activeLensLabel: string;
+  items: string[];
+}
+
 /**
  * The JNW game is state dependent: an edge direction is read from the current
  * state, not from a globally fixed sign on its generator.
@@ -47,6 +56,61 @@ export function createDefaultJnwState(system: CoxeterSystemInput): JnwState {
       (_unused, index) => index,
     ),
   );
+}
+
+/**
+ * Display a JNW state using the vertices of the defining graph Gamma.
+ *
+ * Internally a state is a subset of generator indices. In the cube example the
+ * generators are the eight vertices v000, v001, ... of Gamma, so showing
+ * `{v000, v101}` is much clearer than showing `{s0, s5}`.
+ */
+export function formatJnwStateLabel(
+  state: JnwState | readonly number[],
+  system: CoxeterSystemInput,
+): string {
+  const generators = "generators" in state ? state.generators : state;
+  const labels = normalizeGeneratorSet(system.rank, generators).map(
+    (generator) => system.generators[generator]?.label ?? `s${generator}`,
+  );
+  return labels.length === 0 ? "{}" : `{${labels.join(", ")}}`;
+}
+
+export function formatJnwStateName(
+  summary: Pick<JnwLegalOrbitSummary, "states">,
+  state: JnwState | string | undefined,
+): string {
+  const stateId = typeof state === "string" ? state : state?.id;
+  if (!stateId) {
+    return "state";
+  }
+  const index = summary.states.findIndex((entry) => entry.id === stateId);
+  return index >= 0 ? `S_${index + 1}` : "state";
+}
+
+export function buildJnwLayerBreadcrumb(
+  system: CoxeterSystemInput,
+  selectedState: JnwState,
+  activeLensLabel: string,
+  summary?: Pick<JnwLegalOrbitSummary, "states">,
+): JnwLayerBreadcrumb {
+  const selectedStateLabel = summary
+    ? formatJnwStateName(summary, selectedState)
+    : formatJnwStateLabel(selectedState, system);
+  const selectedStateSubsetLabel = formatJnwStateLabel(selectedState, system);
+  return {
+    sourceSystemName: system.name,
+    selectedStateId: selectedState.id,
+    selectedStateLabel,
+    selectedStateSubsetLabel,
+    activeLensLabel,
+    items: [
+      "Coxeter system Gamma",
+      "Y_Gamma fundamental domain",
+      "JNW state quotient",
+      `link at state ${selectedStateLabel}`,
+    ],
+  };
 }
 
 export function createBipartiteJnwMoveSystem(
@@ -275,7 +339,7 @@ export function jnwOrbitToQuotientComplex(
     generatorRank: system.rank,
     vertices: summary.states.map((state) => ({
       id: state.id,
-      label: stateLabel(state.generators),
+      label: formatJnwStateName(summary, state),
       representativeWord: [],
     })),
     edges: summary.edges.map((edge) => ({
@@ -455,12 +519,6 @@ function stateId(generators: number[]): string {
   return generators.length === 0
     ? "jnw:state:empty"
     : `jnw:state:${generators.join(".")}`;
-}
-
-function stateLabel(generators: number[]): string {
-  return generators.length === 0
-    ? "empty"
-    : `{${generators.map((generator) => `s${generator}`).join(", ")}}`;
 }
 
 function compareStates(left: JnwState, right: JnwState): number {

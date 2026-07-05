@@ -2,11 +2,14 @@ export {
   applyJnwMove,
   checkJnwLegalState,
   checkJnwMoveProperty,
+  buildJnwLayerBreadcrumb,
   createBipartiteJnwMoveSystem,
   createDefaultJnwMoveSystem,
   createDefaultJnwState,
   createJnwState,
   enumerateJnwOrbit,
+  formatJnwStateLabel,
+  formatJnwStateName,
   jnwOrbitToQuotientComplex,
   summarizeJnwLegalSystem,
 } from "./jnwLegalSystem";
@@ -26,6 +29,7 @@ export {
   validateQuotientGameData,
   validateRankTwoCocycle,
 } from "./cocycles";
+export type { JnwLayerBreadcrumb } from "./jnwLegalSystem";
 export type {
   BoundaryEquation,
   BoundaryCocycleTerm,

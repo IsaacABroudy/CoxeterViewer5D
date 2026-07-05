@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import A3_SAGE_RADIUS_6 from "./fixtures/generated/A3_sage_radius_6.json";
 import I2_5_SAGE_RADIUS_5 from "./fixtures/generated/I2_5_sage_radius_5.json";
 import I2_5 from "../public/examples/I2_5.json";
+import jnwCubeGraph from "../public/examples/jnw_cube_graph.json";
 import {
   gapKbmagExactBackend,
   parseGeneratedCayleyBall,
@@ -20,8 +21,12 @@ import {
   certifyMorseCocycle,
   checkJnwLegalState,
   checkJnwMoveProperty,
+  buildJnwLayerBreadcrumb,
+  createBipartiteJnwMoveSystem,
   createGeneratorGameAssignment,
   createJnwState,
+  formatJnwStateLabel,
+  formatJnwStateName,
   formatBoundaryEquation,
   invertGeneratorAssignment,
   jnwOrbitToQuotientComplex,
@@ -45,6 +50,7 @@ import type { CoxeterSystemInput } from "../src/types";
 
 const createdAt = "2026-01-01T00:00:00.000Z";
 const I2_5_INPUT = I2_5 as CoxeterSystemInput;
+const JNW_CUBE_INPUT = jnwCubeGraph as CoxeterSystemInput;
 
 describe("exact backend stubs", () => {
   it("reports that Sage generation is unavailable in-browser", async () => {
@@ -794,6 +800,49 @@ describe("game and PL Morse preparation helpers", () => {
     const edge = quotient.edges.find((entry) => entry.generator === 0);
     expect(edge).toBeDefined();
     expect(edge?.source).not.toBe(edge?.target);
+  });
+
+  it("uses the JNW cube graph bipartition as a faithful legal-system demo", () => {
+    const moveSystem = createBipartiteJnwMoveSystem(JNW_CUBE_INPUT);
+    expect(moveSystem).toBeDefined();
+
+    const initialState = createJnwState([0, 1, 2, 5]);
+    const summary = summarizeJnwLegalSystem(
+      JNW_CUBE_INPUT,
+      moveSystem!,
+      initialState,
+    );
+
+    expect(summary.rightAngled).toBe(true);
+    expect(summary.claimStatus).toBe("jnw-faithful");
+    expect(summary.legalOrbit).toBe(true);
+    expect(summary.stronglyLegalOrbit).toBe(true);
+    expect(summary.states).toHaveLength(4);
+    expect(summary.moveChecks.every((check) => check.ok)).toBe(true);
+    expect(summary.rankTwoDiagnostics.every((check) => check.ok)).toBe(true);
+
+    const quotient = jnwOrbitToQuotientComplex(JNW_CUBE_INPUT, summary);
+    expect(quotient.vertices).toHaveLength(4);
+    expect(quotient.sourceSystem?.name).toBe(JNW_CUBE_INPUT.name);
+    expect(quotient.game?.notes?.join(" ")).toContain("jnw-faithful");
+    expect(quotient.vertices.map((vertex) => vertex.label).sort()).toEqual([
+      "S_1",
+      "S_2",
+      "S_3",
+      "S_4",
+    ]);
+    expect(formatJnwStateName(summary, summary.states[0])).toBe("S_1");
+    expect(formatJnwStateLabel(summary.states[0], JNW_CUBE_INPUT)).toMatch(
+      /v[01]{3}/,
+    );
+    expect(
+      buildJnwLayerBreadcrumb(
+        JNW_CUBE_INPUT,
+        summary.states[0],
+        "Ascending link at selected state",
+        summary,
+      ).items.join(" -> "),
+    ).toContain("Y_Gamma fundamental domain -> JNW state quotient");
   });
 
   it("marks non-right-angled JNW diagnostics as experimental", () => {
