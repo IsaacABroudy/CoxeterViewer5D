@@ -5,153 +5,341 @@
   "timedBaselinePath": "scripts/benchmarks/timed-browser-v1.json",
   "summary": {
     "sourceReport": "timed-browser-benchmark",
-    "sourceCreatedAt": "1970-01-01T00:00:00.000Z",
+    "sourceCreatedAt": "2026-07-05T13:50:27.368Z",
     "cases": [
       {
         "id": "I2_5:5",
-        "elapsedMs": 240.534,
-        "lastGraphUpdateMs": 4.6,
+        "elapsedMs": 436.715,
+        "lastGraphUpdateMs": 4.4,
         "renderedNodes": 10,
+        "renderedEdgeSegments": 10,
         "renderedCells": 1,
-        "drawCalls": 0
+        "renderedNodeLabels": 10,
+        "renderedEdgeLabels": 10,
+        "renderedLabelLeaders": 0,
+        "drawCalls": 28
       },
       {
         "id": "A3:4",
-        "elapsedMs": 478.777,
-        "lastGraphUpdateMs": 4.1,
-        "renderedNodes": 23,
+        "elapsedMs": 221.848,
+        "lastGraphUpdateMs": 1.3,
+        "renderedNodes": 20,
+        "renderedEdgeSegments": 27,
         "renderedCells": 3,
-        "drawCalls": 0
+        "renderedNodeLabels": 20,
+        "renderedEdgeLabels": 10,
+        "renderedLabelLeaders": 0,
+        "drawCalls": 46
       },
       {
         "id": "universal_rank3:4",
-        "elapsedMs": 443.752,
-        "lastGraphUpdateMs": 4.1,
+        "elapsedMs": 30.339,
+        "lastGraphUpdateMs": 3,
         "renderedNodes": 46,
+        "renderedEdgeSegments": 45,
         "renderedCells": 0,
-        "drawCalls": 0
+        "renderedNodeLabels": 46,
+        "renderedEdgeLabels": 20,
+        "renderedLabelLeaders": 0,
+        "drawCalls": 46
       },
       {
         "id": "compact_5_cube_gamma1:2",
-        "elapsedMs": 912.774,
-        "lastGraphUpdateMs": 0.8,
+        "elapsedMs": 332.652,
+        "lastGraphUpdateMs": 0.7,
         "renderedNodes": 10,
+        "renderedEdgeSegments": 9,
         "renderedCells": 0,
-        "drawCalls": 0
+        "renderedNodeLabels": 4,
+        "renderedEdgeLabels": 1,
+        "renderedLabelLeaders": 0,
+        "drawCalls": 11
       },
       {
         "id": "compact_5_cube_gamma1:3",
-        "elapsedMs": 2946.793,
-        "lastGraphUpdateMs": 4.6,
+        "elapsedMs": 548.503,
+        "lastGraphUpdateMs": 4.1,
         "renderedNodes": 71,
+        "renderedEdgeSegments": 100,
         "renderedCells": 30,
-        "drawCalls": 0
+        "renderedNodeLabels": 13,
+        "renderedEdgeLabels": 10,
+        "renderedLabelLeaders": 0,
+        "drawCalls": 127
       }
     ],
     "interactions": [
       {
         "id": "label-toggle",
-        "elapsedMs": 287.765,
-        "lastGraphUpdateMs": 0.4,
-        "renderCountDelta": 3,
-        "drawCalls": 8
+        "elapsedMs": 68.38,
+        "lastGraphUpdateMs": 0.2,
+        "renderCountDelta": 1,
+        "renderedNodes": 10,
+        "renderedEdgeSegments": 10,
+        "renderedCells": 1,
+        "renderedNodeLabels": 0,
+        "renderedEdgeLabels": 0,
+        "renderedLabelLeaders": 0,
+        "drawCalls": 15
       },
       {
         "id": "rank-two-pair-focus",
-        "elapsedMs": 446.255,
-        "lastGraphUpdateMs": 0.5,
-        "renderCountDelta": 14,
-        "drawCalls": 19
+        "elapsedMs": 39.895,
+        "lastGraphUpdateMs": 0.8,
+        "renderCountDelta": 0,
+        "renderedNodes": 6,
+        "renderedEdgeSegments": 6,
+        "renderedCells": 1,
+        "renderedNodeLabels": 6,
+        "renderedEdgeLabels": 6,
+        "renderedLabelLeaders": 0,
+        "drawCalls": 20
       },
       {
         "id": "ygamma-preset-switch",
-        "elapsedMs": 752.073,
-        "lastGraphUpdateMs": 0.8,
-        "renderCountDelta": 14,
-        "drawCalls": 9
+        "elapsedMs": 168.124,
+        "lastGraphUpdateMs": 0.9,
+        "renderCountDelta": 3,
+        "renderedNodes": 1,
+        "renderedEdgeSegments": 3,
+        "renderedCells": 3,
+        "renderedNodeLabels": 1,
+        "renderedEdgeLabels": 1,
+        "renderedLabelLeaders": 0,
+        "drawCalls": 70
       },
       {
         "id": "quotient-link-lens",
-        "elapsedMs": 440.915,
-        "lastGraphUpdateMs": 0.4,
-        "renderCountDelta": 14,
+        "elapsedMs": 37.235,
+        "lastGraphUpdateMs": 0.8,
+        "renderCountDelta": 1,
+        "renderedNodes": 3,
+        "renderedEdgeSegments": 4,
+        "renderedCells": 0,
+        "renderedNodeLabels": 3,
+        "renderedEdgeLabels": 4,
+        "renderedLabelLeaders": 1,
         "drawCalls": 10
       },
       {
         "id": "topology-generator-star",
-        "elapsedMs": 620.507,
-        "lastGraphUpdateMs": 1.2,
-        "renderCountDelta": 12,
-        "drawCalls": 19
+        "elapsedMs": 194.795,
+        "lastGraphUpdateMs": 1.1,
+        "renderCountDelta": 4,
+        "renderedNodes": 1,
+        "renderedEdgeSegments": 3,
+        "renderedCells": 3,
+        "renderedNodeLabels": 1,
+        "renderedEdgeLabels": 1,
+        "renderedLabelLeaders": 0,
+        "drawCalls": 16
       },
       {
         "id": "edge-star",
-        "elapsedMs": 1214.121,
-        "lastGraphUpdateMs": 2.2,
-        "renderCountDelta": 28,
-        "drawCalls": 20
+        "elapsedMs": 279.267,
+        "lastGraphUpdateMs": 2,
+        "renderCountDelta": 6,
+        "renderedNodes": 10,
+        "renderedEdgeSegments": 12,
+        "renderedCells": 3,
+        "renderedNodeLabels": 1,
+        "renderedEdgeLabels": 12,
+        "renderedLabelLeaders": 12,
+        "drawCalls": 29
       },
       {
         "id": "cell-star",
-        "elapsedMs": 737.753,
-        "lastGraphUpdateMs": 0.8,
-        "renderCountDelta": 13,
-        "drawCalls": 20
+        "elapsedMs": 193.308,
+        "lastGraphUpdateMs": 0.9,
+        "renderCountDelta": 4,
+        "renderedNodes": 13,
+        "renderedEdgeSegments": 16,
+        "renderedCells": 1,
+        "renderedNodeLabels": 7,
+        "renderedEdgeLabels": 4,
+        "renderedLabelLeaders": 0,
+        "drawCalls": 23
       },
       {
         "id": "rank-k-lens",
-        "elapsedMs": 678.464,
-        "lastGraphUpdateMs": 1.3,
-        "renderCountDelta": 13,
-        "drawCalls": 19
+        "elapsedMs": 180.87,
+        "lastGraphUpdateMs": 1,
+        "renderCountDelta": 3,
+        "renderedNodes": 1,
+        "renderedEdgeSegments": 3,
+        "renderedCells": 3,
+        "renderedNodeLabels": 1,
+        "renderedEdgeLabels": 1,
+        "renderedLabelLeaders": 0,
+        "drawCalls": 16
       },
       {
         "id": "comparison-view",
-        "elapsedMs": 642.944,
-        "lastGraphUpdateMs": 1.8,
-        "renderCountDelta": 12,
-        "drawCalls": 25
+        "elapsedMs": 110.81,
+        "lastGraphUpdateMs": 1.9,
+        "renderCountDelta": 3,
+        "renderedNodes": 10,
+        "renderedEdgeSegments": 10,
+        "renderedCells": 1,
+        "renderedNodeLabels": 10,
+        "renderedEdgeLabels": 10,
+        "renderedLabelLeaders": 0,
+        "drawCalls": 28
+      },
+      {
+        "id": "ygamma-cutaway-switch",
+        "elapsedMs": 105.05,
+        "lastGraphUpdateMs": 1,
+        "renderCountDelta": 1,
+        "renderedNodes": 11,
+        "renderedEdgeSegments": 14,
+        "renderedCells": 1,
+        "renderedNodeLabels": 1,
+        "renderedEdgeLabels": 14,
+        "renderedLabelLeaders": 14,
+        "drawCalls": 45
+      },
+      {
+        "id": "ygamma-relation-star",
+        "elapsedMs": 252.146,
+        "lastGraphUpdateMs": 1.1,
+        "renderCountDelta": 3,
+        "renderedNodes": 11,
+        "renderedEdgeSegments": 14,
+        "renderedCells": 1,
+        "renderedNodeLabels": 1,
+        "renderedEdgeLabels": 14,
+        "renderedLabelLeaders": 14,
+        "drawCalls": 45
+      },
+      {
+        "id": "ygamma-leader-labels",
+        "elapsedMs": 97.503,
+        "lastGraphUpdateMs": 0.9,
+        "renderCountDelta": 1,
+        "renderedNodes": 11,
+        "renderedEdgeSegments": 14,
+        "renderedCells": 1,
+        "renderedNodeLabels": 1,
+        "renderedEdgeLabels": 14,
+        "renderedLabelLeaders": 14,
+        "drawCalls": 45
+      },
+      {
+        "id": "ygamma-relation-atlas",
+        "elapsedMs": 61.518,
+        "lastGraphUpdateMs": 1,
+        "renderCountDelta": 0,
+        "renderedNodes": 11,
+        "renderedEdgeSegments": 14,
+        "renderedCells": 1,
+        "renderedNodeLabels": 1,
+        "renderedEdgeLabels": 14,
+        "renderedLabelLeaders": 14,
+        "drawCalls": 45
+      },
+      {
+        "id": "ygamma-drawing-comparison",
+        "elapsedMs": 431.333,
+        "lastGraphUpdateMs": 5.6,
+        "renderCountDelta": -10,
+        "renderedNodes": 11,
+        "renderedEdgeSegments": 110,
+        "renderedCells": 40,
+        "renderedNodeLabels": 0,
+        "renderedEdgeLabels": 110,
+        "renderedLabelLeaders": 110,
+        "drawCalls": 175
+      },
+      {
+        "id": "ygamma-camera-path",
+        "elapsedMs": 102.972,
+        "lastGraphUpdateMs": 0.8,
+        "renderCountDelta": 1,
+        "renderedNodes": 11,
+        "renderedEdgeSegments": 14,
+        "renderedCells": 1,
+        "renderedNodeLabels": 1,
+        "renderedEdgeLabels": 14,
+        "renderedLabelLeaders": 14,
+        "drawCalls": 45
       },
       {
         "id": "annotation-toggle",
-        "elapsedMs": 158.86,
+        "elapsedMs": 35.531,
         "lastGraphUpdateMs": 0.3,
         "renderCountDelta": 1,
-        "drawCalls": 8
+        "renderedNodes": 10,
+        "renderedEdgeSegments": 10,
+        "renderedCells": 1,
+        "renderedNodeLabels": 0,
+        "renderedEdgeLabels": 0,
+        "renderedLabelLeaders": 0,
+        "drawCalls": 28
       },
       {
         "id": "bookmark-restore",
-        "elapsedMs": 798.185,
-        "lastGraphUpdateMs": 2,
-        "renderCountDelta": 25,
-        "drawCalls": 13
+        "elapsedMs": 154.209,
+        "lastGraphUpdateMs": 1.5,
+        "renderCountDelta": 4,
+        "renderedNodes": 3,
+        "renderedEdgeSegments": 10,
+        "renderedCells": 1,
+        "renderedNodeLabels": 1,
+        "renderedEdgeLabels": 10,
+        "renderedLabelLeaders": 10,
+        "drawCalls": 22
       },
       {
         "id": "progressive-quotient-load",
-        "elapsedMs": 664.624,
+        "elapsedMs": 121.264,
         "lastGraphUpdateMs": 0.7,
-        "renderCountDelta": 16,
-        "drawCalls": 12
+        "renderCountDelta": 4,
+        "renderedNodes": 3,
+        "renderedEdgeSegments": 4,
+        "renderedCells": 0,
+        "renderedNodeLabels": 3,
+        "renderedEdgeLabels": 1,
+        "renderedLabelLeaders": 0,
+        "drawCalls": 10
       },
       {
         "id": "import-repair",
-        "elapsedMs": 499.194,
+        "elapsedMs": 23.463,
         "lastGraphUpdateMs": 0.4,
-        "renderCountDelta": 11,
-        "drawCalls": 25
+        "renderCountDelta": 0,
+        "renderedNodes": 10,
+        "renderedEdgeSegments": 10,
+        "renderedCells": 1,
+        "renderedNodeLabels": 10,
+        "renderedEdgeLabels": 7,
+        "renderedLabelLeaders": 0,
+        "drawCalls": 28
       },
       {
         "id": "screenshot-export",
-        "elapsedMs": 410.263,
-        "lastGraphUpdateMs": 1.8,
-        "renderCountDelta": 10,
-        "drawCalls": 25
+        "elapsedMs": 174.057,
+        "lastGraphUpdateMs": 2,
+        "renderCountDelta": 5,
+        "renderedNodes": 10,
+        "renderedEdgeSegments": 10,
+        "renderedCells": 1,
+        "renderedNodeLabels": 10,
+        "renderedEdgeLabels": 10,
+        "renderedLabelLeaders": 0,
+        "drawCalls": 28
       },
       {
         "id": "idle-render-count",
         "elapsedMs": 0,
         "lastGraphUpdateMs": 0,
-        "renderCountDelta": 0,
+        "renderCountDelta": 1,
+        "renderedNodes": 0,
+        "renderedEdgeSegments": 0,
+        "renderedCells": 0,
+        "renderedNodeLabels": 0,
+        "renderedEdgeLabels": 0,
+        "renderedLabelLeaders": 0,
         "drawCalls": 0
       }
     ]
@@ -164,105 +352,266 @@
         "cases": [
           {
             "id": "I2_5:5",
-            "maxElapsedMs": 421,
-            "maxGraphUpdateMs": 9
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 9,
+            "featureFloors": {
+              "renderedNodes": 10,
+              "renderedEdgeSegments": 10,
+              "renderedCells": 1,
+              "renderedNodeLabels": 10,
+              "renderedEdgeLabels": 10,
+              "renderedLabelLeaders": 0
+            }
           },
           {
             "id": "A3:4",
-            "maxElapsedMs": 838,
-            "maxGraphUpdateMs": 8
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 20,
+              "renderedEdgeSegments": 27,
+              "renderedCells": 3,
+              "renderedNodeLabels": 20,
+              "renderedEdgeLabels": 10,
+              "renderedLabelLeaders": 0
+            }
           },
           {
             "id": "universal_rank3:4",
-            "maxElapsedMs": 777,
-            "maxGraphUpdateMs": 8
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 46,
+              "renderedEdgeSegments": 45,
+              "renderedCells": 0,
+              "renderedNodeLabels": 46,
+              "renderedEdgeLabels": 20,
+              "renderedLabelLeaders": 0
+            }
           },
           {
             "id": "compact_5_cube_gamma1:2",
-            "maxElapsedMs": 1597,
-            "maxGraphUpdateMs": 2
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 10,
+              "renderedEdgeSegments": 9,
+              "renderedCells": 0,
+              "renderedNodeLabels": 4,
+              "renderedEdgeLabels": 1,
+              "renderedLabelLeaders": 0
+            }
           },
           {
             "id": "compact_5_cube_gamma1:3",
-            "maxElapsedMs": 5157,
-            "maxGraphUpdateMs": 9
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 71,
+              "renderedEdgeSegments": 100,
+              "renderedCells": 30,
+              "renderedNodeLabels": 13,
+              "renderedEdgeLabels": 10,
+              "renderedLabelLeaders": 0
+            }
           }
         ],
         "interactions": [
           {
             "id": "label-toggle",
-            "maxElapsedMs": 504,
-            "maxGraphUpdateMs": 2
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeSegments": 1,
+              "renderedCells": 1
+            }
           },
           {
             "id": "rank-two-pair-focus",
-            "maxElapsedMs": 781,
-            "maxGraphUpdateMs": 2
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "ygamma-preset-switch",
-            "maxElapsedMs": 1316,
-            "maxGraphUpdateMs": 2
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "quotient-link-lens",
-            "maxElapsedMs": 772,
-            "maxGraphUpdateMs": 2
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeSegments": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "topology-generator-star",
-            "maxElapsedMs": 1086,
-            "maxGraphUpdateMs": 2
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1
+            }
           },
           {
             "id": "edge-star",
-            "maxElapsedMs": 2125,
-            "maxGraphUpdateMs": 4
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedEdgeSegments": 1,
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "cell-star",
-            "maxElapsedMs": 1291,
-            "maxGraphUpdateMs": 2
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "rank-k-lens",
-            "maxElapsedMs": 1187,
-            "maxGraphUpdateMs": 3
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1
+            }
           },
           {
             "id": "comparison-view",
-            "maxElapsedMs": 1125,
-            "maxGraphUpdateMs": 4
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeLabels": 1
+            }
+          },
+          {
+            "id": "ygamma-cutaway-switch",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1
+            }
+          },
+          {
+            "id": "ygamma-relation-star",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1,
+              "renderedLabelLeaders": 1
+            }
+          },
+          {
+            "id": "ygamma-leader-labels",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedEdgeLabels": 1,
+              "renderedLabelLeaders": 1
+            }
+          },
+          {
+            "id": "ygamma-relation-atlas",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1,
+              "renderedLabelLeaders": 1
+            }
+          },
+          {
+            "id": "ygamma-drawing-comparison",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 11,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1,
+              "renderedLabelLeaders": 1
+            }
+          },
+          {
+            "id": "ygamma-camera-path",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "annotation-toggle",
-            "maxElapsedMs": 278,
-            "maxGraphUpdateMs": 2
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeSegments": 1,
+              "renderedCells": 1
+            }
           },
           {
             "id": "bookmark-restore",
-            "maxElapsedMs": 1397,
-            "maxGraphUpdateMs": 4
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeSegments": 1,
+              "renderedCells": 1,
+              "renderedNodeLabels": 1,
+              "renderedEdgeLabels": 1,
+              "renderedLabelLeaders": 1
+            }
           },
           {
             "id": "progressive-quotient-load",
-            "maxElapsedMs": 1163,
-            "maxGraphUpdateMs": 2
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeSegments": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "import-repair",
-            "maxElapsedMs": 874,
-            "maxGraphUpdateMs": 2
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "screenshot-export",
-            "maxElapsedMs": 718,
-            "maxGraphUpdateMs": 4
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "idle-render-count",
-            "maxElapsedMs": 1,
-            "maxGraphUpdateMs": 2
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {}
           }
         ]
       }
@@ -274,105 +623,266 @@
         "cases": [
           {
             "id": "I2_5:5",
-            "maxElapsedMs": 241,
-            "maxGraphUpdateMs": 5
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 10,
+              "renderedEdgeSegments": 10,
+              "renderedCells": 1,
+              "renderedNodeLabels": 10,
+              "renderedEdgeLabels": 10,
+              "renderedLabelLeaders": 0
+            }
           },
           {
             "id": "A3:4",
-            "maxElapsedMs": 479,
-            "maxGraphUpdateMs": 4
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 20,
+              "renderedEdgeSegments": 27,
+              "renderedCells": 3,
+              "renderedNodeLabels": 20,
+              "renderedEdgeLabels": 10,
+              "renderedLabelLeaders": 0
+            }
           },
           {
             "id": "universal_rank3:4",
-            "maxElapsedMs": 444,
-            "maxGraphUpdateMs": 4
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 46,
+              "renderedEdgeSegments": 45,
+              "renderedCells": 0,
+              "renderedNodeLabels": 46,
+              "renderedEdgeLabels": 20,
+              "renderedLabelLeaders": 0
+            }
           },
           {
             "id": "compact_5_cube_gamma1:2",
-            "maxElapsedMs": 913,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 10,
+              "renderedEdgeSegments": 9,
+              "renderedCells": 0,
+              "renderedNodeLabels": 4,
+              "renderedEdgeLabels": 1,
+              "renderedLabelLeaders": 0
+            }
           },
           {
             "id": "compact_5_cube_gamma1:3",
-            "maxElapsedMs": 2947,
-            "maxGraphUpdateMs": 5
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 71,
+              "renderedEdgeSegments": 100,
+              "renderedCells": 30,
+              "renderedNodeLabels": 13,
+              "renderedEdgeLabels": 10,
+              "renderedLabelLeaders": 0
+            }
           }
         ],
         "interactions": [
           {
             "id": "label-toggle",
-            "maxElapsedMs": 288,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeSegments": 1,
+              "renderedCells": 1
+            }
           },
           {
             "id": "rank-two-pair-focus",
-            "maxElapsedMs": 446,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "ygamma-preset-switch",
-            "maxElapsedMs": 752,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "quotient-link-lens",
-            "maxElapsedMs": 441,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeSegments": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "topology-generator-star",
-            "maxElapsedMs": 621,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1
+            }
           },
           {
             "id": "edge-star",
-            "maxElapsedMs": 1214,
-            "maxGraphUpdateMs": 2
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedEdgeSegments": 1,
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "cell-star",
-            "maxElapsedMs": 738,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "rank-k-lens",
-            "maxElapsedMs": 678,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1
+            }
           },
           {
             "id": "comparison-view",
-            "maxElapsedMs": 643,
-            "maxGraphUpdateMs": 2
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeLabels": 1
+            }
+          },
+          {
+            "id": "ygamma-cutaway-switch",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1
+            }
+          },
+          {
+            "id": "ygamma-relation-star",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1,
+              "renderedLabelLeaders": 1
+            }
+          },
+          {
+            "id": "ygamma-leader-labels",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedEdgeLabels": 1,
+              "renderedLabelLeaders": 1
+            }
+          },
+          {
+            "id": "ygamma-relation-atlas",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1,
+              "renderedLabelLeaders": 1
+            }
+          },
+          {
+            "id": "ygamma-drawing-comparison",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1,
+              "renderedLabelLeaders": 1
+            }
+          },
+          {
+            "id": "ygamma-camera-path",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "annotation-toggle",
-            "maxElapsedMs": 159,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeSegments": 1,
+              "renderedCells": 1
+            }
           },
           {
             "id": "bookmark-restore",
-            "maxElapsedMs": 798,
-            "maxGraphUpdateMs": 2
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeSegments": 1,
+              "renderedCells": 1,
+              "renderedNodeLabels": 1,
+              "renderedEdgeLabels": 1,
+              "renderedLabelLeaders": 1
+            }
           },
           {
             "id": "progressive-quotient-load",
-            "maxElapsedMs": 665,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeSegments": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "import-repair",
-            "maxElapsedMs": 499,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "screenshot-export",
-            "maxElapsedMs": 410,
-            "maxGraphUpdateMs": 2
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "idle-render-count",
-            "maxElapsedMs": 1,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {}
           }
         ]
       }
@@ -384,105 +894,266 @@
         "cases": [
           {
             "id": "I2_5:5",
-            "maxElapsedMs": 168,
-            "maxGraphUpdateMs": 4
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 10,
+              "renderedEdgeSegments": 10,
+              "renderedCells": 1,
+              "renderedNodeLabels": 10,
+              "renderedEdgeLabels": 10,
+              "renderedLabelLeaders": 0
+            }
           },
           {
             "id": "A3:4",
-            "maxElapsedMs": 335,
-            "maxGraphUpdateMs": 3
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 20,
+              "renderedEdgeSegments": 27,
+              "renderedCells": 3,
+              "renderedNodeLabels": 20,
+              "renderedEdgeLabels": 10,
+              "renderedLabelLeaders": 0
+            }
           },
           {
             "id": "universal_rank3:4",
-            "maxElapsedMs": 311,
-            "maxGraphUpdateMs": 3
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 46,
+              "renderedEdgeSegments": 45,
+              "renderedCells": 0,
+              "renderedNodeLabels": 46,
+              "renderedEdgeLabels": 20,
+              "renderedLabelLeaders": 0
+            }
           },
           {
             "id": "compact_5_cube_gamma1:2",
-            "maxElapsedMs": 639,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 10,
+              "renderedEdgeSegments": 9,
+              "renderedCells": 0,
+              "renderedNodeLabels": 4,
+              "renderedEdgeLabels": 1,
+              "renderedLabelLeaders": 0
+            }
           },
           {
             "id": "compact_5_cube_gamma1:3",
-            "maxElapsedMs": 2063,
-            "maxGraphUpdateMs": 4
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 71,
+              "renderedEdgeSegments": 100,
+              "renderedCells": 30,
+              "renderedNodeLabels": 13,
+              "renderedEdgeLabels": 10,
+              "renderedLabelLeaders": 0
+            }
           }
         ],
         "interactions": [
           {
             "id": "label-toggle",
-            "maxElapsedMs": 201,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeSegments": 1,
+              "renderedCells": 1
+            }
           },
           {
             "id": "rank-two-pair-focus",
-            "maxElapsedMs": 312,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "ygamma-preset-switch",
-            "maxElapsedMs": 526,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "quotient-link-lens",
-            "maxElapsedMs": 309,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeSegments": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "topology-generator-star",
-            "maxElapsedMs": 434,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1
+            }
           },
           {
             "id": "edge-star",
-            "maxElapsedMs": 850,
-            "maxGraphUpdateMs": 2
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedEdgeSegments": 1,
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "cell-star",
-            "maxElapsedMs": 516,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "rank-k-lens",
-            "maxElapsedMs": 475,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1
+            }
           },
           {
             "id": "comparison-view",
-            "maxElapsedMs": 450,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeLabels": 1
+            }
+          },
+          {
+            "id": "ygamma-cutaway-switch",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1
+            }
+          },
+          {
+            "id": "ygamma-relation-star",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1,
+              "renderedLabelLeaders": 1
+            }
+          },
+          {
+            "id": "ygamma-leader-labels",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedEdgeLabels": 1,
+              "renderedLabelLeaders": 1
+            }
+          },
+          {
+            "id": "ygamma-relation-atlas",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1,
+              "renderedLabelLeaders": 1
+            }
+          },
+          {
+            "id": "ygamma-drawing-comparison",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1,
+              "renderedLabelLeaders": 1
+            }
+          },
+          {
+            "id": "ygamma-camera-path",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedCells": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "annotation-toggle",
-            "maxElapsedMs": 111,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeSegments": 1,
+              "renderedCells": 1
+            }
           },
           {
             "id": "bookmark-restore",
-            "maxElapsedMs": 559,
-            "maxGraphUpdateMs": 2
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeSegments": 1,
+              "renderedCells": 1,
+              "renderedNodeLabels": 1,
+              "renderedEdgeLabels": 1,
+              "renderedLabelLeaders": 1
+            }
           },
           {
             "id": "progressive-quotient-load",
-            "maxElapsedMs": 465,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeSegments": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "import-repair",
-            "maxElapsedMs": 349,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "screenshot-export",
-            "maxElapsedMs": 287,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 1,
+              "renderedEdgeLabels": 1
+            }
           },
           {
             "id": "idle-render-count",
-            "maxElapsedMs": 1,
-            "maxGraphUpdateMs": 1
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {}
           }
         ]
       }

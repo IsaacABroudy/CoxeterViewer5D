@@ -6,6 +6,8 @@ import process from "node:process";
 const DEFAULT_TIMED_BASELINE = "scripts/benchmarks/timed-browser-v1.json";
 const DEFAULT_OUTPUT = "scripts/benchmarks/machine-baselines-v1.json";
 const checkedAt = "1970-01-01T00:00:00.000Z";
+const minElapsedBudgetMs = 1000;
+const minGraphUpdateBudgetMs = 8;
 
 const machineClasses = {
   "ci-linux-standard": {
@@ -29,12 +31,51 @@ const machineClasses = {
     graphUpdateScale: 0.8,
   },
 };
+const interactionFeatureFloorOverrides = new Map([
+  ["rank-two-pair-focus", { renderedCells: 1, renderedEdgeLabels: 1 }],
+  ["ygamma-preset-switch", { renderedCells: 1, renderedEdgeLabels: 1 }],
+  [
+    "quotient-link-lens",
+    { renderedNodes: 1, renderedEdgeSegments: 1, renderedEdgeLabels: 1 },
+  ],
+  ["topology-generator-star", { renderedCells: 1 }],
+  [
+    "edge-star",
+    { renderedEdgeSegments: 1, renderedCells: 1, renderedEdgeLabels: 1 },
+  ],
+  ["cell-star", { renderedCells: 1, renderedEdgeLabels: 1 }],
+  ["rank-k-lens", { renderedCells: 1 }],
+  ["comparison-view", { renderedNodes: 1, renderedEdgeLabels: 1 }],
+  ["ygamma-cutaway-switch", { renderedCells: 1, renderedEdgeLabels: 1 }],
+  [
+    "ygamma-relation-star",
+    { renderedCells: 1, renderedEdgeLabels: 1, renderedLabelLeaders: 1 },
+  ],
+  ["ygamma-leader-labels", { renderedEdgeLabels: 1, renderedLabelLeaders: 1 }],
+  [
+    "ygamma-relation-atlas",
+    { renderedCells: 1, renderedEdgeLabels: 1, renderedLabelLeaders: 1 },
+  ],
+  [
+    "ygamma-drawing-comparison",
+    { renderedCells: 1, renderedEdgeLabels: 1, renderedLabelLeaders: 1 },
+  ],
+  ["ygamma-camera-path", { renderedCells: 1, renderedEdgeLabels: 1 }],
+  [
+    "progressive-quotient-load",
+    { renderedNodes: 1, renderedEdgeSegments: 1, renderedEdgeLabels: 1 },
+  ],
+  ["import-repair", { renderedNodes: 1, renderedEdgeLabels: 1 }],
+  ["screenshot-export", { renderedNodes: 1, renderedEdgeLabels: 1 }],
+]);
 
 function parseArgs(argv) {
   const args = {
     baseline: DEFAULT_TIMED_BASELINE,
     write: undefined,
     check: undefined,
+    current: undefined,
+    hardGates: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -49,6 +90,15 @@ function parseArgs(argv) {
     if (arg === "--write" || arg === "--check") {
       args[arg.slice(2)] = argv[index + 1] ?? DEFAULT_OUTPUT;
       index += 1;
+      continue;
+    }
+    if (arg === "--current") {
+      args.current = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    if (arg === "--hard-gates") {
+      args.hardGates = true;
       continue;
     }
     throw new Error(`unknown machine benchmark argument: ${arg}`);
@@ -85,7 +135,11 @@ function summarizeTimedBaseline(report) {
       elapsedMs: Number(entry.elapsedMs ?? 0),
       lastGraphUpdateMs: Number(entry.lastGraphUpdateMs ?? 0),
       renderedNodes: Number(entry.renderedNodes ?? 0),
+      renderedEdgeSegments: Number(entry.renderedEdgeSegments ?? 0),
       renderedCells: Number(entry.renderedCells ?? 0),
+      renderedNodeLabels: Number(entry.renderedNodeLabels ?? 0),
+      renderedEdgeLabels: Number(entry.renderedEdgeLabels ?? 0),
+      renderedLabelLeaders: Number(entry.renderedLabelLeaders ?? 0),
       drawCalls: Number(entry.drawCalls ?? 0),
     })),
     interactions: interactions.map((entry) => ({
@@ -93,6 +147,12 @@ function summarizeTimedBaseline(report) {
       elapsedMs: Number(entry.elapsedMs ?? 0),
       lastGraphUpdateMs: Number(entry.lastGraphUpdateMs ?? 0),
       renderCountDelta: Number(entry.renderCountDelta ?? 0),
+      renderedNodes: Number(entry.renderedNodes ?? 0),
+      renderedEdgeSegments: Number(entry.renderedEdgeSegments ?? 0),
+      renderedCells: Number(entry.renderedCells ?? 0),
+      renderedNodeLabels: Number(entry.renderedNodeLabels ?? 0),
+      renderedEdgeLabels: Number(entry.renderedEdgeLabels ?? 0),
+      renderedLabelLeaders: Number(entry.renderedLabelLeaders ?? 0),
       drawCalls: Number(entry.drawCalls ?? 0),
     })),
   };
@@ -100,22 +160,59 @@ function summarizeTimedBaseline(report) {
 
 function scaledBudgets(summary, scale) {
   const round = (value) => Math.max(1, Math.round(value));
+  const elapsedBudget = (value) =>
+    Math.max(minElapsedBudgetMs, round(value * scale.elapsedScale));
+  const graphBudget = (value) =>
+    Math.max(
+      minGraphUpdateBudgetMs,
+      round(Math.max(value, 1) * scale.graphUpdateScale),
+    );
   return {
     cases: summary.cases.map((entry) => ({
       id: entry.id,
-      maxElapsedMs: round(entry.elapsedMs * scale.elapsedScale),
-      maxGraphUpdateMs: round(
-        Math.max(entry.lastGraphUpdateMs, 1) * scale.graphUpdateScale,
-      ),
+      maxElapsedMs: elapsedBudget(entry.elapsedMs),
+      maxGraphUpdateMs: graphBudget(entry.lastGraphUpdateMs),
+      featureFloors: featureFloors(entry),
     })),
     interactions: summary.interactions.map((entry) => ({
       id: entry.id,
-      maxElapsedMs: round(entry.elapsedMs * scale.elapsedScale),
-      maxGraphUpdateMs: round(
-        Math.max(entry.lastGraphUpdateMs, 1) * scale.graphUpdateScale,
-      ),
+      maxElapsedMs: elapsedBudget(entry.elapsedMs),
+      maxGraphUpdateMs: graphBudget(entry.lastGraphUpdateMs),
+      featureFloors: interactionFeatureFloors(entry),
     })),
   };
+}
+
+function featureFloors(entry) {
+  return {
+    renderedNodes: entry.renderedNodes,
+    renderedEdgeSegments: entry.renderedEdgeSegments,
+    renderedCells: entry.renderedCells,
+    renderedNodeLabels: entry.renderedNodeLabels,
+    renderedEdgeLabels: entry.renderedEdgeLabels,
+    renderedLabelLeaders: entry.renderedLabelLeaders,
+  };
+}
+
+function interactionFeatureFloors(entry) {
+  const explicit = interactionFeatureFloorOverrides.get(entry.id);
+  if (explicit) {
+    return explicit;
+  }
+  const floor = {};
+  for (const field of [
+    "renderedNodes",
+    "renderedEdgeSegments",
+    "renderedCells",
+    "renderedNodeLabels",
+    "renderedEdgeLabels",
+    "renderedLabelLeaders",
+  ]) {
+    if (Number(entry[field] ?? 0) > 0) {
+      floor[field] = 1;
+    }
+  }
+  return floor;
 }
 
 function buildMachineBaseline(timedReport) {
@@ -167,6 +264,13 @@ if (args.check) {
     throw new Error(`${args.check} is missing.`);
   }
   assertCloseEnough(readJson(args.check), report, args.check);
+  if (args.current && args.hardGates) {
+    const current = summarizeTimedBaseline(readJson(args.current));
+    const failures = hardGateFailures(readJson(args.check), current);
+    if (failures.length > 0) {
+      throw new Error(`machine hard gates failed: ${failures.join("; ")}`);
+    }
+  }
   process.stdout.write(
     stableJson({ ok: true, status: "passed", path: args.check }),
   );
@@ -174,3 +278,59 @@ if (args.check) {
 }
 
 process.stdout.write(stableJson(report));
+
+function hardGateFailures(baseline, currentSummary) {
+  const currentCases = new Map(
+    currentSummary.cases.map((entry) => [entry.id, entry]),
+  );
+  const currentInteractions = new Map(
+    currentSummary.interactions.map((entry) => [entry.id, entry]),
+  );
+  const failures = [];
+  for (const [machineId, machine] of Object.entries(
+    baseline.machineClasses ?? {},
+  )) {
+    if (!machine.hardGate) {
+      continue;
+    }
+    for (const budget of machine.budgets?.cases ?? []) {
+      compareEntry(
+        failures,
+        `${machineId} case ${budget.id}`,
+        currentCases.get(budget.id),
+        budget,
+      );
+    }
+    for (const budget of machine.budgets?.interactions ?? []) {
+      compareEntry(
+        failures,
+        `${machineId} interaction ${budget.id}`,
+        currentInteractions.get(budget.id),
+        budget,
+      );
+    }
+  }
+  return failures;
+}
+
+function compareEntry(failures, label, current, budget) {
+  if (!current) {
+    failures.push(`${label} missing`);
+    return;
+  }
+  if (current.elapsedMs > budget.maxElapsedMs) {
+    failures.push(
+      `${label} elapsed ${current.elapsedMs}ms > ${budget.maxElapsedMs}ms`,
+    );
+  }
+  if (current.lastGraphUpdateMs > budget.maxGraphUpdateMs) {
+    failures.push(
+      `${label} graph update ${current.lastGraphUpdateMs}ms > ${budget.maxGraphUpdateMs}ms`,
+    );
+  }
+  for (const [field, floor] of Object.entries(budget.featureFloors ?? {})) {
+    if (Number(current[field] ?? 0) < Number(floor ?? 0)) {
+      failures.push(`${label} ${field} ${current[field] ?? 0} < ${floor}`);
+    }
+  }
+}

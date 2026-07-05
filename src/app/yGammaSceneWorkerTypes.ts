@@ -14,7 +14,8 @@ export interface BuildYGammaSceneRequest {
   type: "build-ygamma-scene";
   requestId: number;
   sceneVersion: string;
-  atlas: YGammaCellAtlas;
+  atlasVersion: string;
+  atlas?: YGammaCellAtlas;
   options: YGamma2SkeletonSceneOptions;
 }
 

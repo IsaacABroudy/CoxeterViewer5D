@@ -236,6 +236,14 @@ export class GenerationClient {
     worker.onmessage = (event: MessageEvent<GenerationWorkerResponse>) => {
       void this.handleWorkerMessage(event.data);
     };
+    worker.onmessageerror = () => {
+      this.rejectAll("Generation worker could not deserialize a message.");
+      worker.terminate();
+      if (this.worker === worker) {
+        this.worker = undefined;
+      }
+      this.postedSystemHashes.clear();
+    };
     worker.onerror = (event) => {
       this.rejectAll(event.message || "Generation worker failed.");
       worker.terminate();

@@ -17,11 +17,13 @@ import {
   type PersistentCacheKey,
 } from "../src/app/persistentCache";
 import {
+  buildSceneRevisionSet,
   generationCacheKey,
   sceneAppearanceVersion,
   sceneStructureVersion,
   stableValueHash,
 } from "../src/app/stableHash";
+import { buildSceneTopologyIndex } from "../src/app/sceneTopologyIndex";
 import { buildYGammaCellAtlas } from "../src/app/yGammaAtlas";
 import { buildYGamma2SkeletonScene } from "../src/app/yGammaScene";
 import { createYGammaSceneClient } from "../src/app/yGammaSceneClient";
@@ -120,6 +122,259 @@ describe("performance data-pipeline helpers", () => {
         topologyMode: false,
       }),
     );
+  });
+
+  it("separates scene topology, layout, cell geometry, labels, and appearance revisions", () => {
+    const base = buildSceneRevisionSet({
+      nodes: [
+        { id: "e", length: 0, position: [0, 0, 0], label: "e" },
+        { id: "s0", length: 1, position: [1, 0, 0], label: "s0" },
+      ],
+      edges: [
+        {
+          id: "e--0--s0",
+          source: "e",
+          target: "s0",
+          generator: 0,
+          compactLabel: "s0",
+        },
+      ],
+      cells: [
+        {
+          id: "c:0-1",
+          generatorPair: [0, 1],
+          boundaryNodeIds: ["e", "s0"],
+        },
+      ],
+      cellGeometryParts: ["separation:50"],
+      appearanceParts: ["selected:e"],
+      labelParts: ["labels:on"],
+    });
+    const moved = buildSceneRevisionSet({
+      nodes: [
+        { id: "e", length: 0, position: [0, 0, 0], label: "e" },
+        { id: "s0", length: 1, position: [2, 0, 0], label: "s0" },
+      ],
+      edges: [
+        {
+          id: "e--0--s0",
+          source: "e",
+          target: "s0",
+          generator: 0,
+          compactLabel: "s0",
+        },
+      ],
+      cells: [
+        {
+          id: "c:0-1",
+          generatorPair: [0, 1],
+          boundaryNodeIds: ["e", "s0"],
+        },
+      ],
+      cellGeometryParts: ["separation:50"],
+      appearanceParts: ["selected:e"],
+      labelParts: ["labels:on"],
+    });
+    const relabeled = buildSceneRevisionSet({
+      nodes: [
+        { id: "e", length: 0, position: [0, 0, 0], label: "identity" },
+        { id: "s0", length: 1, position: [1, 0, 0], label: "s0" },
+      ],
+      edges: [
+        {
+          id: "e--0--s0",
+          source: "e",
+          target: "s0",
+          generator: 0,
+          compactLabel: "g0",
+        },
+      ],
+      cells: [
+        {
+          id: "c:0-1",
+          generatorPair: [0, 1],
+          boundaryNodeIds: ["e", "s0"],
+        },
+      ],
+      cellGeometryParts: ["separation:50"],
+      appearanceParts: ["selected:e"],
+      labelParts: ["labels:on"],
+    });
+    const separated = buildSceneRevisionSet({
+      nodes: [
+        { id: "e", length: 0, position: [0, 0, 0], label: "e" },
+        { id: "s0", length: 1, position: [1, 0, 0], label: "s0" },
+      ],
+      edges: [
+        {
+          id: "e--0--s0",
+          source: "e",
+          target: "s0",
+          generator: 0,
+          compactLabel: "s0",
+        },
+      ],
+      cells: [
+        {
+          id: "c:0-1",
+          generatorPair: [0, 1],
+          boundaryNodeIds: ["e", "s0"],
+        },
+      ],
+      cellGeometryParts: ["separation:100"],
+      appearanceParts: ["selected:e"],
+      labelParts: ["labels:on"],
+    });
+    const activePairChanged = buildSceneRevisionSet({
+      nodes: [
+        { id: "e", length: 0, position: [0, 0, 0], label: "e" },
+        { id: "s0", length: 1, position: [1, 0, 0], label: "s0" },
+      ],
+      edges: [
+        {
+          id: "e--0--s0",
+          source: "e",
+          target: "s0",
+          generator: 0,
+          compactLabel: "s0",
+        },
+      ],
+      cells: [
+        {
+          id: "c:0-1",
+          generatorPair: [0, 1],
+          boundaryNodeIds: ["e", "s0"],
+        },
+      ],
+      cellGeometryParts: ["separation:50", "active-pair:0-1"],
+      appearanceParts: ["selected:e"],
+      labelParts: ["labels:on"],
+    });
+    const edgeRenderChanged = buildSceneRevisionSet({
+      nodes: [
+        { id: "e", length: 0, position: [0, 0, 0], label: "e" },
+        { id: "s0", length: 1, position: [1, 0, 0], label: "s0" },
+      ],
+      edges: [
+        {
+          id: "e--0--s0",
+          source: "e",
+          target: "s0",
+          generator: 0,
+          compactLabel: "s0",
+          colorHint: "#ff0000",
+          ghost: true,
+          isRelationBoundary: true,
+        },
+      ],
+      cells: [
+        {
+          id: "c:0-1",
+          generatorPair: [0, 1],
+          boundaryNodeIds: ["e", "s0"],
+        },
+      ],
+      cellGeometryParts: ["separation:50"],
+      appearanceParts: ["selected:e"],
+      labelParts: ["labels:on"],
+    });
+    const gammaStateHighlightChanged = buildSceneRevisionSet({
+      nodes: [
+        {
+          id: "e",
+          length: 0,
+          position: [0, 0, 0],
+          label: "e",
+          colorHint: "#2dd4bf",
+          nodeScale: 1.9,
+          stateRole: "in-state",
+          alwaysLabel: true,
+        },
+        {
+          id: "s0",
+          length: 1,
+          position: [1, 0, 0],
+          label: "s0",
+          colorHint: "#334155",
+          nodeScale: 0.62,
+          stateRole: "out-of-state",
+          alwaysLabel: true,
+        },
+      ],
+      edges: [
+        {
+          id: "e--0--s0",
+          source: "e",
+          target: "s0",
+          generator: 0,
+          compactLabel: "s0",
+        },
+      ],
+      cells: [
+        {
+          id: "c:0-1",
+          generatorPair: [0, 1],
+          boundaryNodeIds: ["e", "s0"],
+        },
+      ],
+      cellGeometryParts: ["separation:50"],
+      appearanceParts: ["selected:e"],
+      labelParts: ["labels:on"],
+    });
+
+    expect(moved.topologyVersion).toBe(base.topologyVersion);
+    expect(moved.layoutVersion).not.toBe(base.layoutVersion);
+    expect(relabeled.structureVersion).toBe(base.structureVersion);
+    expect(relabeled.labelVersion).not.toBe(base.labelVersion);
+    expect(separated.topologyVersion).toBe(base.topologyVersion);
+    expect(separated.cellGeometryVersion).not.toBe(base.cellGeometryVersion);
+    expect(activePairChanged.cellGeometryVersion).not.toBe(
+      base.cellGeometryVersion,
+    );
+    expect(edgeRenderChanged.topologyVersion).not.toBe(base.topologyVersion);
+    expect(gammaStateHighlightChanged.layoutVersion).not.toBe(
+      base.layoutVersion,
+    );
+    expect(gammaStateHighlightChanged.appearanceVersion).not.toBe(
+      base.appearanceVersion,
+    );
+    expect(gammaStateHighlightChanged.labelVersion).not.toBe(base.labelVersion);
+  });
+
+  it("indexes scene topology without changing incidence", () => {
+    const index = buildSceneTopologyIndex({
+      nodes: [
+        { id: "e", length: 0 },
+        { id: "s0", length: 1 },
+        { id: "s1", length: 1 },
+      ],
+      edges: [
+        { id: "e--0--s0", source: "e", target: "s0", generator: 0 },
+        { id: "e--1--s1", source: "e", target: "s1", generator: 1 },
+      ],
+      cells: [
+        {
+          id: "cell",
+          generatorPair: [0, 1],
+          boundaryNodeIds: ["e", "s0", "s1"],
+        },
+      ],
+    });
+
+    expect(
+      index.edgesByNode
+        .get("e")
+        ?.map((edge) => edge.id)
+        .sort(),
+    ).toEqual(["e--0--s0", "e--1--s1"]);
+    expect(index.edgesByGenerator.get(0)?.[0]?.id).toBe("e--0--s0");
+    expect(index.cellsByPair.get("0-1")?.[0]?.id).toBe("cell");
+    expect(index.cellsByNode.get("s0")?.[0]?.id).toBe("cell");
+    expect(index.boundaryEdgeKeysByCell.get("cell")).toEqual([
+      "e--s0",
+      "s0--s1",
+      "e--s1",
+    ]);
   });
 
   it("registers bounded cache metadata for topology, quotient, comparison, and benchmark caches", () => {
@@ -267,6 +522,39 @@ describe("performance data-pipeline helpers", () => {
     expect(result.scene.nodes.length).toBe(expected.nodes.length);
     expect(result.scene.edges.length).toBe(expected.edges.length);
     expect(result.scene.cells.length).toBe(expected.cells.length);
+    client.dispose();
+  });
+
+  it("invalidates Y_Gamma scene cache when relation data changes under stable ids", () => {
+    const system = parseCoxeterSystemInput(A3);
+    const atlas = buildYGammaCellAtlas(system);
+    const client = createYGammaSceneClient({
+      canUseWorker: false,
+      persistentCache: new ImmediateMemoryPersistentCache(),
+    });
+    const baseVersion = client.sceneVersionFor({
+      atlas,
+      options: { faceMode: "all", includeRankThreeCells: true },
+    });
+    const changedAtlas = {
+      ...atlas,
+      rankTwoCells: atlas.rankTwoCells.map((cell, index) =>
+        index === 0
+          ? {
+              ...cell,
+              m: (cell.m ?? 3) + 1,
+              boundaryLength: (cell.boundaryLength ?? 6) + 2,
+              attachingWord: [...cell.attachingWord, "changed"],
+            }
+          : cell,
+      ),
+    };
+    const changedVersion = client.sceneVersionFor({
+      atlas: changedAtlas,
+      options: { faceMode: "all", includeRankThreeCells: true },
+    });
+
+    expect(changedVersion).not.toBe(baseVersion);
     client.dispose();
   });
 

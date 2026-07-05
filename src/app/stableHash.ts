@@ -6,6 +6,29 @@ import type {
 import type { SceneCell, SceneEdge, SceneNode } from "../render/SceneView";
 import type { YGamma2SkeletonSceneOptions } from "./yGammaScene";
 
+export interface SceneRevisionSet {
+  topologyVersion: string;
+  layoutVersion: string;
+  cellGeometryVersion: string;
+  appearanceVersion: string;
+  labelVersion: string;
+  pickingVersion: string;
+  cameraVersion: string;
+  structureVersion: string;
+  renderAppearanceVersion: string;
+}
+
+export interface SceneRevisionInput {
+  nodes: readonly SceneNode[];
+  edges: readonly SceneEdge[];
+  cells: readonly SceneCell[];
+  cellGeometryParts?: readonly string[];
+  appearanceParts?: readonly string[];
+  labelParts?: readonly string[];
+  pickingParts?: readonly string[];
+  cameraParts?: readonly string[];
+}
+
 /**
  * Small deterministic FNV-1a hash for cache keys and renderer versions.
  *
@@ -21,6 +44,20 @@ export function stableHashString(input: string): string {
   return (hash >>> 0).toString(36).padStart(7, "0");
 }
 
+export function stableLongHashString(input: string): string {
+  const seeds = [0x811c9dc5, 0x9e3779b9, 0x85ebca6b, 0xc2b2ae35];
+  return seeds
+    .map((seed, seedIndex) => {
+      let hash = seed >>> 0;
+      for (let index = 0; index < input.length; index += 1) {
+        hash ^= input.charCodeAt(index) + seedIndex * 17;
+        hash = Math.imul(hash, 0x01000193);
+      }
+      return (hash >>> 0).toString(16).padStart(8, "0");
+    })
+    .join("");
+}
+
 /**
  * Stable JSON-like serialization for app state that needs repeatable keys.
  */
@@ -32,13 +69,17 @@ export function stableValueHash(value: unknown): string {
   return stableHashString(stableValueString(value));
 }
 
+export function stableValueLongHash(value: unknown): string {
+  return stableLongHashString(stableValueString(value));
+}
+
 /**
  * Hashes only the Coxeter data that changes generated Cayley-ball structure.
  */
 export function hashCoxeterSystemForGeneration(
   system: CoxeterSystemInput,
 ): string {
-  return stableValueHash({
+  return stableValueLongHash({
     schemaVersion: system.schemaVersion,
     name: system.name,
     rank: system.rank,
@@ -71,6 +112,7 @@ export function generationCacheKey(input: {
 }): string {
   return [
     "generated-ball",
+    "pipeline-v2",
     input.datasetId,
     hashCoxeterSystemForGeneration(input.system),
     input.options.radius,
@@ -85,17 +127,129 @@ export function generationCacheKey(input: {
  * Lightweight identity for memoizing derived layouts from an already-built ball.
  */
 export function generatedBallIdentity(ball: GeneratedCayleyBall): string {
-  return [
-    ball.systemName,
-    ball.rank,
-    ball.metadata.radius,
-    ball.metadata.requestedRadius,
-    ball.nodes.length,
-    ball.edges.length,
-    ball.twoCells.length,
-    ball.higherCells?.length ?? 0,
-    ball.metadata.outputHash ?? ball.metadata.inputHash ?? "",
-  ].join(":");
+  return stableValueLongHash({
+    systemName: ball.systemName,
+    rank: ball.rank,
+    radius: ball.metadata.radius,
+    requestedRadius: ball.metadata.requestedRadius,
+    nodeCount: ball.nodes.length,
+    edgeCount: ball.edges.length,
+    twoCellCount: ball.twoCells.length,
+    higherCellCount: ball.higherCells?.length ?? 0,
+    sourceHash: ball.metadata.outputHash ?? ball.metadata.inputHash,
+    fallbackTopology:
+      ball.metadata.outputHash || ball.metadata.inputHash
+        ? undefined
+        : {
+            nodes: ball.nodes.map((node) => [node.id, node.word, node.length]),
+            edges: ball.edges.map((edge) => [
+              edge.id,
+              edge.source,
+              edge.target,
+              edge.generator,
+            ]),
+            cells: ball.twoCells.map((cell) => [
+              cell.id,
+              cell.generatorPair,
+              cell.m,
+              cell.boundaryNodeIds,
+            ]),
+          },
+  });
+}
+
+/**
+ * Layered scene revisions let the renderer avoid treating every React render as
+ * a possible mesh rebuild. The layers are intentionally semantic: topology is
+ * incidence, layout is coordinates, cell geometry is drawing-only deformation,
+ * labels are text/sprite state, and appearance is material/highlight state.
+ */
+export function buildSceneRevisionSet(
+  input: SceneRevisionInput,
+): SceneRevisionSet {
+  const topologyVersion = sceneTopologyVersion(input);
+  const layoutVersion = sceneLayoutVersion(input);
+  const cellGeometryVersion = stableValueHash({
+    topologyVersion,
+    layoutVersion,
+    cells: input.cells.map((cell) => [
+      cell.id,
+      cell.localDistance,
+      cell.readabilityRole,
+      cell.isRelationBoundary === true ? 1 : 0,
+    ]),
+    parts: input.cellGeometryParts ?? [],
+  });
+  const appearanceVersion = stableValueHash({
+    nodes: input.nodes.map((node) => [
+      node.id,
+      node.ghost === true ? 1 : 0,
+      node.isRelationBoundary === true ? 1 : 0,
+      node.colorHint,
+      node.stateRole,
+    ]),
+    edges: input.edges.map((edge) => [
+      edge.id,
+      edge.ghost === true ? 1 : 0,
+      edge.emphasis,
+      edge.selectedHighlight,
+      edge.colorHint,
+    ]),
+    cells: input.cells.map((cell) => [cell.id, cell.readabilityRole]),
+    parts: input.appearanceParts ?? [],
+  });
+  const labelVersion = stableValueHash({
+    nodes: input.nodes.map((node) => [
+      node.id,
+      node.label,
+      node.compactLabel,
+      node.isRelationBoundary === true ? 1 : 0,
+      node.alwaysLabel === true ? 1 : 0,
+      node.labelPriority,
+      node.stateRole,
+    ]),
+    edges: input.edges.map((edge) => [
+      edge.id,
+      edge.compactLabel,
+      edge.alwaysLabel === true ? 1 : 0,
+      edge.labelAnchor,
+      edge.labelPosition,
+      edge.labelLeader === true ? 1 : 0,
+      edge.labelPriority,
+      edge.suppressSemanticLabel === true ? 1 : 0,
+    ]),
+    parts: input.labelParts ?? [],
+  });
+  const pickingVersion = stableValueHash({
+    topologyVersion,
+    cellGeometryVersion,
+    parts: input.pickingParts ?? [],
+  });
+  const cameraVersion = stableValueHash({
+    layoutVersion,
+    parts: input.cameraParts ?? [],
+  });
+
+  return {
+    topologyVersion,
+    layoutVersion,
+    cellGeometryVersion,
+    appearanceVersion,
+    labelVersion,
+    pickingVersion,
+    cameraVersion,
+    structureVersion: stableValueHash({
+      topologyVersion,
+      layoutVersion,
+      cellGeometryVersion,
+      pickingVersion,
+    }),
+    renderAppearanceVersion: stableValueHash({
+      appearanceVersion,
+      labelVersion,
+      cameraVersion,
+    }),
+  };
 }
 
 /**
@@ -109,27 +263,7 @@ export function sceneStructureVersion(input: {
   edges: readonly SceneEdge[];
   cells: readonly SceneCell[];
 }): string {
-  return stableValueHash({
-    nodes: input.nodes.map((node) => [
-      node.id,
-      node.position,
-      node.hidden === true ? 1 : 0,
-    ]),
-    edges: input.edges.map((edge) => [
-      edge.id,
-      edge.source,
-      edge.target,
-      edge.generator,
-      edge.directed === true ? 1 : 0,
-    ]),
-    cells: input.cells.map((cell) => [
-      cell.id,
-      cell.generatorPair,
-      cell.boundaryNodeIds,
-      cell.dimension,
-      cell.sourceCellId,
-    ]),
-  });
+  return buildSceneRevisionSet(input).structureVersion;
 }
 
 /**
@@ -165,11 +299,73 @@ export function yGammaSceneVersion(input: {
 export function yGammaAtlasVersion(input: {
   systemName: string;
   generatorCount: number;
-  rankTwoCellIds: readonly string[];
-  higherCellIds: readonly string[];
+  generatorCells: readonly {
+    id: string;
+    generators: readonly number[];
+    generatorLabels: readonly string[];
+    label: string;
+    attachingWord: readonly string[];
+  }[];
+  rankTwoCells: readonly {
+    id: string;
+    generators: readonly number[];
+    generatorLabels: readonly string[];
+    m?: number;
+    boundaryLength?: number;
+    attachingWord: readonly string[];
+  }[];
+  higherCells: readonly {
+    id: string;
+    generators: readonly number[];
+    generatorLabels: readonly string[];
+    rank: number;
+    dimension: number;
+    label: string;
+    rankTwoFaceIds: readonly string[];
+    subgroupOrder?: number;
+  }[];
   warnings: readonly string[];
 }): string {
-  return stableValueHash(input);
+  return stableValueLongHash(input);
+}
+
+function sceneTopologyVersion(input: SceneRevisionInput): string {
+  return stableValueHash({
+    nodes: input.nodes.map((node) => [node.id, node.length]),
+    edges: input.edges.map((edge) => [
+      edge.id,
+      edge.source,
+      edge.target,
+      edge.generator,
+      edge.directed === true ? 1 : 0,
+      edge.ghost === true ? 1 : 0,
+      edge.colorHint,
+      edge.isRelationBoundary === true ? 1 : 0,
+      edge.alwaysLabel === true ? 1 : 0,
+      edge.labelPriority,
+      edge.suppressSemanticLabel === true ? 1 : 0,
+    ]),
+    cells: input.cells.map((cell) => [
+      cell.id,
+      cell.generatorPair,
+      cell.boundaryNodeIds,
+      cell.dimension,
+      cell.sourceCellId,
+    ]),
+  });
+}
+
+function sceneLayoutVersion(input: SceneRevisionInput): string {
+  return stableValueHash({
+    nodes: input.nodes.map((node) => [
+      node.id,
+      node.position,
+      node.hidden === true ? 1 : 0,
+      node.localDistance,
+      node.nodeScale,
+      node.stateRole,
+    ]),
+  });
 }
 
 function stringifyStable(value: unknown, seen: WeakSet<object>): string {

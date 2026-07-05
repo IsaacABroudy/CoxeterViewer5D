@@ -111,6 +111,27 @@ const COMMANDS = [
       "scripts/benchmarks/catalogue-static-v1.json",
     ],
   ],
+  [
+    "node",
+    [
+      "scripts/benchmark_timed.mjs",
+      "--check",
+      "scripts/benchmarks/timed-browser-v1.json",
+      "--report",
+      ".benchmark-current/timed-browser-v1.json",
+    ],
+  ],
+  [
+    "node",
+    [
+      "scripts/benchmark_machine.mjs",
+      "--check",
+      "scripts/benchmarks/machine-baselines-v1.json",
+      "--current",
+      ".benchmark-current/timed-browser-v1.json",
+      "--hard-gates",
+    ],
+  ],
 ];
 
 function run(command, args) {

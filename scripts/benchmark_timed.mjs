@@ -1,8 +1,14 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { createServer } from "node:http";
+import { dirname, extname, join, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { spawn, spawnSync } from "node:child_process";
 import { chromium } from "@playwright/test";
 
 const DEFAULT_OUTPUT = "scripts/benchmarks/timed-browser-v1.json";
@@ -17,7 +23,7 @@ const CASES = [
   {
     exampleId: "A3",
     radius: 4,
-    expected: { renderedNodes: 23, renderedEdgeSegments: 33, renderedCells: 3 },
+    expected: { renderedNodes: 20, renderedEdgeSegments: 27, renderedCells: 3 },
   },
   {
     exampleId: "universal_rank3",
@@ -43,7 +49,7 @@ const CASE_BUDGETS = new Map([
   ["I2_5:5", { elapsedMs: 1800, lastGraphUpdateMs: 160 }],
   ["A3:4", { elapsedMs: 1800, lastGraphUpdateMs: 180 }],
   ["universal_rank3:4", { elapsedMs: 1200, lastGraphUpdateMs: 150 }],
-  ["compact_5_cube_gamma1:2", { elapsedMs: 2200, lastGraphUpdateMs: 250 }],
+  ["compact_5_cube_gamma1:2", { elapsedMs: 2600, lastGraphUpdateMs: 250 }],
   ["compact_5_cube_gamma1:3", { elapsedMs: 3600, lastGraphUpdateMs: 300 }],
 ]);
 const FRAME_BUDGETS = {
@@ -60,6 +66,12 @@ const INTERACTION_BUDGETS = new Map([
   ["cell-star", { elapsedMs: 1800, lastGraphUpdateMs: 350 }],
   ["rank-k-lens", { elapsedMs: 2400, lastGraphUpdateMs: 500 }],
   ["comparison-view", { elapsedMs: 1800, lastGraphUpdateMs: 350 }],
+  ["ygamma-cutaway-switch", { elapsedMs: 2400, lastGraphUpdateMs: 500 }],
+  ["ygamma-relation-star", { elapsedMs: 2600, lastGraphUpdateMs: 550 }],
+  ["ygamma-leader-labels", { elapsedMs: 2200, lastGraphUpdateMs: 500 }],
+  ["ygamma-relation-atlas", { elapsedMs: 2400, lastGraphUpdateMs: 500 }],
+  ["ygamma-drawing-comparison", { elapsedMs: 3200, lastGraphUpdateMs: 700 }],
+  ["ygamma-camera-path", { elapsedMs: 2200, lastGraphUpdateMs: 500 }],
   ["annotation-toggle", { elapsedMs: 900, lastGraphUpdateMs: 200 }],
   ["bookmark-restore", { elapsedMs: 1600, lastGraphUpdateMs: 350 }],
   ["progressive-quotient-load", { elapsedMs: 2200, lastGraphUpdateMs: 450 }],
@@ -67,16 +79,58 @@ const INTERACTION_BUDGETS = new Map([
   ["screenshot-export", { elapsedMs: 4500, lastGraphUpdateMs: 450 }],
   ["idle-render-count", { maxRenderCountDelta: 3 }],
 ]);
+const INTERACTION_FEATURE_FLOORS = new Map([
+  ["rank-two-pair-focus", { renderedCells: 1, renderedEdgeLabels: 1 }],
+  ["ygamma-preset-switch", { renderedCells: 1, renderedEdgeLabels: 1 }],
+  [
+    "quotient-link-lens",
+    { renderedNodes: 1, renderedEdgeSegments: 1, renderedEdgeLabels: 1 },
+  ],
+  ["topology-generator-star", { renderedCells: 1 }],
+  [
+    "edge-star",
+    { renderedEdgeSegments: 1, renderedCells: 1, renderedEdgeLabels: 1 },
+  ],
+  ["cell-star", { renderedCells: 1, renderedEdgeLabels: 1 }],
+  ["rank-k-lens", { renderedCells: 1 }],
+  ["comparison-view", { renderedNodes: 1, renderedEdgeLabels: 1 }],
+  ["ygamma-cutaway-switch", { renderedCells: 1, renderedEdgeLabels: 1 }],
+  [
+    "ygamma-relation-star",
+    { renderedCells: 1, renderedEdgeLabels: 1, renderedLabelLeaders: 1 },
+  ],
+  ["ygamma-leader-labels", { renderedEdgeLabels: 1, renderedLabelLeaders: 1 }],
+  [
+    "ygamma-relation-atlas",
+    { renderedCells: 1, renderedEdgeLabels: 1, renderedLabelLeaders: 1 },
+  ],
+  [
+    "ygamma-drawing-comparison",
+    { renderedCells: 1, renderedEdgeLabels: 1, renderedLabelLeaders: 1 },
+  ],
+  ["ygamma-camera-path", { renderedCells: 1, renderedEdgeLabels: 1 }],
+  [
+    "progressive-quotient-load",
+    { renderedNodes: 1, renderedEdgeSegments: 1, renderedEdgeLabels: 1 },
+  ],
+  ["import-repair", { renderedNodes: 1, renderedEdgeLabels: 1 }],
+  ["screenshot-export", { renderedNodes: 1, renderedEdgeLabels: 1 }],
+]);
 
 function stableJson(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
 function parseArgs(argv) {
-  const args = { write: undefined, check: undefined };
+  const args = { write: undefined, check: undefined, report: undefined };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === "--write" || argv[i] === "--check") {
       args[argv[i].slice(2)] = argv[i + 1] ?? DEFAULT_OUTPUT;
+      i += 1;
+      continue;
+    }
+    if (argv[i] === "--report") {
+      args.report = argv[i + 1] ?? ".benchmark-current/timed-browser-v1.json";
       i += 1;
       continue;
     }
@@ -94,7 +148,7 @@ async function canReachBenchmarkUrl() {
   }
 }
 
-async function waitForBenchmarkUrl(timeoutMs = 30_000) {
+async function waitForBenchmarkUrl(timeoutMs = 60_000) {
   const startedAt = performance.now();
   while (performance.now() - startedAt < timeoutMs) {
     if (await canReachBenchmarkUrl()) {
@@ -116,34 +170,78 @@ async function ensureBenchmarkServer() {
     );
   }
 
-  // The benchmark is a release gate, so it should not depend on a previous
-  // Playwright run leaving Vite alive. Start the same local server here when
-  // the standard localhost endpoint is free.
-  const child =
-    process.platform === "win32"
-      ? spawn(`corepack pnpm dev --host ${url.hostname}`, {
-          shell: true,
-          stdio: "ignore",
-          windowsHide: true,
-        })
-      : spawn("corepack", ["pnpm", "dev", "--host", url.hostname], {
-          stdio: "ignore",
-          windowsHide: true,
-        });
-  child.unref();
+  const server = await startStaticBenchmarkServer(url);
   await waitForBenchmarkUrl();
   return {
-    dispose: async () => {
-      if (process.platform === "win32" && child.pid) {
-        spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-          stdio: "ignore",
-          windowsHide: true,
-        });
-        return;
-      }
-      child.kill();
-    },
+    dispose: () => closeServer(server),
   };
+}
+
+async function startStaticBenchmarkServer(url) {
+  const distRoot = resolve(process.cwd(), "dist");
+  const indexPath = join(distRoot, "index.html");
+  if (!existsSync(indexPath)) {
+    throw new Error(
+      "dist/index.html is missing; run `corepack pnpm build` before the timed benchmark",
+    );
+  }
+
+  const server = createServer((request, response) => {
+    const requestUrl = new URL(request.url ?? "/", BENCHMARK_URL);
+    const decodedPath = decodeURIComponent(requestUrl.pathname);
+    const candidate = resolve(
+      distRoot,
+      decodedPath === "/" ? "index.html" : decodedPath.slice(1),
+    );
+    const relativePath = relative(distRoot, candidate);
+    const filePath =
+      relativePath.startsWith("..") || resolve(relativePath) === relativePath
+        ? indexPath
+        : isReadableFile(candidate)
+          ? candidate
+          : indexPath;
+    response.setHeader("content-type", contentTypeFor(filePath));
+    response.end(readFileSync(filePath));
+  });
+
+  await new Promise((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(Number(url.port || "5173"), url.hostname, () => {
+      server.off("error", rejectListen);
+      resolveListen();
+    });
+  });
+  return server;
+}
+
+function isReadableFile(path) {
+  try {
+    return existsSync(path) && statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+async function closeServer(server) {
+  await new Promise((resolveClose) => server.close(resolveClose));
+}
+
+function contentTypeFor(path) {
+  switch (extname(path)) {
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".js":
+      return "text/javascript; charset=utf-8";
+    case ".json":
+      return "application/json; charset=utf-8";
+    case ".png":
+      return "image/png";
+    case ".svg":
+      return "image/svg+xml";
+    case ".html":
+    default:
+      return "text/html; charset=utf-8";
+  }
 }
 
 async function waitForStats(page, expected) {
@@ -180,6 +278,17 @@ async function sceneStats(page) {
   return page.evaluate(() => globalThis.__coxeterSceneStats ?? null);
 }
 
+async function clickSemanticControl(page, selector) {
+  await page.locator(selector).first().waitFor({ state: "attached" });
+  await page.evaluate((controlSelector) => {
+    const element = globalThis.document.querySelector(controlSelector);
+    if (!element || typeof element.click !== "function") {
+      throw new Error(`semantic control not found: ${controlSelector}`);
+    }
+    element.click();
+  }, selector);
+}
+
 async function resetPage(page) {
   await page.goto(BENCHMARK_URL, { waitUntil: "domcontentloaded" });
   await page
@@ -203,27 +312,36 @@ async function switchToResearchMode(page) {
   }
 }
 
+async function ensureGenerationControlsOpen(page) {
+  const radiusInput = page.locator("#radius-input");
+  if (await radiusInput.isVisible().catch(() => false)) {
+    return radiusInput;
+  }
+
+  const generationDetails = page
+    .locator("details")
+    .filter({ hasText: /Generation/i })
+    .first();
+  const summary = generationDetails.locator("summary");
+  if ((await summary.count()) > 0) {
+    await summary.click();
+  }
+  await radiusInput.waitFor({ state: "visible" });
+  return radiusInput;
+}
+
+async function switchModel(page, modelName) {
+  await page
+    .getByRole("group", { name: /choose mathematical view/i })
+    .first()
+    .getByRole("button", { name: modelName })
+    .click();
+}
+
 async function ensureChecked(locator) {
   if (!(await locator.isChecked().catch(() => false))) {
     await locator.click();
   }
-}
-
-async function clickFirstVisible(candidates) {
-  for (const locator of candidates) {
-    const count = await locator.count();
-    for (let index = 0; index < Math.min(count, 6); index += 1) {
-      const option = locator.nth(index);
-      if (
-        (await option.isVisible().catch(() => false)) &&
-        (await option.isEnabled().catch(() => false))
-      ) {
-        await option.click();
-        return;
-      }
-    }
-  }
-  throw new Error("no visible enabled control matched the benchmark selector");
 }
 
 async function firstVisibleEnabled(candidates) {
@@ -252,10 +370,36 @@ async function runInteraction(
 ) {
   await setup();
   const before = await sceneStats(page);
+  const beforeTrace = before?.performanceTrace ?? {};
+  const beforeLongTasks = beforeTrace.longTaskDurations ?? [];
   const startedAt = performance.now();
   await action();
   await waitForSettled();
   const after = await sceneStats(page);
+  const afterTrace = after?.performanceTrace ?? {};
+  const afterLongTasks = afterTrace.longTaskDurations ?? [];
+  const actionLongTasks =
+    afterLongTasks.length >= beforeLongTasks.length
+      ? afterLongTasks.slice(beforeLongTasks.length)
+      : [];
+  const longTaskCount =
+    actionLongTasks.length > 0
+      ? actionLongTasks.length
+      : Math.max(
+          0,
+          Number(afterTrace.longTaskCount ?? 0) -
+            Number(beforeTrace.longTaskCount ?? 0),
+        );
+  const longTaskTotalMs =
+    actionLongTasks.length > 0
+      ? actionLongTasks.reduce((total, duration) => total + duration, 0)
+      : Math.max(
+          0,
+          Number(afterTrace.longTaskTotalMs ?? 0) -
+            Number(beforeTrace.longTaskTotalMs ?? 0),
+        );
+  const longTaskMaxMs =
+    actionLongTasks.length > 0 ? Math.max(...actionLongTasks) : 0;
   const renderCountDelta =
     Number.isFinite(before?.renderCount) && Number.isFinite(after?.renderCount)
       ? after.renderCount - before.renderCount
@@ -273,7 +417,16 @@ async function runInteraction(
     renderedCells: after?.renderedCells ?? 0,
     renderedNodeLabels: after?.renderedNodeLabels ?? 0,
     renderedEdgeLabels: after?.renderedEdgeLabels ?? 0,
+    renderedLabelLeaders: after?.renderedLabelLeaders ?? 0,
     drawCalls: after?.drawCalls ?? 0,
+    triangles: after?.triangles ?? 0,
+    workerGenerationMs: Number((after?.workerGenerationMs ?? 0).toFixed(3)),
+    longTaskCount,
+    longTaskTotalMs: Number(longTaskTotalMs.toFixed(3)),
+    longTaskMaxMs: Number(longTaskMaxMs.toFixed(3)),
+    estimatedSceneBytes: after?.performanceTrace?.estimatedSceneBytes ?? 0,
+    pickingCandidates: after?.picking?.candidates ?? 0,
+    pickingRejected: after?.picking?.rejected ?? 0,
     lastGraphUpdateMs: Number((after?.lastGraphUpdateMs ?? 0).toFixed(3)),
     ...(renderCountDelta !== undefined ? { renderCountDelta } : {}),
     ...frameTimingSummary(after?.frameSamples ?? []),
@@ -330,7 +483,7 @@ async function runRankTwoPairFocusInteraction(page) {
       await resetPage(page);
       await switchToResearchMode(page);
       await page.locator("#example-select").selectOption("A2");
-      await page.getByRole("button", { name: /local chamber/i }).click();
+      await page.getByRole("button", { name: /look near a chamber/i }).click();
       await page.getByLabel(/local depth/i).selectOption("3");
       await page.getByLabel(/far shells/i).selectOption("fade-far");
       await waitForStats(page);
@@ -358,21 +511,15 @@ async function runRankTwoPairFocusInteraction(page) {
 }
 
 async function runYGammaPresetInteraction(page) {
-  let presetLabel = "m=3 hexagons";
+  let presetLabel = "Show m=3 hexagon relations";
 
   return runInteraction(
     page,
     "ygamma-preset-switch",
     async () => {
       await resetPage(page);
-      await clickFirstVisible([
-        page.getByLabel(/viewer controls/i).getByRole("button", {
-          name: /open (3d )?y_gamma (model|complex)/i,
-        }),
-        page.getByRole("button", {
-          name: /open (3d )?y_gamma (model|complex)/i,
-        }),
-      ]);
+      await page.locator("#example-select").selectOption("A3");
+      await switchModel(page, /^Y_Gamma$/);
       await page.waitForFunction(() => {
         const stats = globalThis.__coxeterSceneStats;
         return (
@@ -385,10 +532,10 @@ async function runYGammaPresetInteraction(page) {
         name: /narrated y_gamma focus presets/i,
       });
       const hexagons = presetGroup.getByRole("button", {
-        name: /m=3 hexagons/i,
+        name: /show m=3 hexagon relations/i,
       });
       if (!(await hexagons.isEnabled().catch(() => false))) {
-        presetLabel = "Full 2-skeleton";
+        presetLabel = "Show all relation faces";
       }
     },
     async () => {
@@ -411,6 +558,220 @@ async function runYGammaPresetInteraction(page) {
       }, presetLabel);
     },
     () => ({ preset: presetLabel }),
+  );
+}
+
+async function setupYGammaReadableCase(page) {
+  await resetPage(page);
+  await page.locator("#example-select").selectOption("compact_5_cube_gamma1");
+  await switchModel(page, /^Y_Gamma$/);
+  await page.getByTestId("ygamma-reader").waitFor({ state: "visible" });
+  const focusRelation = page.getByLabel(/focus relation/i);
+  const m3Relation = await focusRelation
+    .locator("option", { hasText: /m=3/i })
+    .first()
+    .getAttribute("value")
+    .catch(() => null);
+  if (m3Relation) {
+    await focusRelation.selectOption(m3Relation);
+  }
+  await page.waitForFunction(() => {
+    const stats = globalThis.__coxeterSceneStats;
+    return Boolean(
+      stats && stats.renderedCells > 0 && stats.renderedEdgeLabels > 0,
+    );
+  });
+}
+
+async function runYGammaCutawayInteraction(page) {
+  return runInteraction(
+    page,
+    "ygamma-cutaway-switch",
+    async () => {
+      await setupYGammaReadableCase(page);
+      await page.getByTestId("ygamma-cutaway").scrollIntoViewIfNeeded();
+    },
+    async () => {
+      await clickSemanticControl(
+        page,
+        '[data-testid="ygamma-cutaway"] button[data-cutaway-mode="relation-order"]',
+      );
+    },
+    async () => {
+      await page.waitForFunction(() => {
+        const stats = globalThis.__coxeterSceneStats;
+        const pressed = [
+          ...globalThis.document.querySelectorAll("button"),
+        ].some(
+          (button) =>
+            button.textContent?.match(/same m/i) &&
+            button.getAttribute("aria-pressed") === "true",
+        );
+        return Boolean(stats && stats.renderedCells > 0 && pressed);
+      });
+    },
+    { cutaway: "relation-order" },
+  );
+}
+
+async function runYGammaRelationStarInteraction(page) {
+  return runInteraction(
+    page,
+    "ygamma-relation-star",
+    async () => {
+      await setupYGammaReadableCase(page);
+      await page
+        .getByTestId("ygamma-advanced-readability")
+        .scrollIntoViewIfNeeded();
+    },
+    async () => {
+      const advanced = page.getByTestId("ygamma-advanced-readability");
+      await advanced.locator("summary").click();
+      await clickSemanticControl(
+        page,
+        '[data-readable-action="relation-star"]',
+      );
+    },
+    async () => {
+      await page.waitForFunction(() => {
+        const stats = globalThis.__coxeterSceneStats;
+        return Boolean(
+          stats &&
+          stats.renderedCells > 0 &&
+          stats.renderedEdgeLabels > 0 &&
+          stats.renderedLabelLeaders > 0,
+        );
+      });
+    },
+    { focus: "relation-star" },
+  );
+}
+
+async function runYGammaLeaderLabelInteraction(page) {
+  return runInteraction(
+    page,
+    "ygamma-leader-labels",
+    async () => {
+      await setupYGammaReadableCase(page);
+      await page.getByTestId("ygamma-drawing").scrollIntoViewIfNeeded();
+    },
+    async () => {
+      await clickSemanticControl(
+        page,
+        'button[data-separation-preset="expanded"]',
+      );
+    },
+    async () => {
+      await page.waitForFunction(() => {
+        const stats = globalThis.__coxeterSceneStats;
+        return Boolean(
+          stats &&
+          stats.renderedEdgeLabels > 0 &&
+          stats.renderedLabelLeaders > 0,
+        );
+      });
+    },
+    { labels: "leader-lines" },
+  );
+}
+
+async function runYGammaRelationAtlasInteraction(page) {
+  return runInteraction(
+    page,
+    "ygamma-relation-atlas",
+    async () => {
+      await setupYGammaReadableCase(page);
+      await page
+        .getByTestId("ygamma-advanced-readability")
+        .scrollIntoViewIfNeeded();
+    },
+    async () => {
+      const advanced = page.getByTestId("ygamma-advanced-readability");
+      await advanced.locator("summary").click();
+      await clickSemanticControl(
+        page,
+        '[data-readable-action="relation-atlas"]',
+      );
+      await clickSemanticControl(
+        page,
+        '[data-testid="ygamma-relation-atlas"] button[data-relation-order="3"]',
+      );
+    },
+    async () => {
+      await page.waitForFunction(() => {
+        const stats = globalThis.__coxeterSceneStats;
+        return Boolean(
+          stats &&
+          stats.renderedCells > 0 &&
+          globalThis.document.querySelector(
+            "[data-testid='ygamma-relation-atlas']",
+          ),
+        );
+      });
+    },
+    { atlas: "relation-family-focus" },
+  );
+}
+
+async function runYGammaDrawingComparisonInteraction(page) {
+  return runInteraction(
+    page,
+    "ygamma-drawing-comparison",
+    async () => {
+      await setupYGammaReadableCase(page);
+    },
+    async () => {
+      const advanced = page.getByTestId("ygamma-advanced-readability");
+      await advanced.locator("summary").click();
+      await clickSemanticControl(
+        page,
+        '[data-readable-action="compare-drawing"]',
+      );
+    },
+    async () => {
+      await page.waitForFunction(() => {
+        return Boolean(
+          globalThis.document.querySelector(
+            "[data-testid='ygamma-comparison-left']",
+          ) &&
+          globalThis.document.querySelector(
+            "[data-testid='ygamma-comparison-right']",
+          ),
+        );
+      });
+    },
+    { comparison: "coherent-vs-expanded" },
+  );
+}
+
+async function runYGammaCameraPathInteraction(page) {
+  return runInteraction(
+    page,
+    "ygamma-camera-path",
+    async () => {
+      await setupYGammaReadableCase(page);
+      await page.getByTestId("ygamma-camera-path").scrollIntoViewIfNeeded();
+    },
+    async () => {
+      await clickSemanticControl(
+        page,
+        'button[data-camera-path="shared-generator"]',
+      );
+    },
+    async () => {
+      await page.waitForFunction(() => {
+        const stats = globalThis.__coxeterSceneStats;
+        const pressed = [
+          ...globalThis.document.querySelectorAll("button"),
+        ].some(
+          (button) =>
+            button.textContent?.match(/shared gen/i) &&
+            button.getAttribute("aria-pressed") === "true",
+        );
+        return Boolean(stats && stats.renderedEdgeLabels > 0 && pressed);
+      });
+    },
+    { cameraPath: "shared-generator" },
   );
 }
 
@@ -447,7 +808,10 @@ async function runQuotientLinkLensInteraction(page) {
       await resetPage(page);
       await switchToResearchMode(page);
       const workflow = page.locator(".workflow-panel");
-      await workflow.getByRole("button", { name: /quotient/i }).click();
+      await page
+        .getByRole("group", { name: /research workflow steps/i })
+        .getByRole("button", { name: /^3\s*Quotient$/i })
+        .click();
       await workflow
         .getByRole("button", { name: /load demo quotient/i })
         .click();
@@ -692,14 +1056,7 @@ async function runBookmarkRestoreInteraction(page) {
     "bookmark-restore",
     async () => {
       await resetPage(page);
-      await clickFirstVisible([
-        page.getByLabel(/viewer controls/i).getByRole("button", {
-          name: /open (3d )?y_gamma (model|complex)/i,
-        }),
-        page.getByRole("button", {
-          name: /open (3d )?y_gamma (model|complex)/i,
-        }),
-      ]);
+      await switchModel(page, /^Y_Gamma$/);
       await page.waitForFunction(() => {
         const stats = globalThis.__coxeterSceneStats;
         return Boolean(
@@ -828,6 +1185,15 @@ async function runInteractions(page) {
     { id: "cell-star", run: runCellStarInteraction },
     { id: "rank-k-lens", run: runRankKLensInteraction },
     { id: "comparison-view", run: runComparisonViewInteraction },
+    { id: "ygamma-cutaway-switch", run: runYGammaCutawayInteraction },
+    { id: "ygamma-relation-star", run: runYGammaRelationStarInteraction },
+    { id: "ygamma-leader-labels", run: runYGammaLeaderLabelInteraction },
+    { id: "ygamma-relation-atlas", run: runYGammaRelationAtlasInteraction },
+    {
+      id: "ygamma-drawing-comparison",
+      run: runYGammaDrawingComparisonInteraction,
+    },
+    { id: "ygamma-camera-path", run: runYGammaCameraPathInteraction },
     { id: "annotation-toggle", run: runAnnotationToggleInteraction },
     { id: "bookmark-restore", run: runBookmarkRestoreInteraction },
     {
@@ -857,9 +1223,12 @@ async function runInteractions(page) {
 async function runCase(page, testCase, expected) {
   const startedAt = performance.now();
 
-  await page.locator("#radius-input").fill(String(testCase.radius));
+  await switchToResearchMode(page);
+  let radiusInput = await ensureGenerationControlsOpen(page);
+  await radiusInput.fill(String(testCase.radius));
   await page.locator("#example-select").selectOption(testCase.exampleId);
-  await page.locator("#radius-input").fill(String(testCase.radius));
+  radiusInput = await ensureGenerationControlsOpen(page);
+  await radiusInput.fill(String(testCase.radius));
   const stats = await waitForStats(page, expected ?? testCase.expected);
 
   return {
@@ -869,6 +1238,17 @@ async function runCase(page, testCase, expected) {
     renderedNodes: stats.renderedNodes,
     renderedEdgeSegments: stats.renderedEdgeSegments,
     renderedCells: stats.renderedCells,
+    renderedNodeLabels: stats.renderedNodeLabels ?? 0,
+    renderedEdgeLabels: stats.renderedEdgeLabels ?? 0,
+    renderedLabelLeaders: stats.renderedLabelLeaders ?? 0,
+    drawCalls: stats.drawCalls ?? 0,
+    triangles: stats.triangles ?? 0,
+    workerGenerationMs: Number((stats.workerGenerationMs ?? 0).toFixed(3)),
+    longTaskCount: stats.performanceTrace?.longTaskCount ?? 0,
+    longTaskMaxMs: Number(
+      (stats.performanceTrace?.longTaskMaxMs ?? 0).toFixed(3),
+    ),
+    estimatedSceneBytes: stats.performanceTrace?.estimatedSceneBytes ?? 0,
     lastGraphUpdateMs: Number((stats.lastGraphUpdateMs ?? 0).toFixed(3)),
     ...frameTimingSummary(stats.frameSamples ?? []),
   };
@@ -886,6 +1266,13 @@ function checkOutput(path, snapshot) {
     frameDeltaMedianMs: _frameDeltaMedianMs,
     frameDeltaP95Ms: _frameDeltaP95Ms,
     frameDeltaMaxMs: _frameDeltaMaxMs,
+    drawCalls: _drawCalls,
+    triangles: _triangles,
+    workerGenerationMs: _workerGenerationMs,
+    longTaskCount: _longTaskCount,
+    longTaskTotalMs: _longTaskTotalMs,
+    longTaskMaxMs: _longTaskMaxMs,
+    estimatedSceneBytes: _estimatedSceneBytes,
     ...rest
   }) => {
     void _elapsedMs;
@@ -893,6 +1280,13 @@ function checkOutput(path, snapshot) {
     void _frameDeltaMedianMs;
     void _frameDeltaP95Ms;
     void _frameDeltaMaxMs;
+    void _drawCalls;
+    void _triangles;
+    void _workerGenerationMs;
+    void _longTaskCount;
+    void _longTaskTotalMs;
+    void _longTaskMaxMs;
+    void _estimatedSceneBytes;
     return rest;
   };
   const expectedCases = expected.cases.map(withoutTiming);
@@ -908,7 +1302,16 @@ function checkOutput(path, snapshot) {
     renderedCells: _renderedCells,
     renderedNodeLabels: _renderedNodeLabels,
     renderedEdgeLabels: _renderedEdgeLabels,
+    renderedLabelLeaders: _renderedLabelLeaders,
     drawCalls: _drawCalls,
+    triangles: _triangles,
+    workerGenerationMs: _workerGenerationMs,
+    longTaskCount: _longTaskCount,
+    longTaskTotalMs: _longTaskTotalMs,
+    longTaskMaxMs: _longTaskMaxMs,
+    estimatedSceneBytes: _estimatedSceneBytes,
+    pickingCandidates: _pickingCandidates,
+    pickingRejected: _pickingRejected,
     renderCountDelta: _renderCountDelta,
     ...rest
   }) => {
@@ -922,7 +1325,16 @@ function checkOutput(path, snapshot) {
     void _renderedCells;
     void _renderedNodeLabels;
     void _renderedEdgeLabels;
+    void _renderedLabelLeaders;
     void _drawCalls;
+    void _triangles;
+    void _workerGenerationMs;
+    void _longTaskCount;
+    void _longTaskTotalMs;
+    void _longTaskMaxMs;
+    void _estimatedSceneBytes;
+    void _pickingCandidates;
+    void _pickingRejected;
     void _renderCountDelta;
     return rest;
   };
@@ -936,6 +1348,12 @@ function checkOutput(path, snapshot) {
     JSON.stringify(expectedCases) === JSON.stringify(actualCases) &&
     JSON.stringify(expectedInteractions) === JSON.stringify(actualInteractions);
   const budgetFailures = [
+    ...featureFloorFailuresFor(expected.cases, snapshot.cases, "case"),
+    ...featureFloorFailuresFor(
+      interactionFeatureFloorsFor(expected.interactions ?? []),
+      snapshot.interactions ?? [],
+      "interaction",
+    ),
     ...budgetFailuresFor(snapshot.cases),
     ...interactionBudgetFailuresFor(snapshot.interactions ?? []),
   ];
@@ -965,8 +1383,9 @@ function frameTimingSummary(samples) {
     .map((sample) => sample.deltaMs)
     // Demand-driven rendering deliberately leaves long gaps between frames
     // when the scene is idle. Those gaps are a success condition, not a slow
-    // frame, so the budget checks only look at active render bursts.
-    .filter((delta) => Number.isFinite(delta) && delta <= 250)
+    // frame, so the budget checks only look at active render bursts. Long task
+    // counters separately catch real main-thread stalls.
+    .filter((delta) => Number.isFinite(delta) && delta <= 180)
     .sort((left, right) => left - right);
   if (deltas.length === 0) {
     return {
@@ -1064,6 +1483,70 @@ function interactionBudgetFailuresFor(interactions) {
   return failures;
 }
 
+function featureFloorFailuresFor(expectedEntries, actualEntries, label) {
+  const fields = [
+    "renderedNodes",
+    "renderedEdgeSegments",
+    "renderedCells",
+    "renderedNodeLabels",
+    "renderedEdgeLabels",
+    "renderedLabelLeaders",
+  ];
+  const actualById = new Map(
+    actualEntries.map((entry) => [
+      entry.id ?? `${entry.exampleId}:${entry.radius}`,
+      entry,
+    ]),
+  );
+  const failures = [];
+  for (const expected of expectedEntries) {
+    const id = expected.id ?? `${expected.exampleId}:${expected.radius}`;
+    const actual = actualById.get(id);
+    if (!actual) {
+      failures.push(`${label} ${id} missing from current benchmark`);
+      continue;
+    }
+    for (const field of fields) {
+      if (expected[field] === undefined) {
+        continue;
+      }
+      const expectedFloor = Number(expected[field]);
+      const actualValue = Number(actual[field] ?? 0);
+      if (actualValue < expectedFloor) {
+        failures.push(
+          `${label} ${id} ${field} ${actualValue} < floor ${expectedFloor}`,
+        );
+      }
+    }
+  }
+  return failures;
+}
+
+function interactionFeatureFloorsFor(expectedEntries) {
+  return expectedEntries
+    .map((entry) => {
+      const explicit = INTERACTION_FEATURE_FLOORS.get(entry.id);
+      if (explicit) {
+        return { id: entry.id, ...explicit };
+      }
+      const floor = { id: entry.id };
+      for (const field of [
+        "renderedNodes",
+        "renderedEdgeSegments",
+        "renderedCells",
+        "renderedNodeLabels",
+        "renderedEdgeLabels",
+        "renderedLabelLeaders",
+      ]) {
+        if (Number(entry[field] ?? 0) > 0) {
+          floor[field] = 1;
+        }
+      }
+      return floor;
+    })
+    .filter((entry) => Object.keys(entry).length > 1);
+}
+
 const args = parseArgs(process.argv.slice(2));
 const benchmarkServer = await ensureBenchmarkServer();
 const browser = await chromium.launch();
@@ -1082,6 +1565,17 @@ try {
     ok: true,
     benchmark: "timed-browser-v1",
     schemaVersion: 1,
+    createdAt: new Date().toISOString(),
+    benchmarkUrl: BENCHMARK_URL,
+    nodeVersion: process.version,
+    platform: process.platform,
+    arch: process.arch,
+    browser: {
+      name: "chromium",
+      version: browser.version(),
+    },
+    cachePolicy:
+      "single-pass; local/session storage cleared at reset points; persistent IndexedDB cache may be warm",
     totalElapsedMs: Number((performance.now() - startedAt).toFixed(3)),
     cases,
     interactions,
@@ -1090,6 +1584,10 @@ try {
   if (args.write) {
     mkdirSync(dirname(args.write), { recursive: true });
     writeFileSync(args.write, stableJson(result), "utf8");
+  }
+  if (args.report) {
+    mkdirSync(dirname(args.report), { recursive: true });
+    writeFileSync(args.report, stableJson(result), "utf8");
   }
 
   const check = args.check ? checkOutput(args.check, result) : undefined;

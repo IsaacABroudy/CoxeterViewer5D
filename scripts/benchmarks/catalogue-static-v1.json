@@ -68,6 +68,14 @@
       "infinitePairs": 1
     },
     {
+      "file": "jnw_cube_graph.json",
+      "name": "JNW cube graph RACG",
+      "dataStatus": "verified-source",
+      "rank": 8,
+      "finitePairs": 12,
+      "infinitePairs": 16
+    },
+    {
       "file": "tumarkin_5d_8facet_g11411_01.json",
       "name": "Tumarkin 5D eight-facet G11411 #01",
       "dataStatus": "certified",
@@ -265,7 +273,7 @@
     }
   ],
   "totals": {
-    "examples": 24,
+    "examples": 25,
     "generated": 6,
     "generatedNodes": 80,
     "generatedEdges": 104,

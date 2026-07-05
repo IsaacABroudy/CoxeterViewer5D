@@ -6,6 +6,29 @@ import type {
 import type { CoxeterSystemInput } from "../types";
 
 const systemsByHash = new Map<string, CoxeterSystemInput>();
+const maxCachedSystems = 16;
+
+function rememberSystem(inputHash: string, system: CoxeterSystemInput): void {
+  systemsByHash.delete(inputHash);
+  systemsByHash.set(inputHash, system);
+  while (systemsByHash.size > maxCachedSystems) {
+    const oldest = systemsByHash.keys().next().value;
+    if (oldest === undefined) {
+      break;
+    }
+    systemsByHash.delete(oldest);
+  }
+}
+
+function cachedSystem(inputHash: string): CoxeterSystemInput | undefined {
+  const system = systemsByHash.get(inputHash);
+  if (!system) {
+    return undefined;
+  }
+  systemsByHash.delete(inputHash);
+  systemsByHash.set(inputHash, system);
+  return system;
+}
 
 self.onmessage = (event: MessageEvent<GenerationWorkerRequest>) => {
   const request = event.data;
@@ -16,9 +39,9 @@ self.onmessage = (event: MessageEvent<GenerationWorkerRequest>) => {
 
   try {
     if (request.system) {
-      systemsByHash.set(request.inputHash, request.system);
+      rememberSystem(request.inputHash, request.system);
     }
-    const system = systemsByHash.get(request.inputHash);
+    const system = cachedSystem(request.inputHash);
     if (!system) {
       throw new Error(
         `Generation worker has no cached Coxeter system for ${request.inputHash}.`,

@@ -58,7 +58,7 @@ interface PendingRequest {
 
 const yGammaSceneSchemaVersion = 2;
 const yGammaSceneNamespace = "ygamma-scene";
-const yGammaSceneBuilderVersion = "relation-source-labels-v3";
+const yGammaSceneBuilderVersion = "relation-source-labels-v4-readable-spacing";
 
 /**
  * Factory for the off-main-thread Y_Gamma scene builder.
@@ -76,6 +76,7 @@ export class YGammaSceneClient {
   private readonly canUseWorker: boolean;
   private readonly appVersion: string;
   private readonly pending = new Map<number, PendingRequest>();
+  private readonly postedAtlasVersions = new Set<string>();
   private worker: Worker | undefined;
   private nextRequestId = 1;
 
@@ -91,14 +92,41 @@ export class YGammaSceneClient {
     this.appVersion = options.appVersion ?? "app-v1";
   }
 
-  sceneVersionFor(request: YGammaSceneClientRequest): string {
-    const atlasVersion = yGammaAtlasVersion({
+  atlasVersionFor(request: YGammaSceneClientRequest): string {
+    return yGammaAtlasVersion({
       systemName: request.atlas.systemName,
       generatorCount: request.atlas.generatorCount,
-      rankTwoCellIds: request.atlas.rankTwoCells.map((cell) => cell.id),
-      higherCellIds: request.atlas.higherCells.map((cell) => cell.id),
+      generatorCells: request.atlas.generatorCells.map((cell) => ({
+        id: cell.id,
+        generators: cell.generators,
+        generatorLabels: cell.generatorLabels,
+        label: cell.label,
+        attachingWord: cell.attachingWord,
+      })),
+      rankTwoCells: request.atlas.rankTwoCells.map((cell) => ({
+        id: cell.id,
+        generators: cell.generators,
+        generatorLabels: cell.generatorLabels,
+        m: cell.m,
+        boundaryLength: cell.boundaryLength,
+        attachingWord: cell.attachingWord,
+      })),
+      higherCells: request.atlas.higherCells.map((cell) => ({
+        id: cell.id,
+        generators: cell.generators,
+        generatorLabels: cell.generatorLabels,
+        rank: cell.rank,
+        dimension: cell.dimension,
+        label: cell.label,
+        rankTwoFaceIds: cell.rankTwoFaceIds,
+        subgroupOrder: cell.subgroupOrder,
+      })),
       warnings: request.atlas.warnings,
     });
+  }
+
+  sceneVersionFor(request: YGammaSceneClientRequest): string {
+    const atlasVersion = this.atlasVersionFor(request);
     return yGammaSceneVersion({
       atlasVersion,
       builderVersion: yGammaSceneBuilderVersion,
@@ -110,6 +138,7 @@ export class YGammaSceneClient {
     request: YGammaSceneClientRequest,
   ): Promise<YGammaSceneClientResult> {
     const requestId = this.nextRequestId++;
+    const atlasVersion = this.atlasVersionFor(request);
     const sceneVersion = this.sceneVersionFor(request);
     const persistentKey = this.persistentKey(sceneVersion);
     const memoryHit = this.memory.get(sceneVersion);
@@ -164,10 +193,14 @@ export class YGammaSceneClient {
         type: "build-ygamma-scene",
         requestId,
         sceneVersion,
-        atlas: request.atlas,
+        atlasVersion,
+        atlas: this.postedAtlasVersions.has(atlasVersion)
+          ? undefined
+          : request.atlas,
         options: request.options,
       };
       worker.postMessage(workerRequest);
+      this.postedAtlasVersions.add(atlasVersion);
     });
   }
 
@@ -178,6 +211,7 @@ export class YGammaSceneClient {
     this.pending.clear();
     this.worker?.terminate();
     this.worker = undefined;
+    this.postedAtlasVersions.clear();
   }
 
   private ensureWorker(): Worker | undefined {
@@ -194,12 +228,21 @@ export class YGammaSceneClient {
     worker.onmessage = (event: MessageEvent<YGammaSceneWorkerResponse>) => {
       void this.handleWorkerMessage(event.data);
     };
+    worker.onmessageerror = () => {
+      this.rejectAll("Y_Gamma scene worker could not deserialize a message.");
+      worker.terminate();
+      if (this.worker === worker) {
+        this.worker = undefined;
+      }
+      this.postedAtlasVersions.clear();
+    };
     worker.onerror = (event) => {
       this.rejectAll(event.message || "Y_Gamma scene worker failed.");
       worker.terminate();
       if (this.worker === worker) {
         this.worker = undefined;
       }
+      this.postedAtlasVersions.clear();
     };
     return worker;
   }
