@@ -148,6 +148,8 @@ export interface CoxeterSystemInput {
 
 export interface CayleyNode {
   id: string;
+  label?: string;
+  compactLabel?: string;
   word: number[];
   length: number;
   matrixKey?: string;

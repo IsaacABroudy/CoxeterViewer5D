@@ -32,7 +32,12 @@ import {
 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-import { compactLabelText, selectLabelBudget } from "./labels";
+import type { SceneRevisionSet } from "../app/stableHash";
+import {
+  compactLabelText,
+  selectLabelBudget,
+  selectSegmentLabelBudget,
+} from "./labels";
 
 export type LabelScope = "off" | "focused" | "budgeted";
 export type LocalCellRenderMode =
@@ -50,8 +55,14 @@ export interface SceneNode {
   localDistance?: number;
   position?: [number, number, number];
   isRelationBoundary?: boolean;
+  colorHint?: string;
+  nodeScale?: number;
+  stateRole?: "in-state" | "out-of-state";
+  alwaysLabel?: boolean;
+  labelPriority?: number;
   ghost?: boolean;
   hidden?: boolean;
+  drawingOnly?: boolean;
 }
 
 export interface SceneEdge {
@@ -63,10 +74,17 @@ export interface SceneEdge {
   colorHint?: string;
   alwaysLabel?: boolean;
   isRelationBoundary?: boolean;
+  labelAnchor?: [number, number, number];
+  labelPosition?: [number, number, number];
+  labelLeader?: boolean;
+  labelPriority?: number;
+  suppressSemanticLabel?: boolean;
   emphasis?: "readable-boundary";
   selectedHighlight?: "color" | "outline";
   ghost?: boolean;
   directed?: boolean;
+  visualOffset?: number;
+  drawingOnly?: boolean;
 }
 
 export interface SceneCell {
@@ -77,6 +95,9 @@ export interface SceneCell {
   isRelationBoundary?: boolean;
   dimension?: number;
   sourceCellId?: string;
+  readabilityRole?: "focus" | "incident" | "context" | "hidden-by-cutaway";
+  colorHint?: string;
+  drawingOnly?: boolean;
 }
 
 export interface SceneGenerator {
@@ -114,6 +135,7 @@ export interface SceneRenderStats {
   renderedCells: number;
   renderedNodeLabels: number;
   renderedEdgeLabels: number;
+  renderedLabelLeaders: number;
   drawCalls: number;
   triangles: number;
   frame: number;
@@ -127,9 +149,23 @@ export interface SceneRenderStats {
     high: number;
     low: number;
   };
+  stateNodeHighlights: {
+    inState: number;
+    outOfState: number;
+  };
   omittedTransparentFills: number;
   picking: SpatialPickPrefilterStats;
   workerGenerationMs?: number;
+  revisions?: SceneRevisionSet;
+  performanceTrace: PerformanceTraceSummary;
+}
+
+export interface PerformanceTraceSummary {
+  longTaskCount: number;
+  longTaskTotalMs: number;
+  longTaskMaxMs: number;
+  longTaskDurations: number[];
+  estimatedSceneBytes: number;
 }
 
 export interface SceneViewProps {
@@ -146,6 +182,7 @@ export interface SceneViewProps {
    * Material, label, and highlight version over the current structure.
    */
   appearanceVersion: string;
+  revisionSet?: SceneRevisionSet;
   /**
    * Parent-layout version. It only schedules a resize after CSS or fullscreen
    * changes so the WebGL canvas follows the restored viewer dimensions.
@@ -177,6 +214,7 @@ export interface SceneViewProps {
   pickingEnabled?: boolean;
   workerGenerationMs?: number;
   colorScheme?: SceneColorScheme;
+  sceneLabel?: string;
   onCapturePngReady?: (capture: (() => Promise<string>) | undefined) => void;
   onRenderStats?: (stats: SceneRenderStats) => void;
   onHoverCell?: (cellId: string | undefined) => void;
@@ -241,6 +279,7 @@ export function SceneView({
   generators,
   structureVersion,
   appearanceVersion,
+  revisionSet,
   layoutVersion = 0,
   selectedNodeId,
   selectedCellId,
@@ -268,6 +307,7 @@ export function SceneView({
   pickingEnabled = true,
   workerGenerationMs,
   colorScheme = "light",
+  sceneLabel = "Coxeter viewer scene",
   onCapturePngReady,
   onRenderStats,
   onHoverCell,
@@ -316,6 +356,7 @@ export function SceneView({
       generators,
       structureVersion,
       appearanceVersion,
+      revisionSet,
       layoutVersion: String(layoutVersion),
       selectedNodeId,
       selectedCellId,
@@ -384,6 +425,7 @@ export function SceneView({
     focusNodeId,
     focusSignal,
     structureVersion,
+    revisionSet,
     workerGenerationMs,
     showCells,
     showEdgeLabels,
@@ -397,7 +439,7 @@ export function SceneView({
   }, [onCapturePngReady]);
 
   return (
-    <section className="scene-shell" aria-label="Cayley graph scene">
+    <section className="scene-shell" aria-label={sceneLabel}>
       <div ref={mountRef} className="scene-canvas" data-testid="scene-canvas" />
       <button
         type="button"
@@ -419,6 +461,7 @@ interface GraphUpdate {
   generators: SceneGenerator[];
   structureVersion: string;
   appearanceVersion: string;
+  revisionSet?: SceneRevisionSet;
   layoutVersion: string;
   selectedNodeId?: string;
   selectedCellId?: string;
@@ -483,6 +526,11 @@ interface EdgeLabelCandidate {
   priority: number;
 }
 
+interface EdgeLabelPlacement {
+  labelPosition: Vector3;
+  anchor: Vector3;
+}
+
 declare global {
   interface Window {
     __coxeterSceneStats?: SceneRenderStats;
@@ -523,6 +571,9 @@ class SceneRuntime {
   private cellVerticesById = new Map<string, Vector3[]>();
   private cellPickObjects: Mesh[] = [];
   private cellPickIndex: CellPickEntry[] = [];
+  private readonly cellPickEntryScratch: CellPickEntry[] = [];
+  private readonly cellPickObjectScratch: Mesh[] = [];
+  private readonly pickCenterScratch = new Vector3();
   private onSelectNode: (nodeId: string) => void = () => undefined;
   private onSelectCell: (cellId: string) => void = () => undefined;
   private onHoverCell: ((cellId: string | undefined) => void) | undefined;
@@ -532,6 +583,7 @@ class SceneRuntime {
   private onRenderStats: ((stats: SceneRenderStats) => void) | undefined;
   private pickingEnabled = true;
   private stats: SceneRenderStats = emptySceneStats();
+  private longTaskObserver: PerformanceObserver | undefined;
   private frame = 0;
   private previousFrameTime = performance.now();
   private lastGraphUpdate: GraphUpdate | undefined;
@@ -551,6 +603,7 @@ class SceneRuntime {
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
     this.controls.target.set(0, 0, 0);
+    this.installLongTaskObserver();
 
     const ambient = new AmbientLight("#ffffff", 1.9);
     const directional = new DirectionalLight("#ffffff", 1.8);
@@ -636,6 +689,7 @@ class SceneRuntime {
       localCellRenderMode: update.localCellRenderMode,
       occlusionMode: update.occlusionMode,
       workerGenerationMs: update.workerGenerationMs,
+      revisions: update.revisionSet,
     };
     this.publishStats({ notifyCallback: true });
     this.requestRender("scene-update");
@@ -724,6 +778,7 @@ class SceneRuntime {
     window.removeEventListener("keydown", this.handleKeyDown);
     window.removeEventListener("keyup", this.handleKeyUp);
     window.removeEventListener("blur", this.handleWindowBlur);
+    this.longTaskObserver?.disconnect();
     this.controls.dispose();
     this.releaseLabelSprites();
     clearGroup(this.scene);
@@ -734,6 +789,42 @@ class SceneRuntime {
     this.cellGeometryCache.clear();
     this.renderer.dispose();
     this.renderer.domElement.remove();
+  }
+
+  private installLongTaskObserver() {
+    if (typeof PerformanceObserver === "undefined") {
+      return;
+    }
+    try {
+      this.longTaskObserver = new PerformanceObserver((list) => {
+        let longTaskCount = this.stats.performanceTrace.longTaskCount;
+        let longTaskTotalMs = this.stats.performanceTrace.longTaskTotalMs;
+        let longTaskMaxMs = this.stats.performanceTrace.longTaskMaxMs;
+        const longTaskDurations = [
+          ...this.stats.performanceTrace.longTaskDurations,
+        ];
+        for (const entry of list.getEntries()) {
+          longTaskCount += 1;
+          longTaskTotalMs += entry.duration;
+          longTaskMaxMs = Math.max(longTaskMaxMs, entry.duration);
+          longTaskDurations.push(Number(entry.duration.toFixed(3)));
+        }
+        this.stats = {
+          ...this.stats,
+          performanceTrace: {
+            ...this.stats.performanceTrace,
+            longTaskCount,
+            longTaskTotalMs,
+            longTaskMaxMs,
+            longTaskDurations,
+          },
+        };
+        this.publishStats();
+      });
+      this.longTaskObserver.observe({ entryTypes: ["longtask"] });
+    } catch {
+      this.longTaskObserver = undefined;
+    }
   }
 
   private rebuildStructure(update: GraphUpdate) {
@@ -760,6 +851,12 @@ class SceneRuntime {
       renderedCells,
       renderedNodeLabels: 0,
       renderedEdgeLabels: 0,
+      renderedLabelLeaders: 0,
+      picking: emptySpatialPickStats(),
+      performanceTrace: {
+        ...this.stats.performanceTrace,
+        estimatedSceneBytes: estimateSceneBytes(update),
+      },
     };
   }
 
@@ -776,6 +873,7 @@ class SceneRuntime {
       ...this.stats,
       renderedNodeLabels: renderedLabels.nodes,
       renderedEdgeLabels: renderedLabels.edges,
+      renderedLabelLeaders: renderedLabels.leaders,
     };
   }
 
@@ -798,6 +896,7 @@ class SceneRuntime {
       high: highNodes.length,
       low: lowNodes.length,
     };
+    this.stats.stateNodeHighlights = countStateNodeHighlights(visibleNodes);
     this.updateNodeAppearance(update);
     return visibleNodes.length;
   }
@@ -847,18 +946,20 @@ class SceneRuntime {
                 ? 0.72
                 : 1;
         temp.position.copy(position);
-        temp.scale.setScalar(scale);
+        temp.scale.setScalar(scale * (node.nodeScale ?? 1));
         temp.updateMatrix();
         transform.copy(temp.matrix);
         bucket.mesh.setMatrixAt(index, transform);
         color.set(
-          selected
-            ? "#f85149"
-            : node.isRelationBoundary
-              ? "#b42318"
-              : neighbor
-                ? "#0f6b5f"
-                : nodeColor(node, update.occlusionMode),
+          node.stateRole
+            ? nodeColor(node, update.occlusionMode)
+            : selected
+              ? "#f85149"
+              : node.isRelationBoundary
+                ? "#b42318"
+                : neighbor
+                  ? "#0f6b5f"
+                  : nodeColor(node, update.occlusionMode),
         );
         bucket.mesh.setColorAt(index, color);
       });
@@ -945,22 +1046,35 @@ class SceneRuntime {
         color,
         coordinates: [],
       };
+      const [visualSource, visualTarget] = visualEdgeEndpoints(
+        edge,
+        source,
+        target,
+        update,
+      );
       bucket.coordinates.push(
-        ...(source.equals(target)
+        ...(visualSource.equals(visualTarget)
           ? loopEdgeCoordinates(
-              source,
+              visualSource,
               edge.generator,
               update.generators.length,
             )
-          : [source.x, source.y, source.z, target.x, target.y, target.z]),
+          : [
+              visualSource.x,
+              visualSource.y,
+              visualSource.z,
+              visualTarget.x,
+              visualTarget.y,
+              visualTarget.z,
+            ]),
       );
       edgeBuckets.set(bucketKey, bucket);
       renderedEdgeSegments += 1;
 
-      if (edge.directed && !source.equals(target)) {
+      if (edge.directed && !visualSource.equals(visualTarget)) {
         const matrix = arrowHeadMatrix(
-          source,
-          target,
+          visualSource,
+          visualTarget,
           arrowDirection,
           arrowObject,
         );
@@ -1038,15 +1152,16 @@ class SceneRuntime {
 
       if (edge.isRelationBoundary && !edge.colorHint) {
         boundaryCoordinates.push(...coordinates);
-        if (edge.emphasis === "readable-boundary") {
-          readableBoundaryCoordinates.push(...coordinates);
-        }
+      }
+      if (edge.emphasis === "readable-boundary") {
+        readableBoundaryCoordinates.push(...coordinates);
       }
 
       if (
-        update.selectedNodeId &&
-        (edge.source === update.selectedNodeId ||
-          edge.target === update.selectedNodeId)
+        edge.selectedHighlight === "outline" ||
+        (update.selectedNodeId &&
+          (edge.source === update.selectedNodeId ||
+            edge.target === update.selectedNodeId))
       ) {
         if (edge.selectedHighlight === "outline") {
           outlineHighlightCoordinates.push(...coordinates);
@@ -1135,10 +1250,13 @@ class SceneRuntime {
   private addLabels(update: GraphUpdate): {
     nodes: number;
     edges: number;
+    leaders: number;
   } {
+    const edgeLabels = this.addEdgeLabels(update);
     return {
       nodes: this.addNodeLabels(update),
-      edges: this.addEdgeLabels(update),
+      edges: edgeLabels.edges,
+      leaders: edgeLabels.leaders,
     };
   }
 
@@ -1154,7 +1272,8 @@ class SceneRuntime {
           if (
             update.semanticLabelsOnly &&
             node.isRelationBoundary &&
-            node.id !== update.selectedNodeId
+            node.id !== update.selectedNodeId &&
+            !node.alwaysLabel
           ) {
             return undefined;
           }
@@ -1162,13 +1281,16 @@ class SceneRuntime {
             update.labelScope === "focused" &&
             node.id !== update.selectedNodeId &&
             !selectedNeighbors.has(node.id) &&
-            !node.isRelationBoundary
+            !node.isRelationBoundary &&
+            !node.alwaysLabel
           ) {
             return undefined;
           }
           return node.compactLabel ?? node.label ?? node.id;
         },
         getPriority: (node) =>
+          (node.labelPriority ?? 0) +
+          (node.alwaysLabel ? 80_000 : 0) +
           (node.isRelationBoundary ? 15_000 : 0) +
           (node.id === update.selectedNodeId ? 10_000 : 0) -
           node.length,
@@ -1182,13 +1304,36 @@ class SceneRuntime {
       }
 
       const sprite = createTextSprite(label, {
-        textColor: node.isRelationBoundary ? "#b42318" : "#24292f",
-        backgroundColor: node.isRelationBoundary
-          ? "rgba(255, 247, 237, 0.92)"
-          : "rgba(255, 255, 255, 0.86)",
-        borderColor: node.isRelationBoundary
-          ? "#b42318"
-          : "rgba(36, 41, 47, 0.24)",
+        textColor:
+          node.stateRole === "in-state"
+            ? "#083344"
+            : node.stateRole === "out-of-state"
+              ? "#f8fafc"
+              : node.alwaysLabel
+                ? "#111827"
+                : node.isRelationBoundary
+                  ? "#b42318"
+                  : "#24292f",
+        backgroundColor:
+          node.stateRole === "in-state"
+            ? "rgba(165, 243, 252, 0.96)"
+            : node.stateRole === "out-of-state"
+              ? "rgba(71, 85, 105, 0.86)"
+              : node.alwaysLabel
+                ? "rgba(240, 253, 250, 0.94)"
+                : node.isRelationBoundary
+                  ? "rgba(255, 247, 237, 0.92)"
+                  : "rgba(255, 255, 255, 0.86)",
+        borderColor:
+          node.stateRole === "in-state"
+            ? "#0891b2"
+            : node.stateRole === "out-of-state"
+              ? "#94a3b8"
+              : node.alwaysLabel
+                ? "#0f766e"
+                : node.isRelationBoundary
+                  ? "#b42318"
+                  : "rgba(36, 41, 47, 0.24)",
         fontSize: 28,
         paddingX: 8,
         paddingY: 5,
@@ -1203,11 +1348,16 @@ class SceneRuntime {
     return entries.length;
   }
 
-  private addEdgeLabels(update: GraphUpdate): number {
+  private addEdgeLabels(update: GraphUpdate): {
+    edges: number;
+    leaders: number;
+  } {
     const entries = selectEdgeLabelCandidates(update);
 
     const labelOccupancy = new ScreenLabelOccupancy(this.camera);
     let placedLabels = 0;
+    let placedLeaders = 0;
+    const leaderCoordinates: number[] = [];
     for (const { edge, label } of entries) {
       const source = update.nodePositions.get(edge.source);
       const target = update.nodePositions.get(edge.target);
@@ -1247,13 +1397,38 @@ class SceneRuntime {
         worldHeight: 0.2,
       });
       sprite.center.set(0.5, 0.5);
-      sprite.position.copy(position);
+      sprite.position.copy(position.labelPosition);
       sprite.renderOrder = 18;
       this.labelGroup.add(sprite);
+      if (shouldDrawEdgeLabelLeader(edge, update)) {
+        const drewLeader = pushLabelLeaderCoordinates(
+          leaderCoordinates,
+          position.anchor,
+          position.labelPosition,
+          edge.id.startsWith("Gamma:e:") ? 0.62 : 0.38,
+        );
+        if (drewLeader) {
+          placedLeaders += 1;
+        }
+      }
       placedLabels += 1;
     }
 
-    return placedLabels;
+    if (leaderCoordinates.length > 0) {
+      const geometry = new BufferGeometry();
+      geometry.setAttribute(
+        "position",
+        new BufferAttribute(new Float32Array(leaderCoordinates), 3),
+      );
+      const material = new LineBasicMaterial({
+        color: update.semanticLabelsOnly ? "#111827" : "#57606a",
+        transparent: true,
+        opacity: update.semanticLabelsOnly ? 0.68 : 0.46,
+      });
+      this.labelGroup.add(createStableLineSegments(geometry, material, 17));
+    }
+
+    return { edges: placedLabels, leaders: placedLeaders };
   }
 
   private placeEdgeLabel(
@@ -1263,17 +1438,17 @@ class SceneRuntime {
     target: Vector3,
     occupancy: ScreenLabelOccupancy,
     force: boolean,
-  ): Vector3 | undefined {
+  ): EdgeLabelPlacement | undefined {
     const candidates = edgeLabelCandidates(edge, source, target, this.camera);
     for (const candidate of candidates) {
-      if (occupancy.reserve(candidate, label)) {
+      if (occupancy.reserve(candidate.labelPosition, label)) {
         return candidate;
       }
     }
     if (force) {
       const fallback = candidates.at(-1);
       if (fallback) {
-        occupancy.reserve(fallback, label, { force: true });
+        occupancy.reserve(fallback.labelPosition, label, { force: true });
       }
       return fallback;
     }
@@ -1386,7 +1561,7 @@ class SceneRuntime {
         true,
       );
       const material = new MeshBasicMaterial({
-        color: generatorPairColor(update.generators, bucket.pair),
+        color: cellColor(update.generators, bucket.styleCell),
         opacity: cellOpacity(bucket.styleCell, update, false),
         transparent: true,
         side: DoubleSide,
@@ -1411,7 +1586,7 @@ class SceneRuntime {
         false,
       );
       const material = new LineBasicMaterial({
-        color: generatorPairColor(update.generators, bucket.pair),
+        color: cellColor(update.generators, bucket.styleCell),
         transparent: true,
         opacity: cellOutlineOpacity(bucket.styleCell, update, false),
         linewidth: cellOutlineWidth(bucket.styleCell, update, false),
@@ -1485,7 +1660,7 @@ class SceneRuntime {
       const active = activePairKey === bucket.pairKey;
       const color = active
         ? "#0f6b5f"
-        : generatorPairColor(update.generators, bucket.pair);
+        : cellColor(update.generators, bucket.styleCell);
       bucket.fillMaterial?.color.set(color);
       if (bucket.fillMaterial) {
         bucket.fillMaterial.opacity = cellOpacity(
@@ -1717,6 +1892,12 @@ class SceneRuntime {
       return;
     }
 
+    // Plain E moves the camera upward. Shift+E is reserved by the app shell for
+    // edge-label toggling, so the renderer must leave that chord alone.
+    if (event.code === "KeyE" && event.shiftKey) {
+      return;
+    }
+
     event.preventDefault();
     this.fastCameraMove = this.fastCameraMove || event.shiftKey;
     const previousSize = this.movementKeys.size;
@@ -1907,20 +2088,27 @@ class SceneRuntime {
       return this.cellPickObjects;
     }
 
-    const center = new Vector3();
     const { candidates, stats } = prefilterSpatialPickSpheres(
       this.cellPickIndex,
       (point) => {
-        center.set(point[0], point[1], point[2]);
-        return this.raycaster.ray.distanceSqToPoint(center);
+        this.pickCenterScratch.set(point[0], point[1], point[2]);
+        return this.raycaster.ray.distanceSqToPoint(this.pickCenterScratch);
       },
-      { minimumEntryCount: 32, padding: 0.12 },
+      {
+        minimumEntryCount: 32,
+        padding: 0.12,
+        target: this.cellPickEntryScratch,
+      },
     );
     this.stats = {
       ...this.stats,
       picking: stats,
     };
-    return candidates.map((entry) => entry.object);
+    this.cellPickObjectScratch.length = 0;
+    for (const entry of candidates) {
+      this.cellPickObjectScratch.push(entry.object);
+    }
+    return this.cellPickObjectScratch;
   }
 
   private requestRender(reason: string, dampingFrames = 0) {
@@ -1986,8 +2174,21 @@ class SceneRuntime {
     this.mount.dataset.renderedCells = String(stats.renderedCells);
     this.mount.dataset.nodeLabels = String(stats.renderedNodeLabels);
     this.mount.dataset.edgeLabels = String(stats.renderedEdgeLabels);
+    this.mount.dataset.labelLeaders = String(stats.renderedLabelLeaders);
+    this.mount.dataset.stateNodesIn = String(stats.stateNodeHighlights.inState);
+    this.mount.dataset.stateNodesOut = String(
+      stats.stateNodeHighlights.outOfState,
+    );
     this.mount.dataset.cellRenderMode = stats.localCellRenderMode;
     this.mount.dataset.occlusionMode = stats.occlusionMode;
+    this.mount.dataset.topologyVersion = stats.revisions?.topologyVersion ?? "";
+    this.mount.dataset.cellGeometryVersion =
+      stats.revisions?.cellGeometryVersion ?? "";
+    this.mount.dataset.labelVersion = stats.revisions?.labelVersion ?? "";
+    this.mount.dataset.longTasks = String(stats.performanceTrace.longTaskCount);
+    this.mount.dataset.estimatedSceneBytes = String(
+      stats.performanceTrace.estimatedSceneBytes,
+    );
     this.mount.dataset.frame = String(stats.frame);
     this.mount.dispatchEvent(
       new CustomEvent<SceneRenderStats>("coxeter:scene-stats", {
@@ -2012,6 +2213,7 @@ function emptySceneStats(): SceneRenderStats {
     renderedCells: 0,
     renderedNodeLabels: 0,
     renderedEdgeLabels: 0,
+    renderedLabelLeaders: 0,
     drawCalls: 0,
     triangles: 0,
     frame: 0,
@@ -2019,12 +2221,34 @@ function emptySceneStats(): SceneRenderStats {
     renderReason: "init",
     renderCount: 0,
     lodNodes: { high: 0, low: 0 },
+    stateNodeHighlights: { inState: 0, outOfState: 0 },
     omittedTransparentFills: 0,
     picking: emptySpatialPickStats(),
     lastGraphUpdateMs: 0,
     localCellRenderMode: "in-graph",
     occlusionMode: "hide-far",
+    performanceTrace: {
+      longTaskCount: 0,
+      longTaskTotalMs: 0,
+      longTaskMaxMs: 0,
+      longTaskDurations: [],
+      estimatedSceneBytes: 0,
+    },
   };
+}
+
+function estimateSceneBytes(update: GraphUpdate): number {
+  const nodeBytes = update.nodes.length * 96;
+  const edgeBytes = update.edges.length * 128;
+  const cellVertexCount = update.cells.reduce(
+    (total, cell) => total + cell.boundaryNodeIds.length,
+    0,
+  );
+  const cellBytes = cellVertexCount * 3 * Float32Array.BYTES_PER_ELEMENT * 2;
+  const labelBytes =
+    (update.showNodeLabels ? update.maxNodeLabels : 0) * 2048 +
+    (update.showEdgeLabels ? update.maxEdgeLabels : 0) * 2048;
+  return nodeBytes + edgeBytes + cellBytes + labelBytes;
 }
 
 function emptySpatialPickStats(): SpatialPickPrefilterStats {
@@ -2113,13 +2337,16 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
 export function prefilterSpatialPickSpheres<T extends SpatialPickSphere>(
   entries: readonly T[],
   distanceSqToPoint: (point: readonly [number, number, number]) => number,
-  options: { minimumEntryCount?: number; padding?: number } = {},
+  options: { minimumEntryCount?: number; padding?: number; target?: T[] } = {},
 ): { candidates: T[]; stats: SpatialPickPrefilterStats } {
   const minimumEntryCount = options.minimumEntryCount ?? 32;
   const padding = options.padding ?? 0;
   if (entries.length < minimumEntryCount) {
+    const candidates = options.target ?? [];
+    candidates.length = 0;
+    candidates.push(...entries);
     return {
-      candidates: [...entries],
+      candidates,
       stats: {
         total: entries.length,
         candidates: entries.length,
@@ -2131,10 +2358,14 @@ export function prefilterSpatialPickSpheres<T extends SpatialPickSphere>(
     };
   }
 
-  const candidates = entries.filter((entry) => {
+  const candidates = options.target ?? [];
+  candidates.length = 0;
+  for (const entry of entries) {
     const radius = entry.radius + padding;
-    return distanceSqToPoint(entry.center) <= radius * radius;
-  });
+    if (distanceSqToPoint(entry.center) <= radius * radius) {
+      candidates.push(entry);
+    }
+  }
   return {
     candidates,
     stats: {
@@ -2150,6 +2381,12 @@ export function prefilterSpatialPickSpheres<T extends SpatialPickSphere>(
 
 function nodeColor(node: SceneNode, occlusionMode: OcclusionMode) {
   const base = shellPalette[node.length % shellPalette.length];
+  if (node.stateRole && node.colorHint) {
+    return node.colorHint;
+  }
+  if (node.colorHint && !node.ghost) {
+    return node.colorHint;
+  }
   if (node.ghost) {
     return occlusionMode === "x-ray" ? "#e5eaf0" : "#cbd5e1";
   }
@@ -2162,8 +2399,22 @@ function nodeColor(node: SceneNode, occlusionMode: OcclusionMode) {
   return base;
 }
 
+function countStateNodeHighlights(nodes: readonly SceneNode[]) {
+  let inState = 0;
+  let outOfState = 0;
+  for (const node of nodes) {
+    if (node.stateRole === "in-state") {
+      inState += 1;
+    } else if (node.stateRole === "out-of-state") {
+      outOfState += 1;
+    }
+  }
+  return { inState, outOfState };
+}
+
 function isHighDetailNode(node: SceneNode, update: GraphUpdate): boolean {
   return (
+    node.stateRole !== undefined ||
     node.id === update.selectedNodeId ||
     node.isRelationBoundary === true ||
     ((node.localDistance ?? 0) <= 1 && node.ghost !== true)
@@ -2276,6 +2527,8 @@ function cellBucketStyleKey(cell: SceneCell): string {
     cell.dimension ?? 2,
     cell.localDistance ?? 0,
     cell.isRelationBoundary ? "boundary" : "plain",
+    cell.readabilityRole ?? "normal",
+    cell.colorHint ?? "",
   ].join(":");
 }
 
@@ -2284,6 +2537,15 @@ function cellOutlineOpacity(
   update: GraphUpdate,
   active: boolean,
 ) {
+  if (cell.readabilityRole === "focus") {
+    return 1;
+  }
+  if (cell.readabilityRole === "incident") {
+    return active || cell.id === update.selectedCellId ? 0.96 : 0.82;
+  }
+  if (cell.readabilityRole === "context") {
+    return update.topologyMode ? 0.28 : 0.38;
+  }
   if (update.topologyMode) {
     return active || cell.id === update.selectedCellId ? 1 : 0.86;
   }
@@ -2300,6 +2562,15 @@ function cellOutlineWidth(
   update: GraphUpdate,
   active: boolean,
 ) {
+  if (cell.readabilityRole === "focus") {
+    return 4;
+  }
+  if (cell.readabilityRole === "incident") {
+    return 3;
+  }
+  if (cell.readabilityRole === "context") {
+    return 1;
+  }
   return update.topologyMode || active || cell.isRelationBoundary ? 3 : 1;
 }
 
@@ -2366,6 +2637,15 @@ function petalCellVertices(
 }
 
 function cellOpacity(cell: SceneCell, update: GraphUpdate, active: boolean) {
+  if (cell.readabilityRole === "focus") {
+    return Math.max(0.24, Math.min(update.cellOpacity, 0.38));
+  }
+  if (cell.readabilityRole === "incident") {
+    return Math.max(0.12, Math.min(update.cellOpacity * 0.85, 0.24));
+  }
+  if (cell.readabilityRole === "context") {
+    return Math.max(0.025, Math.min(update.cellOpacity * 0.22, 0.075));
+  }
   if (update.topologyMode) {
     if (cell.id === update.selectedCellId || active) {
       return Math.max(0.18, Math.min(update.cellOpacity, 0.26));
@@ -2432,9 +2712,56 @@ function edgeCoordinates(
   target: Vector3,
   update: GraphUpdate,
 ): number[] {
-  return source.equals(target)
-    ? loopEdgeCoordinates(source, edge.generator, update.generators.length)
-    : [source.x, source.y, source.z, target.x, target.y, target.z];
+  const [visualSource, visualTarget] = visualEdgeEndpoints(
+    edge,
+    source,
+    target,
+    update,
+  );
+  return visualSource.equals(visualTarget)
+    ? loopEdgeCoordinates(
+        visualSource,
+        edge.generator,
+        update.generators.length,
+      )
+    : [
+        visualSource.x,
+        visualSource.y,
+        visualSource.z,
+        visualTarget.x,
+        visualTarget.y,
+        visualTarget.z,
+      ];
+}
+
+function visualEdgeEndpoints(
+  edge: SceneEdge,
+  source: Vector3,
+  target: Vector3,
+  update: GraphUpdate,
+): [Vector3, Vector3] {
+  if (!edge.visualOffset || source.equals(target)) {
+    return [source, target];
+  }
+
+  const direction = target.clone().sub(source).normalize();
+  const viewDirection = update.cameraFocusTarget
+    ? new Vector3(...update.cameraFocusTarget).sub(source).normalize()
+    : new Vector3(0, 0, 1);
+  let side = direction.clone().cross(viewDirection);
+  if (side.lengthSq() < 0.0001) {
+    side = direction.clone().cross(new Vector3(0, 0, 1));
+  }
+  if (side.lengthSq() < 0.0001) {
+    side = stableLabelSide(edge.generator);
+  } else {
+    side.normalize();
+  }
+  const lift = stableLabelSide(edge.generator).multiplyScalar(
+    Math.abs(edge.visualOffset) * 0.22,
+  );
+  const offset = side.multiplyScalar(edge.visualOffset).add(lift);
+  return [source.clone().add(offset), target.clone().add(offset)];
 }
 
 function loopEdgeCoordinates(
@@ -2581,6 +2908,8 @@ function edgeLabelPriority(edge: SceneEdge, update: GraphUpdate): number {
     update.semanticLabelsOnly && edge.directed && !edge.isRelationBoundary;
 
   return (
+    (edge.labelPriority ?? 0) +
+    (edge.alwaysLabel ? 80_000 : 0) +
     (generatorSpine ? 60_000 : 0) +
     (edge.emphasis === "readable-boundary" ? 22_000 : 0) +
     (edge.isRelationBoundary ? 15_000 : 0) +
@@ -2614,7 +2943,7 @@ function selectEdgeLabelCandidates(update: GraphUpdate): EdgeLabelCandidate[] {
     .filter((candidate): candidate is EdgeLabelCandidate => Boolean(candidate));
 
   if (update.semanticLabelsOnly) {
-    return selectSemanticEdgeLabelCandidates(candidates);
+    return selectSemanticEdgeLabelCandidates(candidates, update);
   }
 
   return candidates
@@ -2629,6 +2958,13 @@ function selectRenderableEdges(update: GraphUpdate): SceneEdge[] {
 
   const selectedBySegment = new Map<string, SceneEdge>();
   for (const edge of update.edges) {
+    if (
+      edge.suppressSemanticLabel === true &&
+      edge.alwaysLabel !== true &&
+      edge.labelPriority === undefined
+    ) {
+      continue;
+    }
     if (!(edge.directed || edge.isRelationBoundary)) {
       continue;
     }
@@ -2680,14 +3016,18 @@ function semanticEdgeSegmentKey(
   }
 
   if (source.equals(target)) {
+    // Loop drawings are generator-specific: two loops based at the same point
+    // are placed in different directions by loopEdgeCoordinates().
     return `loop:${vectorLabelKey(source)}:${edge.generator}`;
   }
 
   const sourceKey = vectorLabelKey(source);
   const targetKey = vectorLabelKey(target);
-  return sourceKey < targetKey
-    ? `${sourceKey}|${targetKey}`
-    : `${targetKey}|${sourceKey}`;
+  const segmentKey =
+    sourceKey < targetKey
+      ? `${sourceKey}|${targetKey}`
+      : `${targetKey}|${sourceKey}`;
+  return segmentKey;
 }
 
 function vectorLabelKey(position: Vector3): string {
@@ -2698,14 +3038,41 @@ function vectorLabelKey(position: Vector3): string {
 
 function selectSemanticEdgeLabelCandidates(
   candidates: EdgeLabelCandidate[],
+  update: GraphUpdate,
 ): EdgeLabelCandidate[] {
-  return [...candidates].sort(compareEdgeLabelCandidates);
+  return selectSegmentLabelBudget(
+    candidates
+      .map((candidate) => {
+        const segmentKey = semanticEdgeSegmentKey(candidate.edge, update);
+        return segmentKey
+          ? { ...candidate, id: candidate.edge.id, segmentKey }
+          : undefined;
+      })
+      .filter(
+        (
+          candidate,
+        ): candidate is EdgeLabelCandidate & {
+          id: string;
+          segmentKey: string;
+        } => Boolean(candidate),
+      ),
+    update.maxEdgeLabels,
+  );
 }
 
 function edgeLabelText(
   edge: SceneEdge,
   update: GraphUpdate,
 ): string | undefined {
+  if (
+    update.semanticLabelsOnly &&
+    edge.suppressSemanticLabel === true &&
+    edge.alwaysLabel !== true &&
+    edge.labelPriority === undefined
+  ) {
+    return undefined;
+  }
+
   if (update.semanticLabelsOnly && !edge.directed && !edge.isRelationBoundary) {
     return undefined;
   }
@@ -2745,8 +3112,21 @@ function compareEdgeLabelCandidates(
 
 function importantEdgeLabel(edge: SceneEdge, update: GraphUpdate): boolean {
   return (
-    update.semanticLabelsOnly &&
-    (edge.directed === true || edge.isRelationBoundary === true)
+    edge.alwaysLabel === true ||
+    edge.labelPriority !== undefined ||
+    (update.semanticLabelsOnly &&
+      edge.suppressSemanticLabel !== true &&
+      (edge.directed === true || edge.isRelationBoundary === true))
+  );
+}
+
+function shouldDrawEdgeLabelLeader(edge: SceneEdge, update: GraphUpdate) {
+  return (
+    edge.labelLeader === true ||
+    edge.alwaysLabel === true ||
+    (update.semanticLabelsOnly &&
+      edge.suppressSemanticLabel !== true &&
+      (edge.directed === true || edge.isRelationBoundary === true))
   );
 }
 
@@ -2764,22 +3144,50 @@ function edgeLabelCandidates(
   source: Vector3,
   target: Vector3,
   camera: PerspectiveCamera,
-): Vector3[] {
+): EdgeLabelPlacement[] {
   const midpoint = source.clone().add(target).multiplyScalar(0.5);
   const direction = target.clone().sub(source);
   if (direction.lengthSq() < 0.0001) {
     return loopEdgeLabelCandidates(edge, source);
   }
+  const explicitAnchor = edge.labelAnchor
+    ? new Vector3(...edge.labelAnchor)
+    : undefined;
+  const explicitLabelPosition = edge.labelPosition
+    ? new Vector3(...edge.labelPosition)
+    : undefined;
+  const perimeterAnchoredGammaLabel =
+    explicitAnchor !== undefined && edge.id.startsWith("Gamma:e:");
+  if (explicitLabelPosition) {
+    const anchor = explicitAnchor ?? source.clone().lerp(target, 0.5);
+    const radial = explicitLabelPosition.clone();
+    if (radial.lengthSq() < 0.0001) {
+      radial.set(0, 1, 0);
+    } else {
+      radial.normalize();
+    }
+    const tangent = new Vector3(-radial.y, radial.x, 0).normalize();
+    return [
+      explicitLabelPosition,
+      explicitLabelPosition.clone().addScaledVector(radial, 0.5),
+      explicitLabelPosition.clone().addScaledVector(tangent, 0.34),
+      explicitLabelPosition.clone().addScaledVector(tangent, -0.34),
+    ].map((labelPosition) => ({
+      labelPosition,
+      anchor: anchor.clone(),
+    }));
+  }
 
   direction.normalize();
-  const viewDirection = camera.position.clone().sub(midpoint).normalize();
+  const labelReference = explicitAnchor ?? midpoint;
+  const viewDirection = camera.position.clone().sub(labelReference).normalize();
   let side = direction.clone().cross(viewDirection);
   if (side.lengthSq() < 0.0001) {
     side = stableLabelSide(edge.generator);
   } else {
     side.normalize();
   }
-  let outward = midpoint.clone();
+  let outward = labelReference.clone();
   if (outward.lengthSq() < 0.0001) {
     outward = side.clone();
   } else {
@@ -2787,19 +3195,35 @@ function edgeLabelCandidates(
   }
 
   const along = direction.clone();
-  const labelLane = semanticLabelLane(edge.generator);
-  const laneLift = edge.isRelationBoundary ? labelLane * 0.055 : 0;
-  const laneAlong = edge.isRelationBoundary ? labelLane * 0.025 : 0;
+  const labelLane = semanticLabelLane(edge);
+  const laneLift = edge.isRelationBoundary
+    ? labelLane * (perimeterAnchoredGammaLabel ? 0.14 : 0.055)
+    : 0;
+  const laneAlong = edge.isRelationBoundary
+    ? labelLane * (perimeterAnchoredGammaLabel ? 0.018 : 0.025)
+    : 0;
   const baseLift =
-    (edge.directed ? 0.22 : edge.isRelationBoundary ? 0.16 : 0.1) +
+    (edge.directed
+      ? 0.22
+      : perimeterAnchoredGammaLabel
+        ? 0.72
+        : edge.isRelationBoundary
+          ? 0.16
+          : 0.1) +
     Math.abs(laneLift) * 0.5;
-  const sideLift = (edge.isRelationBoundary ? 0.2 : 0.14) + Math.abs(laneLift);
+  const sideLift =
+    (perimeterAnchoredGammaLabel
+      ? 0.42
+      : edge.isRelationBoundary
+        ? 0.2
+        : 0.14) + Math.abs(laneLift);
   const fractions = edge.directed
     ? [0.58 + laneAlong, 0.48 - laneAlong, 0.68 + laneAlong]
     : [0.5 + laneAlong, 0.42 - laneAlong, 0.58 + laneAlong];
   return fractions.flatMap((fraction, index) => {
     const clampedFraction = Math.max(0.18, Math.min(0.82, fraction));
-    const anchor = source.clone().lerp(target, clampedFraction);
+    const anchor =
+      explicitAnchor ?? source.clone().lerp(target, clampedFraction);
     const lift = baseLift + index * 0.06;
     return [
       anchor
@@ -2820,26 +3244,59 @@ function edgeLabelCandidates(
         .addScaledVector(along, 0.12)
         .addScaledVector(outward, lift)
         .addScaledVector(side, laneLift),
-    ];
+    ].map((labelPosition) => ({
+      labelPosition,
+      anchor: anchor.clone(),
+    }));
   });
 }
 
-function loopEdgeLabelCandidates(edge: SceneEdge, source: Vector3): Vector3[] {
+function loopEdgeLabelCandidates(
+  edge: SceneEdge,
+  source: Vector3,
+): EdgeLabelPlacement[] {
   const side = stableLabelSide(edge.generator);
   const up = new Vector3(0, 0, 1);
-  const lane = semanticLabelLane(edge.generator);
+  const lane = semanticLabelLane(edge);
   const laneOffset = lane * 0.08;
+  const anchor = edge.labelAnchor ? new Vector3(...edge.labelAnchor) : source;
   return [
-    source
+    anchor
       .clone()
       .addScaledVector(side, 0.36 + laneOffset)
       .addScaledVector(up, 0.2),
-    source
+    anchor
       .clone()
       .addScaledVector(side, -0.36 + laneOffset)
       .addScaledVector(up, 0.2),
-    source.clone().addScaledVector(side, laneOffset).addScaledVector(up, 0.45),
-  ];
+    anchor.clone().addScaledVector(side, laneOffset).addScaledVector(up, 0.45),
+  ].map((labelPosition) => ({
+    labelPosition,
+    anchor: anchor.clone(),
+  }));
+}
+
+function pushLabelLeaderCoordinates(
+  coordinates: number[],
+  anchor: Vector3,
+  labelPosition: Vector3,
+  maxLength = 0.38,
+): boolean {
+  const direction = labelPosition.clone().sub(anchor);
+  const distance = direction.length();
+  if (distance < 0.12) {
+    return false;
+  }
+  direction.multiplyScalar(1 / distance);
+  const start = anchor.clone().addScaledVector(direction, 0.045);
+  const end = anchor
+    .clone()
+    .addScaledVector(
+      direction,
+      Math.max(0.07, Math.min(maxLength, distance - 0.08)),
+    );
+  coordinates.push(...vectorToArray(start), ...vectorToArray(end));
+  return true;
 }
 
 function stableLabelSide(generator: number): Vector3 {
@@ -2847,8 +3304,21 @@ function stableLabelSide(generator: number): Vector3 {
   return new Vector3(Math.cos(angle), Math.sin(angle), 0.35).normalize();
 }
 
-function semanticLabelLane(generator: number): number {
-  return [-2, -1, 0, 1, 2][Math.abs(generator) % 5] ?? 0;
+function semanticLabelLane(edge: SceneEdge): number {
+  const baseLane = [-2, -1, 0, 1, 2][Math.abs(edge.generator) % 5] ?? 0;
+  if (!edge.isRelationBoundary) {
+    return baseLane;
+  }
+  return baseLane * 0.72 + stableEdgeLane(edge.id) * 0.55;
+}
+
+function stableEdgeLane(edgeId: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < edgeId.length; index += 1) {
+    hash ^= edgeId.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return [-2, -1, 0, 1, 2][Math.abs(hash) % 5] ?? 0;
 }
 
 function arrowHeadMatrix(
@@ -3158,6 +3628,10 @@ function generatorPairColor(
   const first = new Color(generatorColor(generators, pair[0]));
   const second = new Color(generatorColor(generators, pair[1]));
   return first.lerp(second, 0.5).getStyle();
+}
+
+function cellColor(generators: SceneGenerator[], cell: SceneCell) {
+  return cell.colorHint ?? generatorPairColor(generators, cell.generatorPair);
 }
 
 function pairKey(pair: [number, number]) {

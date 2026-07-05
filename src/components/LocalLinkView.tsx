@@ -42,7 +42,7 @@ export function LocalLinkView({
     <svg
       className="local-link-view"
       viewBox={`0 0 ${size} ${size}`}
-      role="img"
+      role="group"
       aria-label={`Local link at ${localLink.nodeId}`}
     >
       {higherSubsets.map((subset) => {

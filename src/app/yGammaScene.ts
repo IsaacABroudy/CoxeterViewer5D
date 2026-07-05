@@ -17,6 +17,11 @@ export interface YGamma2SkeletonSceneOptions {
   focusGenerator?: number;
   relationOrderFilter?: number;
   peelMode?: YGammaPeelMode;
+  layoutScale?: "normal" | "expansive";
+  cellSeparation?: YGammaCellSeparation;
+  separationValue?: YGammaSeparationValue;
+  cutaway?: YGammaCutawayOptions;
+  relationStar?: YGammaRelationStarOptions;
 }
 
 export interface YGammaRankThreeFocus {
@@ -34,6 +39,29 @@ export type YGammaPeelMode =
   | "selected-face"
   | "adjacent-faces"
   | "same-rank-three";
+
+export type YGammaCellSeparation = "coherent" | "readable" | "expanded";
+export type YGammaSeparationValue = number;
+
+export type YGammaCutawayMode =
+  | "none"
+  | "generator-family"
+  | "relation-order"
+  | "rank"
+  | "incident-to-selected-edge"
+  | "incident-to-selected-relation";
+
+export interface YGammaCutawayOptions {
+  mode: YGammaCutawayMode;
+  generator?: number;
+  relationOrder?: number;
+  rank?: number;
+}
+
+export interface YGammaRelationStarOptions {
+  active: boolean;
+  pairKey?: string;
+}
 
 type Vec3 = [number, number, number];
 type Mat3 = [Vec3, Vec3, Vec3];
@@ -62,6 +90,16 @@ interface RankThreeFaceCycle {
   boundary: number[];
 }
 
+interface NormalizedYGammaCutaway {
+  mode: YGammaCutawayMode;
+  generator?: number;
+  relationOrder?: number;
+  rank?: number;
+  activePair?: [number, number];
+  activePairKey?: string;
+  relationStarActive: boolean;
+}
+
 const BASE_NODE_ID = "Y:*";
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 const GENERATOR_ARROW_RADIUS = 5.2;
@@ -73,6 +111,29 @@ const FACE_LIFT_PER_EDGE = 0.035;
 const FACE_LIFT_MAX = 1.18;
 const FACE_LAYER_STEP = 0.14;
 const rankThreeCoxeterCellCache = new Map<string, RankThreeCoxeterCell>();
+
+function yGammaSeparationStrength(separation: YGammaCellSeparation): number {
+  switch (separation) {
+    case "coherent":
+      return 0.45;
+    case "expanded":
+      return 2.25;
+    case "readable":
+    default:
+      return 1.25;
+  }
+}
+
+function yGammaSeparationStrengthFromValue(
+  separation: YGammaCellSeparation,
+  value: YGammaSeparationValue | undefined,
+): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    return yGammaSeparationStrength(separation);
+  }
+  const normalized = Math.max(0, Math.min(100, value)) / 100;
+  return 0.45 + normalized * 1.8;
+}
 
 /**
  * Builds a cohesive 3D readability model for the 2-skeleton of Y_Gamma.
@@ -108,6 +169,26 @@ export function buildYGamma2SkeletonScene(
     options.focusGenerator >= 0
       ? options.focusGenerator
       : undefined;
+  const cellSeparation =
+    options.cellSeparation ??
+    (options.layoutScale === "expansive" ? "expanded" : "readable");
+  const separationStrength = yGammaSeparationStrengthFromValue(
+    cellSeparation,
+    options.separationValue,
+  );
+  const relationStarPairKey =
+    options.relationStar?.active === true
+      ? (options.relationStar.pairKey ?? options.activeGeneratorPairKey)
+      : undefined;
+  const cutaway = normalizeYGammaCutaway({
+    options: options.cutaway,
+    activePairKey: options.activeGeneratorPairKey,
+    relationStarPairKey,
+    focusGenerator,
+    relationOrderFilter: options.relationOrderFilter,
+  });
+  const expansiveLayout =
+    options.layoutScale === "expansive" || cellSeparation === "expanded";
   const nodes: SceneNode[] = [
     {
       id: BASE_NODE_ID,
@@ -150,6 +231,8 @@ export function buildYGamma2SkeletonScene(
       compactLabel: cell.label,
       directed: true,
       alwaysLabel: true,
+      labelLeader: true,
+      labelPriority: 40_000,
     });
   }
 
@@ -169,6 +252,10 @@ export function buildYGamma2SkeletonScene(
     ) {
       return;
     }
+    const readabilityRole = rankTwoReadabilityRole(cell, cutaway);
+    if (readabilityRole === "hidden-by-cutaway") {
+      return;
+    }
     const active =
       relationPairKey(cell.generators) === options.activeGeneratorPairKey;
     if (
@@ -184,6 +271,9 @@ export function buildYGamma2SkeletonScene(
       directions,
       generatorLabels,
       active,
+      faceMode,
+      separationStrength,
+      readabilityRole,
     );
     nodes.push(...relation.nodes);
     edges.push(...relation.edges);
@@ -201,11 +291,16 @@ export function buildYGamma2SkeletonScene(
       focusGenerator,
       relationOrderFilter: options.relationOrderFilter,
       peelMode: options.peelMode ?? "all",
+      separationStrength,
+      cutaway,
     });
     nodes.push(...rankThree.nodes);
     edges.push(...rankThree.edges);
     cells.push(...rankThree.cells);
     warnings.push(...rankThree.warnings);
+  }
+  if (expansiveLayout) {
+    expandYGammaRelationGeometry(nodes, separationStrength);
   }
 
   return {
@@ -216,6 +311,11 @@ export function buildYGamma2SkeletonScene(
     warnings: [
       "Y_Gamma is shown as one 3D inspectable 2-skeleton: base vertex, oriented generator arrows, and relation faces glued to those arrows.",
       "Rank-two faces are drawn with their full 2m-sided outline, but only the true quotient 0/1-skeleton vertices are displayed; intermediate corners are construction points for the sheet.",
+      ...(expansiveLayout
+        ? [
+            `All-relations Y_Gamma view uses ${cellSeparation} construction spacing and face layers so dense relation sheets can be read without changing the underlying incidence data.`,
+          ]
+        : []),
       ...((options.includeRankThreeCells ?? true)
         ? [
             "Rank-three cells use finite rank-three Coxeter-cell boundary models glued to the same base/generator spine; right-angled triples draw cube-like cells. These coordinates are readability coordinates, not a certified affine realization.",
@@ -226,8 +326,18 @@ export function buildYGamma2SkeletonScene(
             rankThreeFocus.mode === "hinge-witness"
               ? "Rank-three focus mode is showing the square/hexagon hinge witness inside one finite rank-three Coxeter cell."
               : rankThreeFocus.showOnlyFundamentalFaces === true
-                ? "Rank-three focus mode is showing one simply embedded fundamental relation face inside the finite rank-three Coxeter cell; use Show all faces for the complete face family."
+                ? "Rank-three focus mode is showing one simply embedded fundamental relation face inside the finite rank-three Coxeter cell; use Show all faces for the complete relation family."
                 : "Rank-three focus mode is showing the full boundary of one finite rank-three Coxeter cell; the coordinates are expanded for readability.",
+          ]
+        : []),
+      ...(cutaway.mode !== "none"
+        ? [
+            `Y_Gamma cutaway mode '${cutaway.mode}' is a drawing filter; cell ids, generator pairs, and boundary node ids are unchanged.`,
+          ]
+        : []),
+      ...(cutaway.relationStarActive
+        ? [
+            "Relation-star extraction keeps the selected relation family and incident higher cells as a temporary focused view, not a new quotient complex.",
           ]
         : []),
       ...warnings,
@@ -247,6 +357,9 @@ function buildRelationFace(
   generatorDirections: Vec3[],
   generatorLabels: string[],
   active: boolean,
+  faceMode: YGamma2SkeletonSceneOptions["faceMode"],
+  separationStrength: number,
+  readabilityRole: SceneCell["readabilityRole"],
 ): {
   nodes: SceneNode[];
   edges: SceneEdge[];
@@ -263,6 +376,7 @@ function buildRelationFace(
     rightDirection,
     index,
     relationCount,
+    separationStrength,
   );
   const hiddenCornerCount = Math.max(0, boundaryLength - 3);
   const hiddenCornerPositions = cohesiveHiddenCorners(
@@ -271,6 +385,7 @@ function buildRelationFace(
     boundaryLength,
     hiddenCornerCount,
     offset,
+    separationStrength,
   );
   const nodes: SceneNode[] = [];
   const edges: SceneEdge[] = [];
@@ -296,20 +411,23 @@ function buildRelationFace(
     });
   });
 
-  if (active) {
+  if (faceMode === "all" || active) {
     for (let step = 0; step < boundaryNodeIds.length; step += 1) {
       const generator = step % 2 === 0 ? left : right;
+      const suppressSemanticLabel = readabilityRole === "incident";
       edges.push({
         id: `${cell.id}:boundary:${step}`,
         source: boundaryNodeIds[step],
         target: boundaryNodeIds[(step + 1) % boundaryNodeIds.length],
         generator,
-        compactLabel: `${step}: ${
+        compactLabel:
           cell.attachingWord[step % cell.attachingWord.length] ??
-          labelForGenerator(generatorLabels, generator)
-        }`,
+          labelForGenerator(generatorLabels, generator),
         isRelationBoundary: true,
-        emphasis: "readable-boundary",
+        labelLeader: true,
+        labelPriority: readabilityRole === "focus" ? 30_000 : undefined,
+        suppressSemanticLabel,
+        emphasis: active ? "readable-boundary" : undefined,
         directed: true,
       });
     }
@@ -324,6 +442,7 @@ function buildRelationFace(
       boundaryNodeIds,
       localDistance: 2,
       isRelationBoundary: true,
+      readabilityRole,
     },
   };
 }
@@ -369,6 +488,195 @@ function yGammaGeneratorLabels(atlas: YGammaCellAtlas): string[] {
 
 function labelForGenerator(labels: string[], generator: number): string {
   return labels[generator] ?? `s${generator}`;
+}
+
+function normalizeYGammaCutaway(input: {
+  options: YGammaCutawayOptions | undefined;
+  activePairKey?: string;
+  relationStarPairKey?: string;
+  focusGenerator?: number;
+  relationOrderFilter?: number;
+}): NormalizedYGammaCutaway {
+  const mode =
+    input.relationStarPairKey !== undefined
+      ? "incident-to-selected-relation"
+      : (input.options?.mode ?? "none");
+  const activePairKey = input.relationStarPairKey ?? input.activePairKey;
+  const activePair = activePairKey
+    ? parseRelationPairKey(activePairKey)
+    : undefined;
+  return {
+    mode,
+    activePair,
+    activePairKey,
+    relationStarActive: input.relationStarPairKey !== undefined,
+    generator: input.options?.generator ?? input.focusGenerator,
+    relationOrder: input.options?.relationOrder ?? input.relationOrderFilter,
+    rank: input.options?.rank,
+  };
+}
+
+function rankTwoReadabilityRole(
+  cell: YGammaCellRecord,
+  cutaway: NormalizedYGammaCutaway,
+): SceneCell["readabilityRole"] {
+  const pairKeyValue = relationPairKey(cell.generators);
+  const activePair = cutaway.activePair;
+  const activePairKey = cutaway.activePairKey;
+
+  switch (cutaway.mode) {
+    case "generator-family":
+    case "incident-to-selected-edge":
+      if (cutaway.generator === undefined) {
+        return "context";
+      }
+      return cell.generators.includes(cutaway.generator)
+        ? "focus"
+        : cutaway.relationStarActive
+          ? "hidden-by-cutaway"
+          : "context";
+    case "relation-order":
+      if (cutaway.relationOrder === undefined) {
+        return "context";
+      }
+      return cell.m === cutaway.relationOrder ? "focus" : "context";
+    case "rank":
+      if (cutaway.rank === undefined) {
+        return "context";
+      }
+      return cutaway.rank === 2 ? "focus" : "context";
+    case "incident-to-selected-relation":
+      if (!activePair || !activePairKey) {
+        return "context";
+      }
+      if (pairKeyValue === activePairKey) {
+        return "focus";
+      }
+      return sharesGenerator(cell.generators, activePair)
+        ? "incident"
+        : cutaway.relationStarActive
+          ? "hidden-by-cutaway"
+          : "context";
+    case "none":
+    default:
+      return activePairKey && pairKeyValue === activePairKey
+        ? "focus"
+        : "context";
+  }
+}
+
+function rankThreeReadabilityRole(
+  cell: YGammaCellRecord,
+  cutaway: NormalizedYGammaCutaway,
+  pairOrders: Map<string, number>,
+): SceneCell["readabilityRole"] {
+  const activePair = cutaway.activePair;
+  const activePairKey = cutaway.activePairKey;
+
+  switch (cutaway.mode) {
+    case "generator-family":
+    case "incident-to-selected-edge":
+      if (cutaway.generator === undefined) {
+        return "context";
+      }
+      return cell.generators.includes(cutaway.generator)
+        ? "incident"
+        : cutaway.relationStarActive
+          ? "hidden-by-cutaway"
+          : "context";
+    case "relation-order":
+      if (cutaway.relationOrder === undefined) {
+        return "context";
+      }
+      return generatorPairs(cell.generators).some(
+        (pair) =>
+          pairOrders.get(relationPairKey(pair)) === cutaway.relationOrder,
+      )
+        ? "incident"
+        : "context";
+    case "rank":
+      if (cutaway.rank === undefined) {
+        return "context";
+      }
+      return cell.rank === cutaway.rank ? "focus" : "context";
+    case "incident-to-selected-relation":
+      if (!activePair || !activePairKey) {
+        return "context";
+      }
+      return cell.generators.includes(activePair[0]) &&
+        cell.generators.includes(activePair[1])
+        ? "incident"
+        : cutaway.relationStarActive
+          ? "hidden-by-cutaway"
+          : "context";
+    case "none":
+    default:
+      return "context";
+  }
+}
+
+function sharesGenerator(left: number[], right: number[]): boolean {
+  return left.some((generator) => right.includes(generator));
+}
+
+function generatorPairs(generators: number[]): Array<[number, number]> {
+  const pairs: Array<[number, number]> = [];
+  for (let left = 0; left < generators.length; left += 1) {
+    for (let right = left + 1; right < generators.length; right += 1) {
+      pairs.push([generators[left], generators[right]]);
+    }
+  }
+  return pairs;
+}
+
+function expandYGammaRelationGeometry(
+  nodes: SceneNode[],
+  separationStrength: number,
+): void {
+  const spreadStrength = Math.max(0, separationStrength);
+  for (const node of nodes) {
+    if (!node.position || !node.isRelationBoundary) {
+      continue;
+    }
+    if (node.id === BASE_NODE_ID || node.id.startsWith("Y:arrow-end:")) {
+      continue;
+    }
+    const relationScale = node.id.includes(":sheet-corner:")
+      ? 1.55 + spreadStrength * 0.56
+      : node.id.includes(":coxeter-vertex:")
+        ? 1.32 + spreadStrength * 0.32
+        : 1.42 + spreadStrength * 0.46;
+    const verticalScale = Math.max(1.35, relationScale * 0.72);
+    const outward = normalize(node.position);
+    const spread = stableCellSpreadDirection(constructionCellKey(node.id));
+    const sideSpread = projectOntoPlane(spread, outward);
+    const sideOffset: Vec3 =
+      norm(sideSpread) > 1e-6
+        ? scale(normalize(sideSpread), 0.42 + spreadStrength * 0.35)
+        : [0, 0, 0];
+    node.position = [
+      node.position[0] * relationScale + sideOffset[0],
+      node.position[1] * relationScale + sideOffset[1],
+      node.position[2] * verticalScale + sideOffset[2],
+    ];
+  }
+}
+
+function constructionCellKey(nodeId: string): string {
+  return nodeId
+    .replace(/:sheet-corner:\d+$/, "")
+    .replace(/:coxeter-vertex:\d+$/, "")
+    .replace(/:fundamental-face:[^:]+:corner:\d+$/, "")
+    .replace(/:focus:[^:]+:corner:\d+$/, "");
+}
+
+function stableCellSpreadDirection(key: string): Vec3 {
+  let hash = 2166136261;
+  for (let index = 0; index < key.length; index += 1) {
+    hash ^= key.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return stableSphereDirection(Math.abs(hash), 997);
 }
 
 function buildGeneratorDirections(
@@ -488,6 +796,8 @@ function buildRankThreeCellSurfaces(input: {
   focusGenerator?: number;
   relationOrderFilter?: number;
   peelMode: YGammaPeelMode;
+  separationStrength: number;
+  cutaway: NormalizedYGammaCutaway;
 }): RankThreeSceneGeometry {
   const nodes: SceneNode[] = [];
   const edges: SceneEdge[] = [];
@@ -499,6 +809,14 @@ function buildRankThreeCellSurfaces(input: {
     }
     const generators = [...cell.generators].sort((left, right) => left - right);
     if (generators.length !== 3) {
+      continue;
+    }
+    const readabilityRole = rankThreeReadabilityRole(
+      cell,
+      input.cutaway,
+      input.pairOrders,
+    );
+    if (readabilityRole === "hidden-by-cutaway") {
       continue;
     }
     if (
@@ -558,6 +876,8 @@ function buildRankThreeCellSurfaces(input: {
       focusGenerator: input.focusGenerator,
       relationOrderFilter: input.relationOrderFilter,
       peelMode: input.peelMode,
+      separationStrength: input.separationStrength,
+      readabilityRole,
     });
     nodes.push(...embedded.nodes);
     edges.push(...embedded.edges);
@@ -721,10 +1041,10 @@ function buildHingeFace(input: {
       source: nodeId,
       target: boundaryNodeIds[(step + 1) % boundaryNodeIds.length],
       generator: step % 2 === 0 ? left : right,
-      compactLabel: `${step}: ${labelForGenerator(
+      compactLabel: labelForGenerator(
         input.generatorLabels,
         step % 2 === 0 ? left : right,
-      )}`,
+      ),
       isRelationBoundary: true,
       emphasis: "readable-boundary",
       directed: true,
@@ -838,6 +1158,8 @@ function embedRankThreeCoxeterCell(input: {
   focusGenerator?: number;
   relationOrderFilter?: number;
   peelMode: YGammaPeelMode;
+  separationStrength: number;
+  readabilityRole: SceneCell["readabilityRole"];
 }): { nodes: SceneNode[]; edges: SceneEdge[]; cells: SceneCell[] } {
   const { cell, coxeterCell, globalGenerators, generatorDirections } = input;
   const basePoint = coxeterCell.points[0];
@@ -956,6 +1278,8 @@ function embedRankThreeCoxeterCell(input: {
       generatorLabels: input.generatorLabels,
       activePair: input.activePair,
       exposeConstructionVertices: input.focus.exposeConstructionVertices,
+      separationStrength: input.separationStrength,
+      readabilityRole: input.readabilityRole,
     });
   }
   const nodes = coxeterCell.points.flatMap((point, orbitIndex): SceneNode[] => {
@@ -992,36 +1316,35 @@ function embedRankThreeCoxeterCell(input: {
     boundaryNodeIds: boundary.map((orbitIndex) => nodeIds[orbitIndex]),
     localDistance: 3,
     isRelationBoundary: true,
+    readabilityRole: input.readabilityRole,
   }));
-  const edges =
-    input.focus?.exposeConstructionVertices === true
-      ? faceDrawings.flatMap(({ face, boundary }, faceIndex) =>
-          boundary.map((orbitIndex, step): SceneEdge => {
-            const localGenerator =
-              step % 2 === 0 ? face.globalPair[0] : face.globalPair[1];
-            const globalGenerator = globalGenerators[localGenerator];
-            const globalPair: [number, number] = [
-              globalGenerators[face.globalPair[0]],
-              globalGenerators[face.globalPair[1]],
-            ];
-            const active =
-              input.activePair &&
-              relationPairKey(globalPair) === relationPairKey(input.activePair);
-            return {
-              id: `${cell.id}:coxeter-face-edge:${faceIndex}:${step}`,
-              source: nodeIds[orbitIndex],
-              target: nodeIds[boundary[(step + 1) % boundary.length]],
-              generator: globalGenerator,
-              compactLabel: active
-                ? `${step}: ${labelForGenerator(input.generatorLabels, globalGenerator)}`
-                : labelForGenerator(input.generatorLabels, globalGenerator),
-              isRelationBoundary: true,
-              emphasis: active ? "readable-boundary" : undefined,
-              directed: true,
-            };
-          }),
-        )
-      : [];
+  const edges = faceDrawings.flatMap(({ face, boundary }, faceIndex) =>
+    boundary.map((orbitIndex, step): SceneEdge => {
+      const localGenerator =
+        step % 2 === 0 ? face.globalPair[0] : face.globalPair[1];
+      const globalGenerator = globalGenerators[localGenerator];
+      const globalPair: [number, number] = [
+        globalGenerators[face.globalPair[0]],
+        globalGenerators[face.globalPair[1]],
+      ];
+      const active =
+        input.activePair &&
+        relationPairKey(globalPair) === relationPairKey(input.activePair);
+      return {
+        id: `${cell.id}:coxeter-face-edge:${faceIndex}:${step}`,
+        source: nodeIds[orbitIndex],
+        target: nodeIds[boundary[(step + 1) % boundary.length]],
+        generator: globalGenerator,
+        compactLabel: labelForGenerator(input.generatorLabels, globalGenerator),
+        isRelationBoundary: true,
+        labelLeader: true,
+        labelPriority: input.readabilityRole === "focus" ? 28_000 : undefined,
+        suppressSemanticLabel: input.readabilityRole === "incident" && !active,
+        emphasis: active ? "readable-boundary" : undefined,
+        directed: true,
+      };
+    }),
+  );
 
   return peelRankThreeGeometry(
     { nodes, edges, cells },
@@ -1299,6 +1622,8 @@ function embedFundamentalRankThreeFaces(input: {
   generatorLabels: string[];
   activePair?: [number, number];
   exposeConstructionVertices?: boolean;
+  separationStrength: number;
+  readabilityRole: SceneCell["readabilityRole"];
 }): { nodes: SceneNode[]; edges: SceneEdge[]; cells: SceneCell[] } {
   const nodes: SceneNode[] = [];
   const edges: SceneEdge[] = [];
@@ -1323,6 +1648,7 @@ function embedFundamentalRankThreeFaces(input: {
       rightDirection,
       faceIndex,
       Math.max(1, input.faces.length),
+      input.separationStrength,
     );
     const hiddenCornerPositions = cohesiveHiddenCorners(
       leftDirection,
@@ -1330,6 +1656,7 @@ function embedFundamentalRankThreeFaces(input: {
       boundaryLength,
       hiddenCornerCount,
       offset,
+      input.separationStrength,
     );
     const hiddenCornerIds = hiddenCornerPositions.map(
       (_position, cornerIndex) =>
@@ -1356,22 +1683,23 @@ function embedFundamentalRankThreeFaces(input: {
       });
     });
 
-    if (input.exposeConstructionVertices === true) {
-      const active =
-        activePairKey === undefined || pairKeyValue === activePairKey;
-      for (let step = 0; step < boundaryNodeIds.length; step += 1) {
-        const generator = step % 2 === 0 ? left : right;
-        edges.push({
-          id: `${input.cell.id}:fundamental-face-edge:${pairKeyValue}:${step}`,
-          source: boundaryNodeIds[step],
-          target: boundaryNodeIds[(step + 1) % boundaryNodeIds.length],
-          generator,
-          compactLabel: labelForGenerator(input.generatorLabels, generator),
-          isRelationBoundary: true,
-          emphasis: active ? "readable-boundary" : undefined,
-          directed: true,
-        });
-      }
+    const active =
+      activePairKey === undefined || pairKeyValue === activePairKey;
+    for (let step = 0; step < boundaryNodeIds.length; step += 1) {
+      const generator = step % 2 === 0 ? left : right;
+      edges.push({
+        id: `${input.cell.id}:fundamental-face-edge:${pairKeyValue}:${step}`,
+        source: boundaryNodeIds[step],
+        target: boundaryNodeIds[(step + 1) % boundaryNodeIds.length],
+        generator,
+        compactLabel: labelForGenerator(input.generatorLabels, generator),
+        isRelationBoundary: true,
+        labelLeader: true,
+        labelPriority: input.readabilityRole === "focus" ? 28_000 : undefined,
+        suppressSemanticLabel: input.readabilityRole === "incident" && !active,
+        emphasis: active ? "readable-boundary" : undefined,
+        directed: true,
+      });
     }
 
     cells.push({
@@ -1382,6 +1710,7 @@ function embedFundamentalRankThreeFaces(input: {
       boundaryNodeIds,
       localDistance: 3,
       isRelationBoundary: true,
+      readabilityRole: input.readabilityRole,
     });
   });
 
@@ -1601,10 +1930,12 @@ function cohesiveHiddenCorners(
   boundaryLength: number,
   hiddenCornerCount: number,
   offset: Vec3,
+  separationStrength: number,
 ): Vec3[] {
+  const expansion = Math.max(0, separationStrength);
   const outerRadius = Math.min(
-    FACE_OUTER_RADIUS_MAX,
-    FACE_OUTER_RADIUS_BASE + boundaryLength * 0.06,
+    FACE_OUTER_RADIUS_MAX + expansion * 1.2,
+    FACE_OUTER_RADIUS_BASE + boundaryLength * 0.06 + expansion * 0.7,
   );
   const midDirection = normalize(add(left, right));
   const liftNormal = relationNormal(left, right, 0, 1);
@@ -1613,11 +1944,17 @@ function cohesiveHiddenCorners(
   for (let cornerIndex = 0; cornerIndex < hiddenCornerCount; cornerIndex += 1) {
     const t = (cornerIndex + 1) / (hiddenCornerCount + 1);
     const direction = normalize(add(scale(left, 1 - t), scale(right, t)));
-    const bulge = scale(midDirection, Math.sin(Math.PI * t) * FACE_BULGE);
+    const bulge = scale(
+      midDirection,
+      Math.sin(Math.PI * t) * FACE_BULGE * (1 + expansion * 0.34),
+    );
     // Relation faces are readability surfaces, not affine certificates.
     // Lifting hidden corners keeps every 2m-gon legible in the 3D viewer,
     // including decagons where the old construction could sit in one plane.
-    const lift = scale(liftNormal, Math.sin(Math.PI * t) * liftRadius);
+    const lift = scale(
+      liftNormal,
+      Math.sin(Math.PI * t) * liftRadius * (1 + expansion * 0.52),
+    );
     corners.push(
       add(add(add(scale(direction, outerRadius), bulge), offset), lift),
     );
@@ -1637,10 +1974,13 @@ function cohesiveFaceOffset(
   right: Vec3,
   index: number,
   relationCount: number,
+  separationStrength: number,
 ): Vec3 {
   const normal = relationNormal(left, right, index, relationCount);
   const centeredIndex = index - (Math.max(1, relationCount) - 1) / 2;
-  const layer = Math.max(-4, Math.min(4, centeredIndex)) * FACE_LAYER_STEP;
+  const cappedIndex = Math.max(-8, Math.min(8, centeredIndex));
+  const layer =
+    cappedIndex * FACE_LAYER_STEP * (0.55 + separationStrength * 0.58);
   return scale(normal, layer);
 }
 

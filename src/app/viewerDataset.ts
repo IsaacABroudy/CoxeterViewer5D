@@ -107,14 +107,22 @@ export function quotientToGeneratedBall(
     quotient.sourceSystem?.rank ??
     quotient.generatorRank ??
     (Math.max(-1, ...quotient.edges.map((edge) => edge.generator)) + 1 || 1);
+  const jnwStateOrbit = isJnwStateQuotient(quotient);
   return {
     systemName: quotient.name,
     rank,
     nodes: quotient.vertices.map((vertex, index) => ({
       id: vertex.id,
+      label: vertex.label,
+      compactLabel: vertex.label,
       word: vertex.representativeWord ?? [],
       length: vertex.representativeWord?.length ?? 0,
-      position: circularPosition(index, quotient.vertices.length),
+      // JNW state quotients are not Cayley word shells: their vertices are
+      // states in a finite orbit. A non-coplanar orbit layout keeps those
+      // state labels visible and avoids implying this is the Davis complex.
+      position: jnwStateOrbit
+        ? stateOrbitPosition(index, quotient.vertices.length)
+        : circularPosition(index, quotient.vertices.length),
     })),
     edges: quotient.edges.map((edge) => ({
       id: edge.id,
@@ -314,4 +322,32 @@ function circularPosition(
   }
   const angle = (2 * Math.PI * index) / count;
   return [Math.cos(angle) * 1.8, Math.sin(angle) * 1.8, 0];
+}
+
+function stateOrbitPosition(
+  index: number,
+  count: number,
+): [number, number, number] {
+  if (count <= 1) {
+    return [0, 0, 0];
+  }
+  const t = count === 1 ? 0 : index / (count - 1);
+  const z = 1 - 2 * t;
+  const radius = Math.sqrt(Math.max(0, 1 - z * z));
+  const angle = index * Math.PI * (3 - Math.sqrt(5));
+  const scale = 3.4;
+  return [
+    Math.cos(angle) * radius * scale,
+    Math.sin(angle) * radius * scale,
+    z * scale,
+  ];
+}
+
+function isJnwStateQuotient(quotient: QuotientComplex): boolean {
+  return (
+    quotient.name.toLowerCase().includes("jnw state quotient") ||
+    quotient.game?.assignments.some(
+      (assignment) => assignment.id === "jnw-state-directions",
+    ) === true
+  );
 }

@@ -122,6 +122,22 @@ export interface ProjectSessionGameState {
     orbitStateCount: number;
     legalStateCount: number;
     stronglyLegalStateCount: number;
+    reader?: {
+      mode?: "exact-skeleton" | "readable-chart";
+      lens?:
+        | "none"
+        | "state"
+        | "glue"
+        | "relation"
+        | "ascending-link"
+        | "descending-link"
+        | "level-link";
+      railGrouping?: "individual" | "move-class-overview";
+      selectedStateId?: string;
+      selectedGenerator?: number;
+      selectedRelationId?: string;
+      constructionStage?: 1 | 2 | 3 | 4 | 5;
+    };
   };
   selectedVertexId?: string;
   cocycleStatus?: "passed" | "failed" | "incomplete";
@@ -1091,6 +1107,91 @@ function validateJnwLegalSystemState(
       `${path}.stronglyLegalStateCount`,
       errors,
     ),
+    reader: validateJnwReaderState(input.reader, `${path}.reader`, errors),
+  };
+}
+
+function validateJnwReaderState(
+  input: unknown,
+  path: string,
+  errors: ProjectSessionValidationIssue[],
+):
+  | NonNullable<
+      NonNullable<ProjectSessionGameState["jnwLegalSystem"]>["reader"]
+    >
+  | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+  if (!isRecord(input)) {
+    errors.push({ path, message: "reader must be an object when provided." });
+    return undefined;
+  }
+  const constructionStage =
+    input.constructionStage === undefined
+      ? undefined
+      : requireIntegerInRange(
+          input.constructionStage,
+          `${path}.constructionStage`,
+          1,
+          5,
+          errors,
+        );
+  return {
+    mode:
+      input.mode === undefined
+        ? undefined
+        : requireEnum(
+            input.mode,
+            `${path}.mode`,
+            ["exact-skeleton", "readable-chart"] as const,
+            errors,
+          ),
+    lens:
+      input.lens === undefined
+        ? undefined
+        : requireEnum(
+            input.lens,
+            `${path}.lens`,
+            [
+              "none",
+              "state",
+              "glue",
+              "relation",
+              "ascending-link",
+              "descending-link",
+              "level-link",
+            ] as const,
+            errors,
+          ),
+    railGrouping:
+      input.railGrouping === undefined
+        ? undefined
+        : requireEnum(
+            input.railGrouping,
+            `${path}.railGrouping`,
+            ["individual", "move-class-overview"] as const,
+            errors,
+          ),
+    selectedStateId: optionalString(
+      input.selectedStateId,
+      `${path}.selectedStateId`,
+      errors,
+    ),
+    selectedGenerator:
+      input.selectedGenerator === undefined
+        ? undefined
+        : requireInteger(
+            input.selectedGenerator,
+            `${path}.selectedGenerator`,
+            errors,
+          ),
+    selectedRelationId: optionalString(
+      input.selectedRelationId,
+      `${path}.selectedRelationId`,
+      errors,
+    ),
+    constructionStage: constructionStage as 1 | 2 | 3 | 4 | 5 | undefined,
   };
 }
 
@@ -1216,6 +1317,21 @@ function requireInteger(
     return 0;
   }
   return value;
+}
+
+function requireIntegerInRange(
+  value: unknown,
+  path: string,
+  min: number,
+  max: number,
+  errors: ProjectSessionValidationIssue[],
+): number {
+  const parsed = requireInteger(value, path, errors);
+  if (parsed < min || parsed > max) {
+    errors.push({ path, message: `must be between ${min} and ${max}.` });
+    return min;
+  }
+  return parsed;
 }
 
 function validateIntegerArray(

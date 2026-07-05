@@ -49,6 +49,14 @@ async function switchToResearchMode(page: Page): Promise<void> {
     .click();
 }
 
+async function switchModel(page: Page, model: RegExp): Promise<void> {
+  await page
+    .getByRole("group", { name: /choose mathematical view/i })
+    .first()
+    .getByRole("button", { name: model })
+    .click();
+}
+
 test.describe("public alpha demo screenshots", () => {
   test.use({ viewport: { width: 1440, height: 920 } });
 
@@ -75,10 +83,7 @@ test.describe("public alpha demo screenshots", () => {
     await page.goto("/");
     await switchToResearchMode(page);
     await page.getByLabel(/example/i).selectOption("A3");
-    await page
-      .getByLabel(/viewer controls/i)
-      .getByRole("button", { name: /open 3D y_gamma model/i })
-      .click();
+    await switchModel(page, /^Y_Gamma$/);
     await page
       .getByLabel(/Narrated Y_Gamma focus presets/i)
       .getByRole("button", { name: /one rank-three cell/i })
@@ -96,18 +101,16 @@ test.describe("public alpha demo screenshots", () => {
     await page
       .getByLabel(/example/i)
       .selectOption("compact_5_prism_makarov_p2");
-    await page
-      .getByLabel(/viewer controls/i)
-      .getByRole("button", { name: /open 3D y_gamma model/i })
-      .click();
-    const m5Relation = page
-      .getByLabel(/Y_Gamma relation picker/i)
-      .getByRole("button", { name: /m=5/i })
-      .first();
+    await switchModel(page, /^Y_Gamma$/);
+    const relationSelect = page.getByLabel(/focus relation/i);
+    const m5Value = await relationSelect
+      .locator("option", { hasText: /m=5/i })
+      .first()
+      .getAttribute("value");
 
-    await expect(m5Relation).toBeVisible();
-    await m5Relation.click();
-    await expect(m5Relation).toHaveAttribute("data-active", "true");
+    expect(m5Value).toBeTruthy();
+    await relationSelect.selectOption(m5Value ?? "");
+    await expect(relationSelect).toHaveValue(m5Value ?? "");
     await waitForRenderedScene(page);
     await waitForCells(page);
     await capture(page, `${screenshotDir}/y-gamma-p2-m5-relation.png`);
@@ -120,7 +123,7 @@ test.describe("public alpha demo screenshots", () => {
       has: page.getByRole("heading", { name: /research workflow/i }),
     });
 
-    await workflow.getByRole("button", { name: /quotient/i }).click();
+    await workflow.getByRole("button", { name: /^3Quotient$/ }).click();
     await workflow.getByRole("button", { name: /load demo quotient/i }).click();
     await workflow.getByRole("button", { name: /ascending link/i }).click();
 

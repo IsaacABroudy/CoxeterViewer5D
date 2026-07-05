@@ -89,6 +89,8 @@ describe("project sessions", () => {
         activeBundleId: "bundle:local",
         bundleIds: ["bundle:local"],
         game: {
+          workflowKind: "jnw-legal-system",
+          claimStatus: "jnw-faithful",
           assignmentKind: "generator-cochain",
           activeAssignmentId: "working-generator-cochain",
           activeCocycleId: "working-generator-cochain-cocycle",
@@ -96,6 +98,26 @@ describe("project sessions", () => {
             { generator: 0, value: 1 },
             { generator: 1, value: -1 },
           ],
+          jnwLegalSystem: {
+            sourceSystemName: "JNW cube graph RACG",
+            initialState: [0, 2],
+            moves: [
+              { generator: 0, toggles: [0, 2, 4, 6] },
+              { generator: 1, toggles: [1, 3, 5, 7] },
+            ],
+            orbitStateCount: 4,
+            legalStateCount: 4,
+            stronglyLegalStateCount: 4,
+            reader: {
+              mode: "readable-chart",
+              lens: "glue",
+              railGrouping: "individual",
+              selectedStateId: "jnw:state:0-2",
+              selectedGenerator: 1,
+              selectedRelationId: "jnw:rank-two:0-1:state:0-2",
+              constructionStage: 3,
+            },
+          },
           selectedVertexId: "base",
           cocycleStatus: "passed",
           failedCellIds: [],
@@ -123,6 +145,14 @@ describe("project sessions", () => {
             { generator: 1, value: -1 },
           ],
           cocycleStatus: "passed",
+          jnwLegalSystem: {
+            reader: {
+              mode: "readable-chart",
+              lens: "glue",
+              selectedGenerator: 1,
+              constructionStage: 3,
+            },
+          },
         },
       },
       view: {
@@ -151,6 +181,25 @@ describe("project sessions", () => {
         showNodeLabels: false,
         showEdgeLabels: false,
       },
+      experiments: {
+        activeBundleId: undefined,
+        bundleIds: [],
+        game: {
+          generatorValues: [],
+          jnwLegalSystem: {
+            sourceSystemName: "JNW cube graph RACG",
+            initialState: [],
+            moves: [],
+            orbitStateCount: 4,
+            legalStateCount: 4,
+            stronglyLegalStateCount: 4,
+            reader: {
+              mode: "mystery",
+              constructionStage: 9,
+            },
+          },
+        },
+      },
     };
 
     const result = validateProjectSession(invalid);
@@ -161,6 +210,12 @@ describe("project sessions", () => {
     );
     expect(formatSessionIssues(result.errors).join("\n")).toContain(
       "$.view.mode",
+    );
+    expect(formatSessionIssues(result.errors).join("\n")).toContain(
+      "$.experiments.game.jnwLegalSystem.reader.mode",
+    );
+    expect(formatSessionIssues(result.errors).join("\n")).toContain(
+      "$.experiments.game.jnwLegalSystem.reader.constructionStage",
     );
   });
 

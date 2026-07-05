@@ -102,6 +102,17 @@ function validateNode(
     errors.push(`${path}.id must be a non-empty string.`);
   }
 
+  if (value.label !== undefined && typeof value.label !== "string") {
+    errors.push(`${path}.label must be a string when provided.`);
+  }
+
+  if (
+    value.compactLabel !== undefined &&
+    typeof value.compactLabel !== "string"
+  ) {
+    errors.push(`${path}.compactLabel must be a string when provided.`);
+  }
+
   if (!Array.isArray(value.word)) {
     errors.push(`${path}.word must be an array of generator indices.`);
   } else {

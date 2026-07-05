@@ -4,13 +4,20 @@ import type {
   DavisTwoCell,
 } from "../types";
 import type { DavisCellProxy } from "../davis";
+import {
+  formatJnwStateLabel,
+  formatJnwStateName,
+  type JnwLegalOrbitSummary,
+} from "../game";
 import type { QuotientComplex, QuotientTwoCell } from "../quotient";
+import type { TopologyLensId } from "./researchWorkflow";
 import type { YGammaCellRecord } from "./yGammaAtlas";
 
 export type TopologyInspectorLayer =
   | "Davis"
   | "Y_Gamma"
   | "quotient"
+  | "JNW state quotient"
   | "geometric projection";
 
 export type TopologyInspectorStatus =
@@ -18,6 +25,7 @@ export type TopologyInspectorStatus =
   | "exact incidence"
   | "visual proxy"
   | "projection"
+  | "browser diagnostic"
   | "uncertified";
 
 export type TopologyInspectorSubject =
@@ -32,6 +40,13 @@ export type TopologyInspectorSubject =
       kind: "game-assignment";
       quotient: QuotientComplex;
       selectedVertexId?: string;
+    }
+  | {
+      kind: "jnw-state-link";
+      quotient: QuotientComplex;
+      summary: JnwLegalOrbitSummary;
+      selectedStateId?: string;
+      lensId: TopologyLensId;
     };
 
 export interface TopologyExplanation {
@@ -39,9 +54,25 @@ export interface TopologyExplanation {
   layer: TopologyInspectorLayer;
   status: TopologyInspectorStatus;
   summary: string;
+  actionHint?: string;
   rows: Array<{ label: string; value: string }>;
   boundaryWord?: string[];
   badges: string[];
+}
+
+export function buildJnwStateLinkSubject(
+  quotient: QuotientComplex,
+  summary: JnwLegalOrbitSummary,
+  selectedStateId: string | undefined,
+  lensId: TopologyLensId,
+): Extract<TopologyInspectorSubject, { kind: "jnw-state-link" }> {
+  return {
+    kind: "jnw-state-link",
+    quotient,
+    summary,
+    selectedStateId,
+    lensId,
+  };
 }
 
 /**
@@ -67,6 +98,7 @@ export function buildTopologyExplanation(input: {
         : statusForSystem(system),
       summary:
         "Select a chamber, relation cell, or quotient object to inspect its topology.",
+      actionHint: "Click a chamber or filled relation cell in the viewer.",
       rows: [],
       badges: statusBadges(system, input),
     };
@@ -83,6 +115,7 @@ export function buildTopologyExplanation(input: {
         ? "projection"
         : "exact incidence",
       summary: `Since m=${cell.m}, this Davis relation cell is a ${cell.boundaryNodeIds.length}-gon with alternating ${labels.join("/")} edges.`,
+      actionHint: "Use the pair matrix or relation walk to compare its edges.",
       rows: [
         { label: "Cell id", value: cell.id },
         { label: "Finite subset", value: `{${labels.join(", ")}}` },
@@ -105,6 +138,7 @@ export function buildTopologyExplanation(input: {
       layer: "Y_Gamma",
       status: "exact incidence",
       summary: cell.description,
+      actionHint: "Orbit the 3D model; labels name the generator arrows.",
       rows: [
         { label: "Cell id", value: cell.id },
         { label: "Rank", value: String(cell.rank) },
@@ -137,6 +171,7 @@ export function buildTopologyExplanation(input: {
           ? "certified"
           : "uncertified",
       summary: `A quotient rank-two cell for ${labels.join("-")} with m=${cell.m}.`,
+      actionHint: "Focus the cell to check its boundary word and edge labels.",
       rows: [
         { label: "Pair", value: labels.join(", ") },
         {
@@ -172,6 +207,8 @@ export function buildTopologyExplanation(input: {
           ? "visual proxy"
           : "exact incidence",
       summary: `A rank-${subject.cell.rank} spherical Davis cell record for {${labels.join(", ")}}.`,
+      actionHint:
+        "Treat the drawn hull as a proxy unless the status says exact incidence.",
       rows: [
         { label: "Subset", value: subject.cell.sphericalSubsetId },
         { label: "Generators", value: labels.join(", ") },
@@ -205,6 +242,8 @@ export function buildTopologyExplanation(input: {
       layer: "Davis",
       status: "visual proxy",
       summary: `A visual proxy hull for the spherical subset {${labels.join(", ")}}; incidence may be exact, but the drawn hull is not geometry.`,
+      actionHint:
+        "Use the inspector rows for incidence; do not read metric geometry from the hull.",
       rows: [
         { label: "Subset", value: subject.proxy.sphericalSubsetId },
         { label: "Generators", value: labels.join(", ") },
@@ -224,6 +263,8 @@ export function buildTopologyExplanation(input: {
       status: "exact incidence",
       summary:
         "The local link records the spherical subsets visible at the selected chamber.",
+      actionHint:
+        "Use link lenses to isolate ascending, descending, or level pieces.",
       rows: [
         { label: "Selected chamber", value: subject.nodeId },
         {
@@ -237,15 +278,16 @@ export function buildTopologyExplanation(input: {
   }
 
   if (subject.kind === "game-assignment") {
+    const schreierStatus =
+      subject.quotient.schreierCertificate?.status ?? "not supplied";
     return {
       title: "Quotient/game diagnostics",
       layer: "quotient",
-      status:
-        subject.quotient.schreierCertificate?.status === "passed"
-          ? "certified"
-          : "uncertified",
+      status: schreierStatus === "passed" ? "exact incidence" : "uncertified",
       summary:
-        "Integer edge labels are checked on quotient rank-two boundaries and classified around the selected vertex.",
+        "Integer edge labels and JNW state/move directions are browser diagnostics on top of the quotient action.",
+      actionHint:
+        "Choose the cochain or JNW workflow, then inspect links at the selected vertex.",
       rows: [
         { label: "Selected vertex", value: subject.selectedVertexId ?? "none" },
         {
@@ -257,12 +299,71 @@ export function buildTopologyExplanation(input: {
           value: String(subject.quotient.game?.cocycles?.length ?? 0),
         },
         {
+          label: "Quotient action",
+          value: schreierStatus,
+        },
+        {
           label: "Torsion-free",
           value:
             subject.quotient.torsionFreeCertificate?.status ?? "not supplied",
         },
       ],
-      badges: ["quotient", "PL Morse helper"],
+      badges: ["quotient", "game diagnostic"],
+    };
+  }
+
+  if (subject.kind === "jnw-state-link") {
+    const sourceSystem = subject.quotient.sourceSystem ?? system;
+    const selectedState =
+      subject.summary.states.find(
+        (state) => state.id === subject.selectedStateId,
+      ) ?? subject.summary.states[0];
+    const stateName = selectedState
+      ? formatJnwStateName(subject.summary, selectedState)
+      : "none";
+    const stateSubsetLabel = selectedState
+      ? formatJnwStateLabel(selectedState, sourceSystem)
+      : "none";
+    const lensLabel = jnwLinkLensLabel(subject.lensId);
+    const orbitView = subject.lensId === "state-quotient-orbit";
+    return {
+      title: `${lensLabel} at ${stateName}`,
+      layer: "JNW state quotient",
+      status: "browser diagnostic",
+      summary: orbitView
+        ? "This is the finite orbit of JNW states under the selected move system. The selected state controls the Gamma subset and link diagnostics."
+        : "This link is inspected at a selected state vertex in the derived JNW state quotient, not inside the ambient Davis view.",
+      actionHint:
+        "Use the JNW panel to choose a state, show it on Gamma, or switch to ascending, descending, level, and full state-link views.",
+      rows: [
+        {
+          label: "What is selected?",
+          value: "State vertex in the JNW orbit quotient.",
+        },
+        {
+          label: "Why is it here?",
+          value: "It is reached from the initial state by applying JNW moves.",
+        },
+        {
+          label: "Exact or drawing?",
+          value:
+            "The state orbit and link classification are exact browser diagnostics for the supplied move system; the 3D placement is a drawing.",
+        },
+        {
+          label: "Selected state",
+          value:
+            stateName === "none"
+              ? "none"
+              : `${stateName} = ${stateSubsetLabel}`,
+        },
+        { label: "Active link", value: lensLabel },
+        { label: "Claim status", value: subject.summary.claimStatus },
+      ],
+      badges: [
+        "JNW state quotient",
+        "browser diagnostic",
+        orbitView ? "state orbit" : "selected state link",
+      ],
     };
   }
 
@@ -273,6 +374,8 @@ export function buildTopologyExplanation(input: {
       ? "projection"
       : statusForSystem(system),
     summary: `Chamber word length ${subject.length}.`,
+    actionHint:
+      "Step by generator buttons or press F to recenter this chamber.",
     rows: [
       { label: "Node id", value: subject.id },
       {
@@ -283,6 +386,23 @@ export function buildTopologyExplanation(input: {
     ],
     badges: statusBadges(system, input),
   };
+}
+
+function jnwLinkLensLabel(lensId: TopologyLensId): string {
+  switch (lensId) {
+    case "ascending-link":
+      return "Ascending link at selected state";
+    case "descending-link":
+      return "Descending link at selected state";
+    case "level-link":
+      return "Level link at selected state";
+    case "full-local-link":
+      return "Full local link at selected state";
+    case "state-quotient-orbit":
+      return "JNW state quotient";
+    default:
+      return "State-quotient link at selected state";
+  }
 }
 
 function statusForSystem(system: CoxeterSystemInput): TopologyInspectorStatus {

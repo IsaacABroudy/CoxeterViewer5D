@@ -43,6 +43,7 @@ export interface FigureExportBundle {
     preset: ViewPresetId;
     comparisonMode: ViewComparisonMode;
     topologyLensId: TopologyLensId;
+    yGammaReadableView?: unknown;
   };
   selected: {
     nodeId?: string;
@@ -128,6 +129,14 @@ export function defaultGalleryEntries(): ExampleGalleryEntry[] {
       family: "quotient",
       summary: "Load the certified identity-subgroup quotient and cocycle.",
       actionLabel: "Open workflow",
+    },
+    {
+      id: "jnw:cube-graph",
+      label: "JNW cube legal-system demo",
+      family: "quotient",
+      summary:
+        "Use the 3-cube defining graph to play the JNW state/move game with a faithful right-angled example.",
+      actionLabel: "Open JNW game",
     },
     {
       id: "compact:5-cube",

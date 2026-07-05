@@ -49,6 +49,30 @@ describe("scene label helpers", () => {
     expect(picked.map((entry) => entry.label)).toEqual(["s0", "s1"]);
   });
 
+  it("does not keep two generator labels for one semantic edge segment", () => {
+    const picked = selectSegmentLabelBudget(
+      [
+        {
+          id: "relation-copy-a",
+          segmentKey: "shared",
+          label: "s2",
+          priority: 4,
+        },
+        {
+          id: "relation-copy-b",
+          segmentKey: "shared",
+          label: "s5",
+          priority: 6,
+        },
+        { id: "spine", segmentKey: "shared", label: "s3", priority: 60 },
+      ],
+      10,
+    );
+
+    expect(picked).toHaveLength(1);
+    expect(picked[0].label).toBe("s3");
+  });
+
   it("prefilters spatial picking spheres only after the candidate threshold", () => {
     const small = prefilterSpatialPickSpheres(
       [

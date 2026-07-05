@@ -52,13 +52,13 @@ export function buildWhatAmISeeingSummary(input: {
   const selected = input.selectedNode?.id ?? "none";
   const viewFact = input.isYGammaBaseComplex
     ? input.yGammaMainView === "gamma"
-      ? "Defining graph Gamma: vertices are Coxeter generators and edges record the non-right Coxeter matrix entries. This is the presentation diagram, not a cell complex."
+      ? "Defining graph Gamma: vertices are Coxeter generators and edges record finite rank-two Coxeter relations, including m=2 commuting pairs. Pairs with m=inf are omitted. This is the presentation graph, not a cell complex."
       : input.yGammaMainView === "nerve"
         ? "Nerve diagnostic: the main viewer shows generator vertices, finite rank-two chords, and spherical simplices derived from Y_Gamma. This is not the complex itself."
         : "Y_Gamma complex view: the main 3D viewer shows the 2-skeleton as one object: a base vertex, oriented generator arrows, and filled rank-two relation sheets glued to those arrows."
     : input.graphView === "on-graph"
-      ? `Local Chamber 3D: selected chamber ${selected} is centered; only the distance-${input.localDepth} graph neighborhood is drawn with visual cell-panel offsets when cells are enabled.`
-      : "Global view: the full generated finite-radius ball is drawn subject to render budgets.";
+      ? `Look near a chamber: selected chamber ${selected} is centered; only the distance-${input.localDepth} graph neighborhood is drawn with visual cell-panel offsets when cells are enabled.`
+      : "See all: the full generated finite-radius ball is drawn subject to render budgets.";
   const geometryFact =
     input.mode === "geometric"
       ? input.geometryCertified
@@ -67,7 +67,7 @@ export function buildWhatAmISeeingSummary(input: {
       : "Shell mode is a deterministic drawing convention for the Cayley graph, not hyperbolic geometry.";
   const davisFact =
     input.isYGammaBaseComplex && input.yGammaMainView === "gamma"
-      ? `${input.visibleEdgeCount} defining-graph relation edges are visible; m=2 commuting pairs are omitted by diagram convention.`
+      ? `${input.visibleEdgeCount} defining-graph relation edges are visible; m=2 commuting pairs are included intentionally, while m=inf pairs are omitted.`
       : input.visibleHigherProxyCount > 0
         ? `${input.visibleRankTwoCellCount} exact rank-two Davis cells and ${input.visibleHigherProxyCount} higher-rank visual proxies are visible.`
         : `${input.visibleRankTwoCellCount} exact rank-two Davis cells are visible.`;
@@ -80,7 +80,7 @@ export function buildWhatAmISeeingSummary(input: {
           ? "Nerve diagnostic derived from Y_Gamma"
           : "Y_Gamma fundamental-domain cell complex"
       : input.graphView === "on-graph"
-        ? "Local chamber neighborhood"
+        ? "Look near a chamber neighborhood"
         : "Finite-radius Cayley ball",
     facts: [
       `Dataset: ${input.system.name}; radius ${radius}; preset ${input.activePreset}.`,
@@ -116,6 +116,29 @@ export function groupWarnings(warnings: string[]): WarningGroup[] {
     ) {
       buckets.important.push(warning);
     } else if (
+      lower.includes("omitted") ||
+      lower.includes("hidden") ||
+      lower.includes("truncated") ||
+      lower.includes("clipped") ||
+      lower.includes("radius") ||
+      lower.includes("local") ||
+      lower.includes("cap") ||
+      lower.includes("budget")
+    ) {
+      buckets.omitted.push(warning);
+    } else if (
+      lower.includes("disabled") ||
+      lower.includes("missing") ||
+      lower.includes("unavailable") ||
+      lower.includes("cannot") ||
+      lower.includes("not supplied") ||
+      lower.includes("backend") ||
+      lower.includes("certificate") ||
+      lower.includes("checker") ||
+      lower.includes("tool")
+    ) {
+      buckets.backend.push(warning);
+    } else if (
       lower.includes("approx") ||
       lower.includes("projection") ||
       lower.includes("numerical") ||
@@ -123,14 +146,6 @@ export function groupWarnings(warnings: string[]): WarningGroup[] {
       lower.includes("visualization")
     ) {
       buckets.approximation.push(warning);
-    } else if (
-      lower.includes("omitted") ||
-      lower.includes("hidden") ||
-      lower.includes("truncated") ||
-      lower.includes("local") ||
-      lower.includes("budget")
-    ) {
-      buckets.omitted.push(warning);
     } else {
       buckets.backend.push(warning);
     }

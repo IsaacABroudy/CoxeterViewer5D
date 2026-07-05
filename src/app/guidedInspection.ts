@@ -131,19 +131,20 @@ const guideDefinitions: GuidedInspectionDefinition[] = [
   {
     id: "quotient-game-experiment",
     label: "Quotient/game experiment",
-    summary: "Use quotient-style data to inspect cocycles and link directions.",
+    summary:
+      "Compare quotient cocycles with the JNW cube state/move legal-system game.",
     aliases: ["quotient-game"],
     steps: [
       {
         id: "open-quotient",
         title: "Open quotient-style data",
-        body: "Imported quotients and Y_Gamma share the quotient/game diagnostic surface.",
+        body: "Use I2(5) for a quotient/cocycle artifact or the JNW cube graph for state-dependent legal-system directions.",
         focus: "quotient",
       },
       {
         id: "read-cocycle",
         title: "Read game diagnostics",
-        body: "Boundary sums and ascending/descending links are shown at the selected vertex.",
+        body: "Generator-uniform cochains check boundary sums; JNW moves build a state quotient and classify ascending/descending links by state.",
         focus: "quotient",
       },
       {

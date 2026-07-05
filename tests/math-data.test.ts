@@ -7,6 +7,7 @@ import compact5PolytopeP1DoubleMakarov from "../public/examples/compact_5_polyto
 import compact5PrismMakarov from "../public/examples/compact_5_prism_makarov.json";
 import compact5PrismMakarovP2 from "../public/examples/compact_5_prism_makarov_p2.json";
 import I2_5 from "../public/examples/I2_5.json";
+import jnwCubeGraph from "../public/examples/jnw_cube_graph.json";
 import universalRank3 from "../public/examples/universal_rank3.json";
 import {
   browserApproxBackend,
@@ -50,11 +51,39 @@ describe("Coxeter input validation", () => {
     expectValid(I2_5);
     expectValid(A2);
     expectValid(A3);
+    expectValid(jnwCubeGraph);
     expectValid(universalRank3);
     expectValid(compact5CubeGamma1);
     expectValid(compact5PrismMakarov);
     expectValid(compact5PolytopeP1DoubleMakarov);
     expectValid(compact5PrismMakarovP2);
+  });
+
+  it("stores the JNW cube graph as the 3-cube 1-skeleton RACG", () => {
+    expectValid(jnwCubeGraph);
+
+    expect(jnwCubeGraph.rank).toBe(8);
+    expect(jnwCubeGraph.dataStatus).toBe("verified-source");
+    expect(jnwCubeGraph.sourceRefs?.[0]?.locator).toContain("Section 5.a.1");
+
+    let commutingPairs = 0;
+    for (let i = 0; i < jnwCubeGraph.rank; i += 1) {
+      for (let j = i + 1; j < jnwCubeGraph.rank; j += 1) {
+        const left = jnwCubeGraph.generators[i].label.slice(1);
+        const right = jnwCubeGraph.generators[j].label.slice(1);
+        const hammingDistance = [...left].filter(
+          (digit, index) => digit !== right[index],
+        ).length;
+        const entry = jnwCubeGraph.coxeterMatrix[i][j];
+        if (hammingDistance === 1) {
+          expect(entry).toBe(2);
+          commutingPairs += 1;
+        } else {
+          expect(entry).toBe("inf");
+        }
+      }
+    }
+    expect(commutingPairs).toBe(12);
   });
 
   it("keeps the certified compact 5-cube source data explicit", () => {

@@ -30,11 +30,14 @@ import {
 } from "../davis";
 import {
   classifyIncidentEdges,
+  buildJnwLayerBreadcrumb,
   createBipartiteJnwMoveSystem,
   createDefaultJnwMoveSystem,
   createDefaultJnwState,
   createJnwState,
   createGeneratorGameAssignment,
+  formatJnwStateLabel,
+  formatJnwStateName,
   invertGeneratorAssignment,
   jnwOrbitToQuotientComplex,
   resolveIntegerEdgeAssignment,
@@ -46,10 +49,22 @@ import {
   type GameWorkflowKind,
   type JnwLegalOrbitSummary,
   type JnwMoveSystem,
+  type JnwRankTwoDiagnostic,
   type JnwState,
   type QuotientGameData,
 } from "../game";
 import { placeCayleyNodesInHyperbolicGeometry } from "../geometry";
+import {
+  buildJnwGammaStateDiagram,
+  buildJnwStateQuotientYGammaScene,
+  decorateJnwStateQuotientScene,
+  jnwStateChartColor,
+  type JnwQuotientConstructionStage,
+  type JnwQuotientSheetMode,
+  type JnwRailGrouping,
+  type JnwReaderLens,
+  type JnwReaderMode,
+} from "./jnwStateVisual";
 import {
   QuotientValidationError,
   parseQuotientComplex,
@@ -60,6 +75,7 @@ import {
   SceneView,
   type SceneCell,
   type SceneEdge,
+  type SceneGenerator,
   type SceneNode,
   type SceneRenderStats,
 } from "../render/SceneView";
@@ -96,11 +112,22 @@ import {
   type YGammaCellAtlas,
   type YGammaCellRecord,
 } from "./yGammaAtlas";
+import {
+  findRankThreeFocusContainingPair,
+  rankThreeFocusPairOptions,
+} from "./yGammaRankThreeFocus";
 import type {
   YGamma2SkeletonScene,
   YGamma2SkeletonSceneOptions,
 } from "./yGammaScene";
-import { type YGammaPeelMode, type YGammaRankThreeFocus } from "./yGammaScene";
+import {
+  buildYGamma2SkeletonScene,
+  type YGammaCellSeparation,
+  type YGammaCutawayMode,
+  type YGammaPeelMode,
+  type YGammaRankThreeFocus,
+  type YGammaSeparationValue,
+} from "./yGammaScene";
 import { createYGammaSceneClient } from "./yGammaSceneClient";
 import {
   buildLocalNeighborhoodExport,
@@ -119,7 +146,7 @@ import {
   type LabelScope,
   type ViewPresetId,
 } from "./localView";
-import { generatedBallIdentity } from "./stableHash";
+import { buildSceneRevisionSet, generatedBallIdentity } from "./stableHash";
 import {
   buildWhatAmISeeingSummary,
   groupWarnings,
@@ -129,6 +156,7 @@ import {
 import {
   buildDefiningGraphScene,
   type DefiningGraphScene,
+  type DefiningGraphLayoutMode,
 } from "./definingGraphScene";
 import {
   activeGuidedInspectionStep,
@@ -167,9 +195,17 @@ import {
 } from "../topology";
 import {
   buildTopologyExplanation,
+  buildJnwStateLinkSubject,
   type TopologyExplanation,
   type TopologyInspectorSubject,
 } from "./topologyInspector";
+import {
+  inspectorAnswers,
+  modelExplanationForLabel,
+  modelExplanations,
+  startHereActions,
+  type StartHereActionId,
+} from "./orientation";
 import {
   createAnnotation,
   createCameraBookmark,
@@ -210,6 +246,7 @@ import compact5PrismMakarovP2 from "../examples/compact_5_prism_makarov_p2.json"
 import hyperbolicToyRank2 from "../examples/hyperbolic_toy_rank2.json";
 import I2_5 from "../examples/I2_5.json";
 import I2_5IdentityQuotient from "../examples/I2_5_identity_quotient.json";
+import jnwCubeGraph from "../examples/jnw_cube_graph.json";
 import universalRank3 from "../examples/universal_rank3.json";
 
 type ViewerMode = "shell" | "geometric";
@@ -228,6 +265,36 @@ type YGammaCameraBookmark =
   | "square-family"
   | "hexagon-family"
   | "rank-three-cell";
+type YGammaStarLens =
+  | "generator-star"
+  | "edge-star"
+  | "relation-star"
+  | "rank-three-cell-star"
+  | "jnw-ascending-star"
+  | "jnw-descending-star";
+type YGammaInspectMode =
+  | "inspect-cell"
+  | "inspect-edge"
+  | "select-relation-family"
+  | "orbit-selected-object";
+type YGammaCameraPath =
+  | "none"
+  | "selected-relation"
+  | "square-family"
+  | "hexagon-family"
+  | "shared-generator"
+  | "relation-star";
+
+interface YGammaReadableViewState {
+  cutawayMode: YGammaCutawayMode;
+  relationStarActive: boolean;
+  starLens?: YGammaStarLens;
+  separationValue: YGammaSeparationValue;
+  inspectMode: YGammaInspectMode;
+  cameraPath: YGammaCameraPath;
+  smallAtlasOpen: boolean;
+  compareDrawing: boolean;
+}
 
 interface ExampleRecord {
   id: string;
@@ -303,6 +370,11 @@ const bundledExamples: ExampleRecord[] = [
     input: parseCoxeterSystemInput(universalRank3),
   },
   {
+    id: "jnw_cube_graph",
+    label: "JNW cube graph",
+    input: parseCoxeterSystemInput(jnwCubeGraph),
+  },
+  {
     id: "compact_5_prism_makarov",
     label: "Compact 5-prism P0 Makarov",
     input: parseCoxeterSystemInput(compact5PrismMakarov),
@@ -324,11 +396,14 @@ const bundledExamples: ExampleRecord[] = [
   },
 ];
 
+const jnwCubeExampleId = "jnw_cube_graph";
+const jnwCubeLegalInitialState = [0, 1, 2, 5];
+
 const viewPresetOptions: Array<{ id: ViewPresetId; label: string }> = [
-  { id: "global", label: "Global" },
-  { id: "local-chamber", label: "Local Chamber" },
+  { id: "global", label: "See all" },
+  { id: "local-chamber", label: "Look near a chamber" },
   { id: "rank-two-cells", label: "Rank-Two Cells" },
-  { id: "geometric-projection", label: "Geometric Projection" },
+  { id: "geometric-projection", label: "Projection drawing" },
 ];
 
 function preferredGeometricProjection(
@@ -364,79 +439,28 @@ function initialYGammaSceneState(): {
   };
 }
 
-function hashVersionParts(parts: Iterable<string>): string {
-  let hash = 0x811c9dc5;
-  for (const part of parts) {
-    for (let index = 0; index < part.length; index += 1) {
-      hash ^= part.charCodeAt(index);
-      hash = Math.imul(hash, 0x01000193);
-    }
-    hash ^= 31;
-    hash = Math.imul(hash, 0x01000193);
+function yGammaSeparationValueForPreset(
+  separation: YGammaCellSeparation,
+): YGammaSeparationValue {
+  if (separation === "coherent") {
+    return 0;
   }
-  return (hash >>> 0).toString(36);
+  if (separation === "expanded") {
+    return 100;
+  }
+  return 50;
 }
 
-function sceneNumber(value: number | undefined): string {
-  return Number.isFinite(value) ? Number(value).toFixed(4) : "";
-}
-
-// SceneView treats this value as the boundary between topology rebuilds and
-// cheap appearance updates. Include only data that changes object identity,
-// incidence, visibility, or positions; labels and colors belong elsewhere.
-function sceneStructureVersion(
-  nodes: SceneNode[],
-  edges: SceneEdge[],
-  cells: SceneCell[],
-): string {
-  const parts: string[] = [
-    `n:${nodes.length}`,
-    `e:${edges.length}`,
-    `c:${cells.length}`,
-  ];
-
-  for (const node of nodes) {
-    const position = node.position ?? [undefined, undefined, undefined];
-    parts.push(
-      [
-        "n",
-        node.id,
-        node.length,
-        node.hidden ? 1 : 0,
-        sceneNumber(node.localDistance),
-        sceneNumber(position[0]),
-        sceneNumber(position[1]),
-        sceneNumber(position[2]),
-      ].join(":"),
-    );
+function yGammaSeparationPresetForValue(
+  value: YGammaSeparationValue,
+): YGammaCellSeparation {
+  if (value <= 20) {
+    return "coherent";
   }
-  for (const edge of edges) {
-    parts.push(
-      [
-        "e",
-        edge.id,
-        edge.source,
-        edge.target,
-        edge.generator,
-        edge.directed ? 1 : 0,
-      ].join(":"),
-    );
+  if (value >= 80) {
+    return "expanded";
   }
-  for (const cell of cells) {
-    parts.push(
-      [
-        "c",
-        cell.id,
-        cell.generatorPair.join("-"),
-        cell.boundaryNodeIds.join(","),
-        sceneNumber(cell.localDistance),
-        sceneNumber(cell.dimension),
-        cell.sourceCellId ?? "",
-      ].join(":"),
-    );
-  }
-
-  return hashVersionParts(parts);
+  return "readable";
 }
 
 const emptySceneNodes: SceneNode[] = [];
@@ -582,6 +606,23 @@ export function App() {
       }
     | undefined
   >(undefined);
+  const [selectedJnwStateId, setSelectedJnwStateId] = useState<
+    string | undefined
+  >(undefined);
+  const [gammaHighlightedJnwStateId, setGammaHighlightedJnwStateId] = useState<
+    string | undefined
+  >(undefined);
+  const [jnwLayerCompareOpen, setJnwLayerCompareOpen] = useState(false);
+  const [jnwReaderMode, setJnwReaderMode] =
+    useState<JnwReaderMode>("readable-chart");
+  const [jnwReaderLens, setJnwReaderLens] = useState<JnwReaderLens>("state");
+  const [jnwRailGrouping, setJnwRailGrouping] =
+    useState<JnwRailGrouping>("individual");
+  const [selectedJnwGenerator, setSelectedJnwGenerator] = useState(0);
+  const [jnwQuotientSheetMode, setJnwQuotientSheetMode] =
+    useState<JnwQuotientSheetMode>("glass");
+  const [jnwQuotientConstructionStage, setJnwQuotientConstructionStage] =
+    useState<JnwQuotientConstructionStage>(4);
   const [notebookImportError, setNotebookImportError] = useState<string | null>(
     null,
   );
@@ -621,9 +662,40 @@ export function App() {
   const [yGammaFocusGenerator, setYGammaFocusGenerator] = useState(0);
   const [yGammaPeelMode, setYGammaPeelMode] =
     useState<YGammaPeelMode>("same-rank-three");
+  const [yGammaCellSeparation, setYGammaCellSeparation] =
+    useState<YGammaCellSeparation>("readable");
+  const [yGammaSeparationValue, setYGammaSeparationValue] =
+    useState<YGammaSeparationValue>(50);
+  const [yGammaCutawayMode, setYGammaCutawayMode] =
+    useState<YGammaCutawayMode>("none");
+  const [yGammaRelationStarActive, setYGammaRelationStarActive] =
+    useState(false);
+  const [yGammaInspectMode, setYGammaInspectMode] =
+    useState<YGammaInspectMode>("inspect-cell");
+  const [yGammaCameraPath, setYGammaCameraPath] =
+    useState<YGammaCameraPath>("none");
+  const [yGammaSmallAtlasOpen, setYGammaSmallAtlasOpen] = useState(false);
+  const [yGammaCompareDrawing, setYGammaCompareDrawing] = useState(false);
   const [yGammaTopologyMode, setYGammaTopologyMode] = useState(true);
   const [yGammaCameraBookmark, setYGammaCameraBookmark] =
     useState<YGammaCameraBookmark>("rank-three-cell");
+  const [gammaLayoutMode, setGammaLayoutMode] =
+    useState<DefiningGraphLayoutMode>("3d");
+  const applyYGammaCellSeparation = useCallback(
+    (separation: YGammaCellSeparation) => {
+      setYGammaCellSeparation(separation);
+      setYGammaSeparationValue(yGammaSeparationValueForPreset(separation));
+    },
+    [],
+  );
+  const applyYGammaSeparationValue = useCallback(
+    (value: YGammaSeparationValue) => {
+      const clamped = Math.max(0, Math.min(100, Math.round(value)));
+      setYGammaSeparationValue(clamped);
+      setYGammaCellSeparation(yGammaSeparationPresetForValue(clamped));
+    },
+    [],
+  );
   const [hoveredCellId, setHoveredCellId] = useState<string | undefined>();
   const [debouncedRadius, setDebouncedRadius] = useState(radius);
   const [workerGeneration, setWorkerGeneration] = useState<{
@@ -1077,6 +1149,7 @@ export function App() {
     activeDataset.kind === "quotient-complex"
       ? activeDataset.quotient
       : undefined;
+  const activeIsJnwStateQuotient = isJnwStateQuotient(activeQuotient);
   const activeQuotientRank =
     activeQuotient?.sourceSystem?.rank ??
     activeQuotient?.generatorRank ??
@@ -1092,14 +1165,22 @@ export function App() {
   const jnwSourceSystem =
     activeQuotient?.sourceSystem ?? sourceSystem ?? system;
   const jnwSourceKey = `${jnwSourceSystem.name}:${jnwSourceSystem.rank}`;
+  const defaultJnwMoveSystem = useMemo(
+    () => defaultJnwMoveSystemForSystem(jnwSourceSystem),
+    [jnwSourceSystem],
+  );
+  const defaultJnwInitialState = useMemo(
+    () => defaultJnwInitialStateForSystem(jnwSourceSystem),
+    [jnwSourceSystem],
+  );
   const activeJnwMoveSystem =
     jnwDraft?.sourceKey === jnwSourceKey
       ? jnwDraft.moveSystem
-      : createDefaultJnwMoveSystem(jnwSourceSystem);
+      : defaultJnwMoveSystem;
   const activeJnwInitialState =
     jnwDraft?.sourceKey === jnwSourceKey
       ? jnwDraft.initialState
-      : createDefaultJnwState(jnwSourceSystem);
+      : defaultJnwInitialState;
   const jnwSummary = useMemo(
     () =>
       summarizeJnwLegalSystem(
@@ -1112,6 +1193,44 @@ export function App() {
   const jnwDerivedQuotient = useMemo(
     () => jnwOrbitToQuotientComplex(jnwSourceSystem, jnwSummary),
     [jnwSourceSystem, jnwSummary],
+  );
+  const activeJnwSelectedState = useMemo(() => {
+    const preferredStateId =
+      selectedJnwStateId ??
+      (activeIsJnwStateQuotient && selectedNode?.id
+        ? selectedNode.id
+        : activeJnwInitialState.id);
+    return (
+      jnwSummary.states.find((state) => state.id === preferredStateId) ??
+      jnwSummary.states.find(
+        (state) => state.id === activeJnwInitialState.id,
+      ) ??
+      jnwSummary.states[0]
+    );
+  }, [
+    activeIsJnwStateQuotient,
+    activeJnwInitialState.id,
+    jnwSummary.states,
+    selectedNode,
+    selectedJnwStateId,
+  ]);
+  const activeJnwLayerBreadcrumb = useMemo(
+    () =>
+      gameWorkflowKind === "jnw-legal-system" && activeJnwSelectedState
+        ? buildJnwLayerBreadcrumb(
+            jnwSourceSystem,
+            activeJnwSelectedState,
+            topologyLensLabel(topologyLens.id),
+            jnwSummary,
+          )
+        : undefined,
+    [
+      activeJnwSelectedState,
+      gameWorkflowKind,
+      jnwSourceSystem,
+      jnwSummary,
+      topologyLens.id,
+    ],
   );
   const importedGameAssignment = useMemo(
     () => activeIntegerGameAssignment(activeQuotient?.game),
@@ -1231,17 +1350,18 @@ export function App() {
       return undefined;
     }
 
-    const selectedFlows =
+    const focusFlows =
       topologyLens.id === "full-local-link"
         ? quotientIncidentFlows
         : quotientIncidentFlows.filter(
             (flow) =>
               flow.classification === topologyLens.id.replace("-link", ""),
           );
-    const edgeIds = new Set(selectedFlows.map((flow) => flow.edgeId));
+    const focusEdgeIds = new Set(focusFlows.map((flow) => flow.edgeId));
+    const edgeIds = new Set(quotientIncidentFlows.map((flow) => flow.edgeId));
     const nodeIds = new Set<string>([selectedVertexId]);
-    selectedFlows.forEach((flow) => nodeIds.add(flow.neighborId));
-    return { nodeIds, edgeIds };
+    quotientIncidentFlows.forEach((flow) => nodeIds.add(flow.neighborId));
+    return { nodeIds, edgeIds, focusEdgeIds };
   }, [
     activeQuotient,
     quotientIncidentFlows,
@@ -1398,13 +1518,49 @@ export function App() {
         : undefined,
     [sourceSystem, sphericalSubsetResult],
   );
+  const highlightedGammaJnwState = useMemo(() => {
+    const requestedStateId = gammaHighlightedJnwStateId ?? selectedJnwStateId;
+    if (gameWorkflowKind !== "jnw-legal-system" || !requestedStateId) {
+      return undefined;
+    }
+    return jnwSummary.states.find((state) => state.id === requestedStateId);
+  }, [
+    gameWorkflowKind,
+    gammaHighlightedJnwStateId,
+    jnwSummary.states,
+    selectedJnwStateId,
+  ]);
   const gammaDefiningGraphScene = useMemo(
-    () => (sourceSystem ? buildDefiningGraphScene(sourceSystem) : undefined),
-    [sourceSystem],
+    () =>
+      sourceSystem
+        ? buildDefiningGraphScene(sourceSystem, {
+            layoutMode: gammaLayoutMode,
+            highlightedGenerators: highlightedGammaJnwState?.generators,
+            highlightLabel:
+              highlightedGammaJnwState !== undefined
+                ? formatJnwStateName(jnwSummary, highlightedGammaJnwState)
+                : undefined,
+            highlightColor:
+              highlightedGammaJnwState !== undefined
+                ? jnwStateChartColor(jnwSummary, highlightedGammaJnwState.id)
+                : undefined,
+          })
+        : undefined,
+    [gammaLayoutMode, highlightedGammaJnwState, jnwSummary, sourceSystem],
   );
   const yGammaRankThreeFocus = useMemo(
-    () => (yGammaAtlas ? findSharedM2M3RankThreeFocus(yGammaAtlas) : undefined),
-    [yGammaAtlas],
+    () =>
+      yGammaAtlas
+        ? findRankThreeFocusContainingPair(yGammaAtlas, activeGeneratorPairKey)
+        : undefined,
+    [activeGeneratorPairKey, yGammaAtlas],
+  );
+  const yGammaRankThreeFocusPairs = useMemo(
+    () =>
+      yGammaAtlas
+        ? rankThreeFocusPairOptions(yGammaAtlas, yGammaRankThreeFocus)
+        : [],
+    [yGammaAtlas, yGammaRankThreeFocus],
   );
   const activeIsYGammaBaseComplex =
     activeDataset.kind === "quotient-complex" &&
@@ -1421,26 +1577,57 @@ export function App() {
       : yGammaFocusPreset === "m3-hexagons"
         ? 3
         : undefined;
+  const yGammaActiveRelationOrder = useMemo(() => {
+    if (!yGammaAtlas || !activeGeneratorPairKey) {
+      return yGammaRelationOrderFilter;
+    }
+    const cell = yGammaAtlas.rankTwoCells.find(
+      (entry) =>
+        relationCellPairKey(entry.generators) === activeGeneratorPairKey,
+    );
+    return cell?.m ?? yGammaRelationOrderFilter;
+  }, [activeGeneratorPairKey, yGammaAtlas, yGammaRelationOrderFilter]);
   const yGammaEffectiveFocusGenerator =
     yGammaFocusPreset === "around-generator" ? yGammaFocusGenerator : undefined;
   const yGammaFaceMode = yGammaRankThreeFocusEnabled
     ? yGammaPeelMode === "selected-face"
       ? "active-pair"
       : "all"
-    : yGammaFocusPreset === "one-relation"
-      ? "active-pair"
-      : yGammaShowAllFaces ||
-          !yGammaDense ||
-          yGammaFocusPreset === "full-skeleton" ||
-          yGammaFocusPreset === "around-generator" ||
-          yGammaRelationOrderFilter !== undefined
-        ? "all"
-        : activeGeneratorPairKey
-          ? "active-pair"
-          : "one-skeleton";
+    : yGammaRelationStarActive
+      ? "all"
+      : yGammaFocusPreset === "one-relation"
+        ? "active-pair"
+        : yGammaShowAllFaces ||
+            !yGammaDense ||
+            yGammaFocusPreset === "full-skeleton" ||
+            yGammaFocusPreset === "around-generator" ||
+            yGammaRelationOrderFilter !== undefined
+          ? "all"
+          : activeGeneratorPairKey
+            ? "active-pair"
+            : "one-skeleton";
   const yGammaIncludeRankThreeCells =
     showHigherCells &&
-    (yGammaRankThreeFocusEnabled || yGammaFocusPreset !== "one-relation");
+    (yGammaRelationStarActive ||
+      yGammaRankThreeFocusEnabled ||
+      yGammaFocusPreset !== "one-relation");
+  const yGammaCutawayOptions = useMemo(
+    () => ({
+      mode: yGammaCutawayMode,
+      generator: yGammaFocusGenerator,
+      relationOrder:
+        yGammaCutawayMode === "relation-order"
+          ? yGammaActiveRelationOrder
+          : yGammaRelationOrderFilter,
+      rank: yGammaCutawayMode === "rank" ? 3 : undefined,
+    }),
+    [
+      yGammaActiveRelationOrder,
+      yGammaCutawayMode,
+      yGammaFocusGenerator,
+      yGammaRelationOrderFilter,
+    ],
+  );
   const effectiveYGammaRankThreeFocus = useMemo(
     () =>
       yGammaRankThreeFocusEnabled && yGammaRankThreeFocus
@@ -1461,15 +1648,80 @@ export function App() {
       focusGenerator: yGammaEffectiveFocusGenerator,
       relationOrderFilter: yGammaRelationOrderFilter,
       peelMode: yGammaPeelMode,
+      cellSeparation: yGammaCellSeparation,
+      separationValue: yGammaSeparationValue,
+      cutaway: yGammaCutawayOptions,
+      relationStar: {
+        active: yGammaRelationStarActive,
+        pairKey: activeGeneratorPairKey,
+      },
+      layoutScale:
+        yGammaDense &&
+        yGammaFaceMode === "all" &&
+        !effectiveYGammaRankThreeFocus
+          ? "expansive"
+          : "normal",
     }),
     [
       activeGeneratorPairKey,
       effectiveYGammaRankThreeFocus,
       yGammaEffectiveFocusGenerator,
+      yGammaDense,
+      yGammaCellSeparation,
+      yGammaSeparationValue,
+      yGammaCutawayOptions,
       yGammaFaceMode,
       yGammaIncludeRankThreeCells,
       yGammaPeelMode,
       yGammaRelationOrderFilter,
+      yGammaRelationStarActive,
+    ],
+  );
+  const yGammaActiveStarLens = useMemo<YGammaStarLens | undefined>(() => {
+    if (yGammaRelationStarActive) {
+      return "relation-star";
+    }
+    if (yGammaRankThreeFocusEnabled) {
+      return "rank-three-cell-star";
+    }
+    if (yGammaFocusPreset === "around-generator") {
+      return "generator-star";
+    }
+    if (
+      topologyLens.id === "ascending-link" ||
+      topologyLens.id === "descending-link"
+    ) {
+      return topologyLens.id === "ascending-link"
+        ? "jnw-ascending-star"
+        : "jnw-descending-star";
+    }
+    return undefined;
+  }, [
+    topologyLens.id,
+    yGammaFocusPreset,
+    yGammaRankThreeFocusEnabled,
+    yGammaRelationStarActive,
+  ]);
+  const yGammaReadableViewState = useMemo<YGammaReadableViewState>(
+    () => ({
+      cutawayMode: yGammaCutawayMode,
+      relationStarActive: yGammaRelationStarActive,
+      starLens: yGammaActiveStarLens,
+      separationValue: yGammaSeparationValue,
+      inspectMode: yGammaInspectMode,
+      cameraPath: yGammaCameraPath,
+      smallAtlasOpen: yGammaSmallAtlasOpen,
+      compareDrawing: yGammaCompareDrawing,
+    }),
+    [
+      yGammaActiveStarLens,
+      yGammaCameraPath,
+      yGammaCompareDrawing,
+      yGammaCutawayMode,
+      yGammaInspectMode,
+      yGammaRelationStarActive,
+      yGammaSeparationValue,
+      yGammaSmallAtlasOpen,
     ],
   );
   const requestedYGammaSceneVersion = useMemo(
@@ -1556,14 +1808,19 @@ export function App() {
     yGamma2SkeletonScene !== undefined &&
     yGammaMainView === "complex";
   const showingGammaDefiningGraph =
-    activeIsYGammaBaseComplex &&
-    gammaDefiningGraphScene !== undefined &&
-    yGammaMainView === "gamma";
+    gammaDefiningGraphScene !== undefined && yGammaMainView === "gamma";
   const showingYGammaNerve =
     activeIsYGammaBaseComplex &&
     yGammaAtlas !== undefined &&
     yGammaMainView === "nerve";
+  const showGenerationControls =
+    showResearchControls &&
+    activeDataset.kind === "coxeter-system" &&
+    !activeIsYGammaBaseComplex &&
+    !showingGammaDefiningGraph &&
+    effectiveMode !== "geometric";
   const showingDerivedScene = showingYGammaComplex || showingGammaDefiningGraph;
+  const forceStateQuotientLabels = activeIsJnwStateQuotient;
   const selectedHigherProxy = sphericalCellProxies.proxies.find(
     (proxy) =>
       proxy.id === selectedCellId || proxy.sourceCellId === selectedCellId,
@@ -1807,7 +2064,7 @@ export function App() {
       (node) => node.id === viewRootNodeId,
     )?.position;
 
-    return viewNodes.map((node) => {
+    return viewNodes.map((node, index) => {
       const position: [number, number, number] | undefined =
         graphView === "on-graph"
           ? effectiveMode === "geometric"
@@ -1820,16 +2077,20 @@ export function App() {
                 node.position[2] - rootPosition[2],
               ]
             : node.position;
+      const wordLabel = compactWordLabel(node.word, system.generators);
+      const nodeLabel = relationLabelByNodeId.get(node.id) ?? node.label;
+      const compactNodeLabel =
+        relationLabelByNodeId.get(node.id) ?? node.compactLabel ?? node.label;
+      const isJnwStateNode =
+        activeIsJnwStateQuotient && node.id.startsWith("jnw:state:");
 
       return {
         ...node,
-        label:
-          relationLabelByNodeId.get(node.id) ??
-          compactWordLabel(node.word, system.generators),
-        compactLabel:
-          relationLabelByNodeId.get(node.id) ??
-          compactWordLabel(node.word, system.generators),
+        label: nodeLabel ?? wordLabel,
+        compactLabel: compactNodeLabel ?? wordLabel,
         isRelationBoundary: relationBoundaryNodeIds.has(node.id),
+        alwaysLabel: isJnwStateNode || undefined,
+        labelPriority: isJnwStateNode ? 120_000 - index : undefined,
         ghost:
           cellNeighborhoodMode !== "chamber" &&
           focusedRankTwoCell !== undefined &&
@@ -1839,6 +2100,7 @@ export function App() {
       };
     });
   }, [
+    activeIsJnwStateQuotient,
     ball,
     cellNeighborhoodMode,
     effectiveMode,
@@ -1872,15 +2134,80 @@ export function App() {
       viewEdges,
     ],
   );
+  const jnwStateYGammaOrbitScene = useMemo(() => {
+    if (
+      !activeIsJnwStateQuotient ||
+      (topologyLens.id !== "state-quotient-orbit" &&
+        !isQuotientLinkLens(topologyLens.id)) ||
+      !yGammaAtlas
+    ) {
+      return undefined;
+    }
+    return buildJnwStateQuotientYGammaScene({
+      system,
+      atlas: yGammaAtlas,
+      summary: jnwSummary,
+      moveSystem: activeJnwMoveSystem,
+      selectedStateId: activeJnwSelectedState?.id ?? selectedNode?.id,
+      selectedRail: { generator: selectedJnwGenerator },
+      selectedRelationId: selectedCellId,
+      sheetMode: jnwQuotientSheetMode,
+      constructionStage: jnwQuotientConstructionStage,
+      readerMode: jnwReaderMode,
+      readerLens: jnwReaderLensForTopologyLens(topologyLens.id, jnwReaderLens),
+      railGrouping: jnwRailGrouping,
+    });
+  }, [
+    activeIsJnwStateQuotient,
+    activeJnwSelectedState?.id,
+    activeJnwMoveSystem,
+    jnwQuotientConstructionStage,
+    jnwQuotientSheetMode,
+    jnwRailGrouping,
+    jnwReaderLens,
+    jnwReaderMode,
+    jnwSummary,
+    selectedNode?.id,
+    selectedCellId,
+    selectedJnwGenerator,
+    system,
+    topologyLens.id,
+    yGammaAtlas,
+  ]);
+  const jnwStateSceneDecoration = useMemo(() => {
+    if (!activeIsJnwStateQuotient || jnwStateYGammaOrbitScene) {
+      return undefined;
+    }
+    return decorateJnwStateQuotientScene({
+      nodes: sceneNodes,
+      edges: sceneEdges,
+      system,
+      summary: jnwSummary,
+      selectedStateId: activeJnwSelectedState?.id ?? selectedNode?.id,
+    });
+  }, [
+    activeIsJnwStateQuotient,
+    activeJnwSelectedState?.id,
+    jnwSummary,
+    jnwStateYGammaOrbitScene,
+    sceneEdges,
+    sceneNodes,
+    selectedNode?.id,
+    system,
+  ]);
   const activeSceneNodes = useMemo(
     () =>
       showingGammaDefiningGraph
         ? (gammaDefiningGraphScene?.nodes ?? emptySceneNodes)
         : showingYGammaComplex
           ? (yGamma2SkeletonScene?.nodes ?? emptySceneNodes)
-          : sceneNodes,
+          : (jnwStateYGammaOrbitScene?.nodes ??
+            jnwStateSceneDecoration?.nodes ??
+            sceneNodes),
     [
       gammaDefiningGraphScene,
+      jnwStateSceneDecoration,
+      jnwStateYGammaOrbitScene,
       sceneNodes,
       showingGammaDefiningGraph,
       showingYGammaComplex,
@@ -1893,45 +2220,80 @@ export function App() {
         ? (gammaDefiningGraphScene?.edges ?? emptySceneEdges)
         : showingYGammaComplex
           ? (yGamma2SkeletonScene?.edges ?? emptySceneEdges)
-          : sceneEdges,
+          : (jnwStateYGammaOrbitScene?.edges ??
+            jnwStateSceneDecoration?.edges ??
+            sceneEdges),
     [
       gammaDefiningGraphScene,
+      jnwStateSceneDecoration,
+      jnwStateYGammaOrbitScene,
       sceneEdges,
       showingGammaDefiningGraph,
       showingYGammaComplex,
       yGamma2SkeletonScene,
     ],
   );
-  const gameDecoratedSceneEdges = useMemo(
+  const readableActiveSceneEdges = useMemo(
     () =>
-      decorateSceneEdgesForGame({
-        edges: activeSceneEdges,
-        enabled:
-          activeQuotient !== undefined &&
-          !showingGammaDefiningGraph &&
-          quotientGameSummary !== undefined,
-        yGamma: showingYGammaComplex,
-        flowByEdgeId: quotientFlowByEdgeId,
-        generatorValueById: quotientGeneratorValueById,
-      }),
-    [
-      activeQuotient,
-      activeSceneEdges,
-      quotientFlowByEdgeId,
-      quotientGameSummary,
-      quotientGeneratorValueById,
-      showingGammaDefiningGraph,
-      showingYGammaComplex,
-    ],
+      activeIsJnwStateQuotient && !jnwStateYGammaOrbitScene
+        ? spreadParallelStateQuotientEdges(activeSceneEdges)
+        : activeSceneEdges,
+    [activeIsJnwStateQuotient, activeSceneEdges, jnwStateYGammaOrbitScene],
   );
+  const gameDecoratedSceneEdges = useMemo(() => {
+    const decorated = decorateSceneEdgesForGame({
+      edges: readableActiveSceneEdges,
+      enabled:
+        activeQuotient !== undefined &&
+        !showingGammaDefiningGraph &&
+        quotientGameSummary !== undefined &&
+        (!jnwStateYGammaOrbitScene || jnwQuotientConstructionStage >= 5),
+      yGamma: showingYGammaComplex,
+      flowByEdgeId: quotientFlowByEdgeId,
+      generatorValueById: quotientGeneratorValueById,
+    });
+    if (
+      !quotientLensSceneIds ||
+      topologyLens.id === "full-local-link" ||
+      !isQuotientLinkLens(topologyLens.id)
+    ) {
+      return decorated;
+    }
+    return decorated.map((edge) =>
+      quotientLensSceneIds.focusEdgeIds.has(edge.id)
+        ? {
+            ...edge,
+            alwaysLabel: true,
+            labelPriority: Math.max(edge.labelPriority ?? 0, 900),
+          }
+        : {
+            ...edge,
+            ghost: true,
+            labelPriority: Math.min(edge.labelPriority ?? 0, -100),
+          },
+    );
+  }, [
+    activeQuotient,
+    jnwQuotientConstructionStage,
+    jnwStateYGammaOrbitScene,
+    quotientFlowByEdgeId,
+    quotientGameSummary,
+    quotientGeneratorValueById,
+    quotientLensSceneIds,
+    readableActiveSceneEdges,
+    showingGammaDefiningGraph,
+    showingYGammaComplex,
+    topologyLens.id,
+  ]);
   const activeSceneCells = useMemo(
     () =>
       showingGammaDefiningGraph
         ? emptySceneCells
         : showingYGammaComplex
           ? (yGamma2SkeletonScene?.cells ?? emptySceneCells)
-          : sceneCells,
+          : (jnwStateYGammaOrbitScene?.cells ?? sceneCells),
     [
+      jnwStateYGammaOrbitScene,
       sceneCells,
       showingGammaDefiningGraph,
       showingYGammaComplex,
@@ -1942,7 +2304,7 @@ export function App() {
     ? gammaDefiningGraphScene?.selectedNodeId
     : showingYGammaComplex
       ? yGamma2SkeletonScene?.selectedNodeId
-      : selectedNode?.id;
+      : (jnwStateYGammaOrbitScene?.selectedNodeId ?? selectedNode?.id);
   const activeSceneVisibleNodeCount = useMemo(
     () =>
       activeSceneNodes.filter((node) => !("hidden" in node) || !node.hidden)
@@ -2000,72 +2362,142 @@ export function App() {
     effectiveMode === "geometric" &&
     graphView === "global" &&
     !projection.endsWith("-pca");
-  const activeSceneStructureVersion = useMemo(
+  const jnwEffectiveSheetMode =
+    jnwStateYGammaOrbitScene && jnwQuotientConstructionStage <= 3
+      ? "outlines"
+      : jnwQuotientSheetMode;
+  const activeLocalCellRenderMode: LocalCellRenderMode =
+    jnwStateYGammaOrbitScene && jnwEffectiveSheetMode === "outlines"
+      ? "outline-only"
+      : showingDerivedScene
+        ? "in-graph"
+        : cellRenderMode;
+  const activeCellOpacity = jnwStateYGammaOrbitScene
+    ? jnwEffectiveSheetMode === "filled"
+      ? 0.24
+      : jnwEffectiveSheetMode === "glass"
+        ? 0.07
+        : 0.04
+    : showingYGammaComplex
+      ? yGammaTopologyMode
+        ? 0.18
+        : 0.3
+      : cellOpacity;
+  const forceBudgetedSceneLabels =
+    showingDerivedScene || forceStateQuotientLabels;
+  const sceneLabelScope = forceBudgetedSceneLabels ? "budgeted" : labelScope;
+  const sceneMaxNodeLabels = forceStateQuotientLabels
+    ? Math.max(activeSceneNodes.length, 120)
+    : showingDerivedScene
+      ? 120
+      : effectiveMaxNodeLabels;
+  const sceneMaxEdgeLabels = showingYGammaComplex
+    ? Math.max(activeSceneEdges.length, 120)
+    : showingGammaDefiningGraph
+      ? Math.max(activeSceneEdges.length, 120)
+      : showingDerivedScene
+        ? 120
+        : effectiveMaxEdgeLabels;
+  const activeSceneRevisionSet = useMemo(
     () =>
-      sceneStructureVersion(
-        activeSceneNodes,
-        gameDecoratedSceneEdges,
-        activeSceneCells,
-      ),
-    [activeSceneCells, activeSceneNodes, gameDecoratedSceneEdges],
-  );
-  // Appearance changes can reuse meshes: selected ids, label budgets, colors,
-  // opacity, and camera-facing helpers should not invalidate topology buffers.
-  const activeSceneAppearanceVersion = useMemo(
-    () =>
-      hashVersionParts([
-        `selected-node:${activeSceneSelectedNodeId ?? ""}`,
-        `selected-cell:${selectedCellId ?? ""}`,
-        `show-cells:${showingDerivedScene || showCells || showHigherCells}`,
-        `show-node-labels:${showingDerivedScene || showNodeLabels}`,
-        `show-edge-labels:${showingDerivedScene || showEdgeLabels}`,
-        `label-scope:${showingDerivedScene ? "budgeted" : labelScope}`,
-        `active-pair:${activeGeneratorPairKey ?? ""}`,
-        `cell-render:${showingDerivedScene ? "in-graph" : cellRenderMode}`,
-        `occlusion:${occlusionMode}`,
-        `cell-opacity:${
-          showingYGammaComplex ? (yGammaTopologyMode ? 0.18 : 0.3) : cellOpacity
-        }`,
-        `panel-offset:${
-          showingYGammaComplex
-            ? 0
-            : bringFocusedCellsForward
-              ? panelOffsetStrength
-              : 0
-        }`,
-        `topology:${showingYGammaComplex && yGammaTopologyMode}`,
-        `semantic:${showingYGammaComplex}`,
-        `reference:${geometricReferenceBallVisible}`,
-        `reference-radius:${geometricDisplayScale}`,
-        `theme:${colorScheme}`,
-        `game:${
-          quotientGameSummary?.generatorValues
-            .map((state) => `${state.generator}:${state.value}`)
-            .join(",") ?? ""
-        }:${quotientGameSummary?.status ?? ""}`,
-        `camera:${showingDerivedScene ? "global" : graphView}`,
-        `max-node-labels:${showingDerivedScene ? 120 : effectiveMaxNodeLabels}`,
-        `max-edge-labels:${showingDerivedScene ? 120 : effectiveMaxEdgeLabels}`,
-        ...system.generators.map(
-          (generator) => `${generator.label}:${generator.colorHint ?? ""}`,
-        ),
-      ]),
+      buildSceneRevisionSet({
+        nodes: activeSceneNodes,
+        edges: gameDecoratedSceneEdges,
+        cells: activeSceneCells,
+        // These values change the actual cell vertices or pick surfaces, not
+        // merely their material. Keeping them in the cell-geometry layer avoids
+        // stale lifted panels and lets cheap label/color updates stay cheap.
+        cellGeometryParts: [
+          `cell-render:${activeLocalCellRenderMode}`,
+          `show-cells:${showingDerivedScene || showCells || showHigherCells}`,
+          `active-pair:${activeGeneratorPairKey ?? ""}`,
+          `ygamma-separation:${showingYGammaComplex ? yGammaCellSeparation : ""}`,
+          `ygamma-separation-value:${
+            showingYGammaComplex ? yGammaSeparationValue : ""
+          }`,
+          `ygamma-cutaway:${showingYGammaComplex ? yGammaCutawayMode : ""}`,
+          `ygamma-relation-star:${
+            showingYGammaComplex ? yGammaRelationStarActive : ""
+          }`,
+          `panel-offset:${
+            showingYGammaComplex
+              ? 0
+              : bringFocusedCellsForward
+                ? panelOffsetStrength
+                : 0
+          }`,
+          `topology:${showingYGammaComplex && yGammaTopologyMode}`,
+          `reference:${geometricReferenceBallVisible}`,
+          `reference-radius:${geometricDisplayScale}`,
+        ],
+        appearanceParts: [
+          `selected-node:${activeSceneSelectedNodeId ?? ""}`,
+          `selected-cell:${selectedCellId ?? ""}`,
+          `show-cells:${showingDerivedScene || showCells || showHigherCells}`,
+          `show-node-labels:${forceBudgetedSceneLabels || showNodeLabels}`,
+          `show-edge-labels:${showingDerivedScene || showEdgeLabels}`,
+          `label-scope:${sceneLabelScope}`,
+          `active-pair:${activeGeneratorPairKey ?? ""}`,
+          `occlusion:${occlusionMode}`,
+          `cell-opacity:${activeCellOpacity}`,
+          `jnw-sheet:${jnwStateYGammaOrbitScene ? jnwEffectiveSheetMode : ""}`,
+          `jnw-stage:${
+            jnwStateYGammaOrbitScene ? jnwQuotientConstructionStage : ""
+          }`,
+          `ygamma-inspect:${showingYGammaComplex ? yGammaInspectMode : ""}`,
+          `semantic:${showingYGammaComplex}`,
+          `reference:${geometricReferenceBallVisible}`,
+          `reference-radius:${geometricDisplayScale}`,
+          `theme:${colorScheme}`,
+          `game:${
+            quotientGameSummary?.generatorValues
+              .map((state) => `${state.generator}:${state.value}`)
+              .join(",") ?? ""
+          }:${quotientGameSummary?.status ?? ""}`,
+          `camera:${showingDerivedScene ? "global" : graphView}`,
+          `max-node-labels:${sceneMaxNodeLabels}`,
+          `max-edge-labels:${sceneMaxEdgeLabels}`,
+          ...system.generators.map(
+            (generator) => `${generator.label}:${generator.colorHint ?? ""}`,
+          ),
+        ],
+        labelParts: [
+          `show-node-labels:${forceBudgetedSceneLabels || showNodeLabels}`,
+          `show-edge-labels:${showingDerivedScene || showEdgeLabels}`,
+          `label-scope:${sceneLabelScope}`,
+          `max-node-labels:${sceneMaxNodeLabels}`,
+          `max-edge-labels:${sceneMaxEdgeLabels}`,
+          `semantic:${showingYGammaComplex}`,
+        ],
+        cameraParts: [
+          `camera:${showingDerivedScene ? "global" : graphView}`,
+          `reference:${geometricReferenceBallVisible}`,
+          `reference-radius:${geometricDisplayScale}`,
+        ],
+      }),
     [
+      activeCellOpacity,
       activeGeneratorPairKey,
+      activeLocalCellRenderMode,
+      activeSceneCells,
+      activeSceneNodes,
       activeSceneSelectedNodeId,
       bringFocusedCellsForward,
-      cellOpacity,
-      cellRenderMode,
       colorScheme,
-      effectiveMaxEdgeLabels,
-      effectiveMaxNodeLabels,
+      forceBudgetedSceneLabels,
       geometricReferenceBallVisible,
+      gameDecoratedSceneEdges,
       graphView,
-      labelScope,
+      jnwEffectiveSheetMode,
+      jnwQuotientConstructionStage,
+      jnwStateYGammaOrbitScene,
       occlusionMode,
       panelOffsetStrength,
       quotientGameSummary?.generatorValues,
       quotientGameSummary?.status,
+      sceneLabelScope,
+      sceneMaxEdgeLabels,
+      sceneMaxNodeLabels,
       selectedCellId,
       showCells,
       showEdgeLabels,
@@ -2075,8 +2507,45 @@ export function App() {
       showNodeLabels,
       system.generators,
       yGammaTopologyMode,
+      yGammaCellSeparation,
+      yGammaCutawayMode,
+      yGammaInspectMode,
+      yGammaRelationStarActive,
+      yGammaSeparationValue,
     ],
   );
+  const activeSceneStructureVersion = activeSceneRevisionSet.structureVersion;
+  const activeSceneAppearanceVersion =
+    activeSceneRevisionSet.renderAppearanceVersion;
+  const yGammaComparisonScenes = useMemo(() => {
+    if (!showingYGammaComplex || !yGammaCompareDrawing || !yGammaAtlas) {
+      return undefined;
+    }
+    const commonOptions: YGamma2SkeletonSceneOptions = {
+      ...yGammaSceneOptions,
+      faceMode: "all",
+      includeRankThreeCells: yGammaSceneOptions.includeRankThreeCells,
+      relationStar: yGammaSceneOptions.relationStar,
+      cutaway: yGammaSceneOptions.cutaway,
+    };
+    return {
+      coherent: buildYGamma2SkeletonScene(yGammaAtlas, {
+        ...commonOptions,
+        cellSeparation: "coherent",
+        separationValue: 0,
+      }),
+      expanded: buildYGamma2SkeletonScene(yGammaAtlas, {
+        ...commonOptions,
+        cellSeparation: "expanded",
+        separationValue: 100,
+      }),
+    };
+  }, [
+    showingYGammaComplex,
+    yGammaAtlas,
+    yGammaCompareDrawing,
+    yGammaSceneOptions,
+  ]);
   const warnings = useMemo(
     () => [
       ...(system.warnings ?? []),
@@ -2095,6 +2564,7 @@ export function App() {
       ...(showingGammaDefiningGraph
         ? (gammaDefiningGraphScene?.warnings ?? [])
         : []),
+      ...(jnwStateYGammaOrbitScene?.warnings ?? []),
       ...(activeIsYGammaBaseComplex &&
       yGammaMainView === "complex" &&
       yGammaSceneState.pending
@@ -2120,7 +2590,7 @@ export function App() {
       graphView === "global" &&
       debouncedRadius >= 5
         ? [
-            "Compact 5-cube radius 5+ in Global view is a research/stress view; Local Chamber is recommended for interactive inspection.",
+            "Compact 5-cube radius 5+ in See all view is a research/stress view; Look near a chamber is recommended for interactive inspection.",
           ]
         : []),
       ...(generation.pending
@@ -2144,7 +2614,7 @@ export function App() {
         : []),
       ...(graphView === "on-graph"
         ? [
-            `Local Chamber 3D shows the radius-${localDepth} graph-neighborhood around ${selectedNode?.id ?? "the selected node"} with ${cellRenderMode} cell drawings; off-graph panels are optional readability transforms, not geometry.`,
+            `Look near a chamber shows the radius-${localDepth} graph-neighborhood around ${selectedNode?.id ?? "the selected node"} with ${cellRenderMode} cell drawings; off-graph panels are optional readability transforms, not geometry.`,
           ]
         : []),
       ...(cellNeighborhoodMode !== "chamber" && focusedRankTwoCell
@@ -2209,6 +2679,7 @@ export function App() {
       topologyDiagnostics?.warnings,
       yGamma2SkeletonScene?.warnings,
       gammaDefiningGraphScene?.warnings,
+      jnwStateYGammaOrbitScene?.warnings,
       yGammaSceneState.error,
       yGammaSceneState.pending,
       yGammaAtlas,
@@ -2273,22 +2744,46 @@ export function App() {
       describeCurrentModel({
         activeDatasetKind: activeDataset.kind,
         activeIsYGammaBaseComplex,
+        activeIsJnwStateQuotient,
+        activePreset,
+        cellFocusMode,
         effectiveMode,
         geometryIntervalCertified:
           system.geometry?.certifiedModel?.certificate.status === "passed",
+        graphView,
+        projection,
         showingGammaDefiningGraph,
         showingYGammaComplex,
         yGammaMainView,
       }),
     [
       activeDataset.kind,
+      activeIsJnwStateQuotient,
       activeIsYGammaBaseComplex,
+      activePreset,
+      cellFocusMode,
       effectiveMode,
+      graphView,
+      projection,
       showingGammaDefiningGraph,
       showingYGammaComplex,
       system.geometry?.certifiedModel?.certificate.status,
       yGammaMainView,
     ],
+  );
+  const currentModelExplanation = modelExplanationForLabel(
+    currentModelBadge.label,
+  );
+  const currentModelDisplayLabel = showReaderControls
+    ? currentModelExplanation.teachingLabel
+    : currentModelExplanation.label;
+  const labelForModel = (id: keyof typeof modelExplanations) =>
+    showReaderControls
+      ? modelExplanations[id].teachingLabel
+      : modelExplanations[id].label;
+  const caveatCount = warningGroups.reduce(
+    (count, group) => count + group.warnings.length,
+    0,
   );
   const activeGuideStep = activeGuidedInspectionStep(guidedInspection);
   const showLocalLinkPanel =
@@ -2322,8 +2817,17 @@ export function App() {
     }
     if (
       activeDataset.kind === "quotient-complex" &&
-      isQuotientLinkLens(topologyLens.id)
+      (isQuotientLinkLens(topologyLens.id) ||
+        topologyLens.id === "state-quotient-orbit")
     ) {
+      if (activeIsJnwStateQuotient) {
+        return buildJnwStateLinkSubject(
+          activeDataset.quotient,
+          jnwSummary,
+          activeSceneSelectedNodeId,
+          topologyLens.id,
+        );
+      }
       return {
         kind: "game-assignment",
         quotient: activeDataset.quotient,
@@ -2366,7 +2870,9 @@ export function App() {
     activeDataset,
     activeGuideStep?.focus,
     activeSceneSelectedNodeId,
+    activeIsJnwStateQuotient,
     focusedRankTwoCell,
+    jnwSummary,
     selectedCellId,
     selectedHigherCell,
     selectedHigherProxy,
@@ -2469,6 +2975,15 @@ export function App() {
                   orbitStateCount: jnwSummary.states.length,
                   legalStateCount: jnwSummary.legalStateCount,
                   stronglyLegalStateCount: jnwSummary.stronglyLegalStateCount,
+                  reader: {
+                    mode: jnwReaderMode,
+                    lens: jnwReaderLens,
+                    railGrouping: jnwRailGrouping,
+                    selectedStateId: activeJnwSelectedState?.id,
+                    selectedGenerator: selectedJnwGenerator,
+                    selectedRelationId: selectedCellId,
+                    constructionStage: jnwQuotientConstructionStage,
+                  },
                 },
                 selectedVertexId: selectedNode?.id,
                 cocycleStatus: quotientGameSummary.status,
@@ -2500,7 +3015,12 @@ export function App() {
       graphView,
       activeJnwInitialState.generators,
       activeJnwMoveSystem.moves,
+      activeJnwSelectedState?.id,
       gameWorkflowKind,
+      jnwQuotientConstructionStage,
+      jnwRailGrouping,
+      jnwReaderLens,
+      jnwReaderMode,
       jnwSourceSystem.name,
       jnwSummary.claimStatus,
       jnwSummary.legalStateCount,
@@ -2513,6 +3033,7 @@ export function App() {
       savedExperiments,
       selectedCellId,
       selectedExample.id,
+      selectedJnwGenerator,
       selectedNode?.id,
       showCells,
       showEdgeLabels,
@@ -2652,6 +3173,8 @@ export function App() {
     setSelectedNodeId("e");
     setRootNodeId("e");
     setSelectedCellId(undefined);
+    setSelectedJnwStateId(undefined);
+    setGammaHighlightedJnwStateId(undefined);
     setDisabledPairs(new Set());
     setDisabledHigherSubsets(new Set());
     setActiveGeneratorPairKey(undefined);
@@ -2705,6 +3228,64 @@ export function App() {
     setCellNeighborhoodMode("chamber");
     setTopologyLens({ id: "full-local-link", selectedGenerator: 0 });
     setShowAdvancedPanels(false);
+    setFocusSignal((value) => value + 1);
+  };
+
+  const loadJnwCubeWorkflow = () => {
+    const cubeSystem = bundledExamples.find(
+      (example) => example.id === jnwCubeExampleId,
+    )?.input;
+    if (!cubeSystem) {
+      return;
+    }
+    const moveSystem =
+      createBipartiteJnwMoveSystem(cubeSystem) ??
+      createDefaultJnwMoveSystem(cubeSystem);
+    const initialState = createJnwState(jnwCubeLegalInitialState);
+    const summary = summarizeJnwLegalSystem(
+      cubeSystem,
+      moveSystem,
+      initialState,
+    );
+    const quotient = jnwOrbitToQuotientComplex(cubeSystem, summary);
+
+    setExampleId(jnwCubeExampleId);
+    setImportedExample(null);
+    setJnwDraft({
+      sourceKey: `${cubeSystem.name}:${cubeSystem.rank}`,
+      moveSystem,
+      initialState,
+    });
+    setImportedDataset({
+      kind: "quotient-complex",
+      id: "jnw:cube-graph-legal-system",
+      label: `${quotient.name} (JNW cube demo)`,
+      quotient,
+      ball: quotientToGeneratedBall(quotient),
+      sourceSystem: cubeSystem,
+    });
+    setGameWorkflowKind("jnw-legal-system");
+    setUiMode("research");
+    setShowAdvancedPanels(true);
+    setMode("shell");
+    setGraphView("global");
+    setSelectedNodeId(initialState.id);
+    setRootNodeId(initialState.id);
+    setSelectedJnwStateId(initialState.id);
+    setGammaHighlightedJnwStateId(initialState.id);
+    setSelectedCellId(undefined);
+    setActiveGeneratorPairKey(undefined);
+    setDisabledPairs(new Set());
+    setDisabledHigherSubsets(new Set());
+    setShowCells(true);
+    setShowHigherCells(true);
+    setShowNodeLabels(true);
+    setShowEdgeLabels(true);
+    setLabelScope("focused");
+    setTopologyLens({ id: "state-quotient-orbit", selectedGenerator: 0 });
+    setDesktopMessage(
+      "Loaded the JNW cube graph with bipartition moves and a legal initial state.",
+    );
     setFocusSignal((value) => value + 1);
   };
 
@@ -3015,6 +3596,31 @@ export function App() {
             }
           : undefined,
       );
+      const restoredJnwReader =
+        session.experiments.game?.jnwLegalSystem?.reader;
+      if (restoredJnwReader) {
+        if (restoredJnwReader.mode) {
+          setJnwReaderMode(restoredJnwReader.mode);
+        }
+        if (restoredJnwReader.lens) {
+          setJnwReaderLens(restoredJnwReader.lens);
+        }
+        if (restoredJnwReader.railGrouping) {
+          setJnwRailGrouping(restoredJnwReader.railGrouping);
+        }
+        if (restoredJnwReader.selectedStateId) {
+          setSelectedJnwStateId(restoredJnwReader.selectedStateId);
+        }
+        if (restoredJnwReader.selectedRelationId) {
+          setSelectedCellId(restoredJnwReader.selectedRelationId);
+        }
+        if (restoredJnwReader.selectedGenerator !== undefined) {
+          setSelectedJnwGenerator(restoredJnwReader.selectedGenerator);
+        }
+        if (restoredJnwReader.constructionStage) {
+          setJnwQuotientConstructionStage(restoredJnwReader.constructionStage);
+        }
+      }
       setGameDraft(
         session.experiments.game
           ? {
@@ -3199,6 +3805,10 @@ export function App() {
     const quotient = baseOrbicomplexForSystem(system);
     const defaultPairKey = firstFinitePairKey(system);
     const startInRankThreeFocus = yGammaRankThreeFocus !== undefined;
+    const focusPairKey =
+      activeGeneratorPairKey ??
+      yGammaRankThreeFocus?.pairKeys[0] ??
+      defaultPairKey;
     setImportedDataset({
       kind: "quotient-complex",
       id: `base-orbicomplex:${activeDataset.id}`,
@@ -3212,9 +3822,7 @@ export function App() {
     setSelectedCellId(undefined);
     setDisabledPairs(new Set());
     setDisabledHigherSubsets(new Set());
-    setActiveGeneratorPairKey(
-      startInRankThreeFocus ? yGammaRankThreeFocus.pairKeys[1] : defaultPairKey,
-    );
+    setActiveGeneratorPairKey(focusPairKey);
     setYGammaShowAllFaces(false);
     setYGammaRankThreeFocusEnabled(startInRankThreeFocus);
     setYGammaFocusPreset(
@@ -3243,7 +3851,7 @@ export function App() {
   };
 
   const openDefiningGraph = () => {
-    if (!activeIsYGammaBaseComplex) {
+    if (!activeIsYGammaBaseComplex && !sourceSystem) {
       openBaseOrbicomplex();
     }
     setYGammaMainView("gamma");
@@ -3285,6 +3893,7 @@ export function App() {
     setShowNodeLabels(true);
     setShowEdgeLabels(true);
     setLabelScope("budgeted");
+    setTopologyLens({ id: "generator-star", selectedGenerator: 0 });
     setFocusSignal((value) => value + 1);
   };
 
@@ -3299,6 +3908,7 @@ export function App() {
     if (activeDataset.kind !== "quotient-complex") {
       openBaseOrbicomplex();
     }
+    setUiMode("research");
     setShowAdvancedPanels(true);
   };
 
@@ -3315,6 +3925,8 @@ export function App() {
     initialState: JnwState,
   ) => {
     setJnwDraft({ sourceKey: jnwSourceKey, moveSystem, initialState });
+    setSelectedJnwStateId(initialState.id);
+    setGammaHighlightedJnwStateId(initialState.id);
   };
 
   const updateJnwInitialState = (generator: number, enabled: boolean) => {
@@ -3383,8 +3995,15 @@ export function App() {
     );
   };
 
-  const openJnwStateQuotient = () => {
+  const openJnwStateQuotient = (
+    requestedStateId = activeJnwInitialState.id,
+  ) => {
     const quotient = jnwDerivedQuotient;
+    const selectedStateId = quotient.vertices.some(
+      (vertex) => vertex.id === requestedStateId,
+    )
+      ? requestedStateId
+      : (quotient.vertices[0]?.id ?? "jnw:state:empty");
     setImportedDataset({
       kind: "quotient-complex",
       id: `jnw:${jnwSourceKey}`,
@@ -3394,19 +4013,79 @@ export function App() {
       sourceSystem: jnwSourceSystem,
     });
     setGameWorkflowKind("jnw-legal-system");
-    setSelectedNodeId(quotient.vertices[0]?.id ?? "jnw:state:empty");
+    setUiMode("research");
+    setShowAdvancedPanels(true);
+    setSelectedNodeId(selectedStateId);
+    setRootNodeId(selectedStateId);
+    setSelectedJnwStateId(selectedStateId);
+    setGammaHighlightedJnwStateId(selectedStateId);
     setSelectedCellId(undefined);
     setYGammaMainView("complex");
     setMode("shell");
     setGraphView("global");
     setShowCells(true);
+    setShowNodeLabels(true);
     setShowEdgeLabels(true);
-    setLabelScope("focused");
+    setLabelScope("budgeted");
+    setJnwReaderMode("readable-chart");
+    setJnwReaderLens("state");
+    setJnwRailGrouping("individual");
+    setSelectedJnwGenerator(0);
+    setJnwQuotientSheetMode("glass");
+    setJnwQuotientConstructionStage(3);
+    setTopologyLens({ id: "state-quotient-orbit" });
     setFocusSignal((value) => value + 1);
+  };
+
+  const openJnwStateQuotientLens = (lensId: TopologyLensId) => {
+    const selectedStateId =
+      activeJnwSelectedState?.id ?? activeJnwInitialState.id;
+    openJnwStateQuotient(selectedStateId);
+    setJnwReaderLens(jnwReaderLensForTopologyLens(lensId, "state"));
+    if (isQuotientLinkLens(lensId)) {
+      setJnwQuotientConstructionStage(5);
+    }
+    setTopologyLens({
+      id: lensId,
+      selectedGenerator: topologyLens.selectedGenerator,
+    });
+  };
+
+  const selectJnwState = (stateId: string) => {
+    setSelectedJnwStateId(stateId);
+    setGammaHighlightedJnwStateId(stateId);
+    setJnwReaderLens("state");
+    if (activeIsJnwStateQuotient) {
+      setSelectedNodeId(stateId);
+      setRootNodeId(stateId);
+    }
+    setFocusSignal((value) => value + 1);
+  };
+
+  const showJnwStateOnGamma = (stateId: string) => {
+    const state = jnwSummary.states.find((entry) => entry.id === stateId);
+    const nextStateId = state?.id ?? stateId;
+    setSelectedJnwStateId(nextStateId);
+    setGammaHighlightedJnwStateId(nextStateId);
+    openDefiningGraph();
+    setSceneLayoutSignal((value) => value + 1);
+  };
+
+  const selectJnwGlueGenerator = (generator: number) => {
+    if (activeIsJnwStateQuotient) {
+      setTopologyLens({ id: "state-quotient-orbit" });
+    } else {
+      openJnwStateQuotient(activeJnwSelectedState?.id);
+    }
+    setSelectedJnwGenerator(generator);
+    setJnwReaderLens("glue");
+    setJnwRailGrouping("individual");
   };
 
   const focusJnwDiagnostic = (diagnosticId: string) => {
     openJnwStateQuotient();
+    setJnwReaderLens("relation");
+    setJnwRailGrouping("individual");
     setSelectedCellId(diagnosticId);
     setActiveGeneratorPairKey(
       pairKey(
@@ -3417,6 +4096,8 @@ export function App() {
     );
     setCellFocusMode("selected-cell");
     setRelationWalkMode("numbered");
+    setJnwQuotientSheetMode("glass");
+    setJnwQuotientConstructionStage(4);
   };
 
   const updateGameGeneratorValue = (generator: number, value: number) => {
@@ -3504,6 +4185,7 @@ export function App() {
       setYGammaFocusPreset("one-relation");
       setYGammaPeelMode("selected-face");
       setYGammaCameraBookmark("front");
+      applyYGammaCellSeparation("readable");
       setYGammaTopologyMode(true);
       setHoveredCellId(undefined);
       setShowHigherCells(false);
@@ -3534,27 +4216,26 @@ export function App() {
     setFocusSignal((value) => value + 1);
   };
 
-  const focusRankThreeM2M3Demo = (pairKeyToView?: string) => {
-    if (!yGammaRankThreeFocus) {
+  const focusRankThreeCell = (pairKeyToView?: string) => {
+    const focus =
+      pairKeyToView && yGammaAtlas
+        ? findRankThreeFocusContainingPair(yGammaAtlas, pairKeyToView)
+        : yGammaRankThreeFocus;
+    if (!focus) {
       return;
     }
+    const pairToView =
+      pairKeyToView ?? activeGeneratorPairKey ?? focus.pairKeys[0];
     setYGammaMainView("complex");
     setShowHigherCells(true);
     setYGammaShowAllFaces(false);
     setYGammaRankThreeFocusEnabled(true);
     setYGammaFocusPreset("rank-three-cell");
     setYGammaPeelMode("same-rank-three");
+    applyYGammaCellSeparation("readable");
     setYGammaTopologyMode(true);
-    setActiveGeneratorPairKey(
-      pairKeyToView ?? yGammaRankThreeFocus.pairKeys[1],
-    );
-    setYGammaCameraBookmark(
-      pairKeyToView === yGammaRankThreeFocus.pairKeys[0]
-        ? "square-family"
-        : pairKeyToView === yGammaRankThreeFocus.pairKeys[1]
-          ? "hexagon-family"
-          : "rank-three-cell",
-    );
+    setActiveGeneratorPairKey(pairToView);
+    setYGammaCameraBookmark("rank-three-cell");
     setShowCells(true);
     setShowNodeLabels(true);
     setShowEdgeLabels(true);
@@ -3582,6 +4263,7 @@ export function App() {
   const toggleAllRankTwoPairs = (enabled: boolean) => {
     setYGammaRankThreeFocusEnabled(false);
     setYGammaFocusPreset(enabled ? "full-skeleton" : "one-relation");
+    applyYGammaCellSeparation(enabled ? "expanded" : "readable");
     setDisabledPairs(
       enabled ? new Set() : new Set(pairOptions.map((option) => option.key)),
     );
@@ -3591,6 +4273,7 @@ export function App() {
     setYGammaRankThreeFocusEnabled(false);
     setYGammaFocusPreset("m3-hexagons");
     setYGammaCameraBookmark("hexagon-family");
+    applyYGammaCellSeparation("expanded");
     setShowCells(true);
     setDisabledPairs(
       new Set(
@@ -3619,6 +4302,93 @@ export function App() {
     focusPairByKey(activeGeneratorPairKey);
   };
 
+  const extractYGammaRelationStar = () => {
+    if (!yGammaAtlas) {
+      return;
+    }
+    const defaultRelationCell =
+      yGammaAtlas.rankTwoCells.find(
+        (cell) => typeof cell.m === "number" && cell.m > 2,
+      ) ?? yGammaAtlas.rankTwoCells[0];
+    const key =
+      activeGeneratorPairKey ??
+      (defaultRelationCell
+        ? relationCellPairKey(defaultRelationCell.generators)
+        : undefined);
+    if (!key) {
+      return;
+    }
+    setYGammaMainView("complex");
+    setActiveGeneratorPairKey(key);
+    setYGammaFocusPreset("one-relation");
+    setYGammaRankThreeFocusEnabled(false);
+    setYGammaShowAllFaces(true);
+    setYGammaRelationStarActive(true);
+    setYGammaCutawayMode("incident-to-selected-relation");
+    setYGammaPeelMode("all");
+    applyYGammaCellSeparation("expanded");
+    setYGammaTopologyMode(true);
+    setShowHigherCells(true);
+    setShowCells(true);
+    setShowEdgeLabels(true);
+    setShowNodeLabels(true);
+    setLabelScope("focused");
+    setYGammaCameraPath("relation-star");
+    setYGammaCameraBookmark("rank-three-cell");
+    setFocusSignal((value) => value + 1);
+  };
+
+  const applyYGammaStarLens = (lens: YGammaStarLens) => {
+    if (lens === "generator-star") {
+      setYGammaCutawayMode("generator-family");
+      setYGammaRelationStarActive(false);
+      applyYGammaNarratedPreset("around-generator");
+      return;
+    }
+    if (lens === "edge-star") {
+      setYGammaCutawayMode("incident-to-selected-edge");
+      setYGammaRelationStarActive(false);
+      applyYGammaNarratedPreset("around-generator");
+      return;
+    }
+    if (lens === "relation-star") {
+      extractYGammaRelationStar();
+      return;
+    }
+    if (lens === "rank-three-cell-star") {
+      setYGammaCutawayMode("rank");
+      setYGammaRelationStarActive(false);
+      focusRankThreeCell();
+      return;
+    }
+    setTopologyLens({
+      id: lens === "jnw-ascending-star" ? "ascending-link" : "descending-link",
+      selectedGenerator: yGammaFocusGenerator,
+    });
+    setYGammaRelationStarActive(false);
+    setFocusSignal((value) => value + 1);
+  };
+
+  const runYGammaCameraPath = (path: YGammaCameraPath) => {
+    setYGammaCameraPath(path);
+    if (path === "none") {
+      setFocusSignal((value) => value + 1);
+      return;
+    }
+    if (path === "selected-relation") {
+      snapYGammaCamera("front");
+    } else if (path === "square-family") {
+      snapYGammaCamera("square-family");
+    } else if (path === "hexagon-family") {
+      snapYGammaCamera("hexagon-family");
+    } else if (path === "shared-generator") {
+      setYGammaCutawayMode("generator-family");
+      snapYGammaCamera("top");
+    } else {
+      extractYGammaRelationStar();
+    }
+  };
+
   const applyYGammaNarratedPreset = (preset: YGammaFocusPreset) => {
     if (!yGammaAtlas) {
       return;
@@ -3633,6 +4403,9 @@ export function App() {
     setShowNodeLabels(true);
     setLabelScope("focused");
     setHoveredCellId(undefined);
+    setYGammaRelationStarActive(false);
+    setYGammaCutawayMode("none");
+    setYGammaCameraPath("none");
 
     if (preset === "one-relation") {
       const key =
@@ -3644,21 +4417,24 @@ export function App() {
       setYGammaRankThreeFocusEnabled(false);
       setYGammaShowAllFaces(false);
       setYGammaPeelMode("selected-face");
+      applyYGammaCellSeparation("readable");
       setYGammaTopologyMode(true);
       setYGammaCameraBookmark("front");
     } else if (preset === "rank-three-cell") {
       setYGammaRankThreeFocusEnabled(Boolean(yGammaRankThreeFocus));
       setYGammaShowAllFaces(false);
       setYGammaPeelMode("same-rank-three");
+      applyYGammaCellSeparation("readable");
       setYGammaTopologyMode(true);
       setYGammaCameraBookmark("rank-three-cell");
       if (yGammaRankThreeFocus && !activeGeneratorPairKey) {
-        setActiveGeneratorPairKey(yGammaRankThreeFocus.pairKeys[1]);
+        setActiveGeneratorPairKey(yGammaRankThreeFocus.pairKeys[0]);
       }
     } else if (preset === "around-generator") {
       setYGammaRankThreeFocusEnabled(false);
       setYGammaShowAllFaces(true);
       setYGammaPeelMode("all");
+      applyYGammaCellSeparation("expanded");
       setYGammaTopologyMode(true);
       setYGammaCameraBookmark("front");
       setActiveGeneratorPairKey(undefined);
@@ -3668,6 +4444,7 @@ export function App() {
       }
       setYGammaRankThreeFocusEnabled(Boolean(yGammaRankThreeFocus));
       setYGammaPeelMode("all");
+      applyYGammaCellSeparation("expanded");
       setYGammaTopologyMode(true);
       setYGammaCameraBookmark("square-family");
     } else if (preset === "m3-hexagons") {
@@ -3676,12 +4453,14 @@ export function App() {
       }
       setYGammaRankThreeFocusEnabled(Boolean(yGammaRankThreeFocus));
       setYGammaPeelMode("all");
+      applyYGammaCellSeparation("expanded");
       setYGammaTopologyMode(true);
       setYGammaCameraBookmark("hexagon-family");
     } else {
       setYGammaRankThreeFocusEnabled(false);
       setYGammaShowAllFaces(true);
       setYGammaPeelMode("all");
+      applyYGammaCellSeparation("expanded");
       setYGammaTopologyMode(false);
       setActiveGeneratorPairKey(undefined);
       setYGammaCameraBookmark("front");
@@ -3691,11 +4470,13 @@ export function App() {
 
   const snapYGammaCamera = (bookmark: YGammaCameraBookmark) => {
     setYGammaCameraBookmark(bookmark);
-    if (bookmark === "square-family" && yGammaRankThreeFocus?.pairKeys[0]) {
-      setActiveGeneratorPairKey(yGammaRankThreeFocus.pairKeys[0]);
+    const squarePair = yGammaRankThreeFocusPairs.find((pair) => pair.m === 2);
+    const hexagonPair = yGammaRankThreeFocusPairs.find((pair) => pair.m === 3);
+    if (bookmark === "square-family" && squarePair) {
+      setActiveGeneratorPairKey(squarePair.key);
     }
-    if (bookmark === "hexagon-family" && yGammaRankThreeFocus?.pairKeys[1]) {
-      setActiveGeneratorPairKey(yGammaRankThreeFocus.pairKeys[1]);
+    if (bookmark === "hexagon-family" && hexagonPair) {
+      setActiveGeneratorPairKey(hexagonPair.key);
     }
     setFocusSignal((value) => value + 1);
   };
@@ -3777,6 +4558,55 @@ export function App() {
     applyGuidedInspectionPreset(id);
   };
 
+  const runStartHereAction = (id: StartHereActionId) => {
+    setUiMode(id === "study-quotient-game" ? "research" : "teaching");
+    setShowAdvancedPanels(id === "study-quotient-game");
+    setTeachingLocalLinkOpen(false);
+
+    if (id === "explore-coxeter-example") {
+      showDavisComplexForSource();
+      applyViewPreset("local-chamber", { persist: false });
+      setDesktopMessage(
+        "Local chamber view shows the selected chamber, generator steps, nearby cells, and focused labels.",
+      );
+      return;
+    }
+
+    if (id === "find-relation-cell") {
+      startGuidedInspection("one-relation");
+      setDesktopMessage(
+        "Relation focus shows one finite rank-two cell and its boundary labels.",
+      );
+      return;
+    }
+
+    if (id === "understand-ygamma") {
+      startGuidedInspection("inspect-ygamma");
+      setDesktopMessage(
+        "Y_Gamma is the one-vertex fundamental-domain model; its 3D placement is a readability drawing.",
+      );
+      return;
+    }
+
+    if (id === "study-quotient-game") {
+      loadJnwCubeWorkflow();
+      setGuidedInspection({ id: "quotient-game-experiment", stepIndex: 0 });
+      setDesktopMessage(
+        "Loaded the JNW cube graph legal-system demo. The I2(5) quotient/cocycle demo remains available in Research Workflow.",
+      );
+      return;
+    }
+
+    setUiMode("research");
+    setShowAdvancedPanels(true);
+    setEightFacetCatalogueOpen(true);
+    setEightFacetCatalogueFilter("all");
+    setEightFacetCatalogueQuery("");
+    setDesktopMessage(
+      "Research mode exposes data status, certificates, backend tools, the example catalogue, and caveats.",
+    );
+  };
+
   const moveGuidedInspection = (delta: number) => {
     setGuidedInspection((current) =>
       current ? moveGuidedInspectionStep(current, delta) : current,
@@ -3795,6 +4625,10 @@ export function App() {
     if (entryId === "quotient:i2-5") {
       loadI25WorkflowQuotient();
       setUiMode("research");
+      return;
+    }
+    if (entryId === "jnw:cube-graph") {
+      loadJnwCubeWorkflow();
       return;
     }
     if (entryId === "compact:5-cube") {
@@ -3874,6 +4708,20 @@ export function App() {
   const handleSceneSelectCell = useCallback(
     (cellId: string) => {
       setSelectedCellId(cellId);
+      if (showingYGammaComplex && yGamma2SkeletonScene) {
+        const cell = yGamma2SkeletonScene.cells.find(
+          (entry) => entry.id === cellId,
+        );
+        if (cell) {
+          setActiveGeneratorPairKey(pairKey(cell.generatorPair));
+          setYGammaFocusPreset("one-relation");
+          setShowCells(true);
+          setShowEdgeLabels(true);
+          setLabelScope("focused");
+          setFocusSignal((value) => value + 1);
+          return;
+        }
+      }
       const cell = ballIndexes.twoCellsById.get(cellId);
       if (cell) {
         setActiveGeneratorPairKey(pairKey(cell.generatorPair));
@@ -3886,7 +4734,7 @@ export function App() {
         setFocusSignal((value) => value + 1);
       }
     },
-    [ballIndexes.twoCellsById],
+    [ballIndexes.twoCellsById, showingYGammaComplex, yGamma2SkeletonScene],
   );
 
   const toggleHigherSubset = (subsetId: string, enabled: boolean) => {
@@ -4043,6 +4891,9 @@ export function App() {
         cellNeighborhoodMode,
         relationWalkMode,
         occlusionMode,
+        yGammaReadableView: activeIsYGammaBaseComplex
+          ? yGammaReadableViewState
+          : undefined,
       },
       annotations,
       cameraBookmarks,
@@ -4059,6 +4910,7 @@ export function App() {
     activeDataset.id,
     activeDataset.label,
     activeGeneratorPairKey,
+    activeIsYGammaBaseComplex,
     activePreset,
     annotations,
     cameraBookmarks,
@@ -4082,6 +4934,7 @@ export function App() {
     system,
     warnings,
     viewComparisonMode,
+    yGammaReadableViewState,
   ]);
 
   const addAnnotation = useCallback(() => {
@@ -4164,6 +5017,9 @@ export function App() {
         preset: activePreset,
         comparisonMode: viewComparisonMode,
         topologyLensId: topologyLens.id,
+        yGammaReadableView: activeIsYGammaBaseComplex
+          ? yGammaReadableViewState
+          : undefined,
       },
       selected: {
         nodeId: selectedNode?.id,
@@ -4186,6 +5042,7 @@ export function App() {
     activeDataset.id,
     activeDataset.label,
     activeGeneratorPairKey,
+    activeIsYGammaBaseComplex,
     activePreset,
     annotations,
     cameraBookmarks,
@@ -4197,6 +5054,7 @@ export function App() {
     topologyLens.id,
     uiMode,
     viewComparisonMode,
+    yGammaReadableViewState,
   ]);
 
   const exportProjectSession = useCallback(async () => {
@@ -4314,6 +5172,9 @@ export function App() {
               disabledGeneratorPairs: [...disabledPairs].sort(),
               annotations,
               cameraBookmarks,
+              yGammaReadableView: activeIsYGammaBaseComplex
+                ? yGammaReadableViewState
+                : undefined,
             },
             render: {
               sceneStats,
@@ -4360,6 +5221,15 @@ export function App() {
                             legalStateCount: jnwSummary.legalStateCount,
                             stronglyLegalStateCount:
                               jnwSummary.stronglyLegalStateCount,
+                            reader: {
+                              mode: jnwReaderMode,
+                              lens: jnwReaderLens,
+                              railGrouping: jnwRailGrouping,
+                              selectedStateId: activeJnwSelectedState?.id,
+                              selectedGenerator: selectedJnwGenerator,
+                              selectedRelationId: selectedCellId,
+                              constructionStage: jnwQuotientConstructionStage,
+                            },
                           },
                           cocycleStatus: quotientGameSummary.status,
                           failedCellIds: quotientGameSummary.failedCellIds,
@@ -4389,6 +5259,7 @@ export function App() {
       activeDataset.id,
       activeDataset.label,
       activeGeneratorPairKey,
+      activeIsYGammaBaseComplex,
       activePreset,
       activeQuotient,
       annotations,
@@ -4406,9 +5277,14 @@ export function App() {
       activeJnwInitialState.generators,
       activeJnwInitialState.id,
       activeJnwMoveSystem.moves,
+      activeJnwSelectedState?.id,
       gameWorkflowKind,
       graphView,
       guidedInspection,
+      jnwQuotientConstructionStage,
+      jnwRailGrouping,
+      jnwReaderLens,
+      jnwReaderMode,
       jnwSourceSystem.name,
       jnwSummary.claimStatus,
       jnwSummary.legalStateCount,
@@ -4424,6 +5300,8 @@ export function App() {
       relationWalkMode,
       researchWorkflow,
       sceneStats,
+      selectedCellId,
+      selectedJnwGenerator,
       selectedNode?.id,
       system,
       topologyLens,
@@ -4431,6 +5309,7 @@ export function App() {
       uiMode,
       warnings,
       viewComparisonMode,
+      yGammaReadableViewState,
     ],
   );
 
@@ -4657,7 +5536,9 @@ export function App() {
           break;
         case "e":
         case "E":
-          setShowEdgeLabels((value) => !value);
+          if (event.shiftKey) {
+            setShowEdgeLabels((value) => !value);
+          }
           break;
         case "c":
         case "C":
@@ -4706,13 +5587,93 @@ export function App() {
     setViewerOnlyMode,
   ]);
 
+  const renderModelSwitch = (placement: "sidebar" | "top") =>
+    hasMathContext ? (
+      <div
+        className={`segmented ygamma-view-switch model-switch-${placement}`}
+        role="group"
+        aria-label="Choose mathematical view"
+      >
+        <button
+          type="button"
+          aria-pressed={
+            !showingGammaDefiningGraph &&
+            !activeIsYGammaBaseComplex &&
+            !(
+              activeDataset.kind === "quotient-complex" &&
+              !activeIsYGammaBaseComplex
+            )
+          }
+          title={`${modelExplanations.davis.shortDescription} ${modelExplanations.davis.whyUseIt}`}
+          onClick={() => showDavisComplexForSource()}
+        >
+          {labelForModel("davis")}
+        </button>
+        <button
+          type="button"
+          aria-pressed={
+            activeIsYGammaBaseComplex && yGammaMainView === "complex"
+          }
+          onClick={() => {
+            if (!activeIsYGammaBaseComplex) {
+              openBaseOrbicomplex();
+            } else {
+              setYGammaMainView("complex");
+            }
+          }}
+          title={`${modelExplanations.ygamma.shortDescription} ${modelExplanations.ygamma.whyUseIt}`}
+        >
+          {labelForModel("ygamma")}
+        </button>
+        <button
+          type="button"
+          aria-pressed={showingGammaDefiningGraph}
+          title={`${modelExplanations.gamma.shortDescription} ${modelExplanations.gamma.whyUseIt}`}
+          onClick={openDefiningGraph}
+        >
+          {labelForModel("gamma")}
+        </button>
+        <button
+          type="button"
+          aria-pressed={effectiveMode === "geometric"}
+          disabled={!geometryAvailable}
+          title={
+            geometryAvailable
+              ? `${modelExplanations.projection.shortDescription} ${modelExplanations.projection.whyUseIt}`
+              : "This example has no geometric reflection data."
+          }
+          onClick={openProjectionView}
+        >
+          {labelForModel("projection")}
+        </button>
+        <button
+          type="button"
+          aria-pressed={
+            !showingGammaDefiningGraph &&
+            activeDataset.kind === "quotient-complex" &&
+            !activeIsYGammaBaseComplex
+          }
+          title={`${modelExplanations["quotient-games"].shortDescription} ${modelExplanations["quotient-games"].whyUseIt}`}
+          onClick={openQuotientAndGames}
+        >
+          {labelForModel("quotient-games")}
+        </button>
+        <span className="model-switch-help" aria-live="polite">
+          {currentModelDisplayLabel}: {currentModelExplanation.shortDescription}
+        </span>
+      </div>
+    ) : null;
+
   return (
     <main
       className={`app-shell${viewerOnly ? " viewer-only" : ""}`}
       data-theme={colorScheme}
+      data-ui-mode={uiMode}
     >
       <aside ref={sidebarRef} className="sidebar" aria-label="Viewer controls">
-        <Panel title="Input">
+        <Panel
+          title={showResearchControls ? "Choose / Load" : "Choose Example"}
+        >
           <div className="segmented" role="group" aria-label="Interface mode">
             <button
               type="button"
@@ -4751,74 +5712,91 @@ export function App() {
             </select>
           </div>
 
+          <div className="field">
+            <span className="small-label">View</span>
+            {renderModelSwitch("sidebar")}
+          </div>
+
           {showResearchControls ? (
-            <div className="field">
-              <label htmlFor="backend-select">Backend</label>
-              <select
-                id="backend-select"
-                value={backendId}
-                onChange={(event) => setBackendId(event.target.value)}
-              >
-                <option value="browserApproxBackend">
-                  Browser approximate
-                </option>
-                {exactBackendStubs.map((backend) => (
-                  <option key={backend.name} value={backend.name}>
-                    {backend.name} (external)
-                  </option>
-                ))}
-              </select>
+            <div className="research-lane-strip" aria-label="Research lanes">
+              <span>Workflow</span>
+              <span>Data/files</span>
+              <span>Notebook/export</span>
+              <span>Status/tools</span>
             </div>
           ) : null}
 
-          <div className="field">
-            <label htmlFor="graph-preset-select">Graph size</label>
-            <select
-              id="graph-preset-select"
-              value={graphPresetId}
-              onChange={(event) => {
-                const nextPresetId = event.target.value as GraphPresetId;
-                const nextPreset = graphPresets[nextPresetId];
-                setGraphPresetId(nextPresetId);
-                setRadius((currentRadius) =>
-                  currentRadius > nextPreset.maxRadius
-                    ? nextPreset.maxRadius
-                    : currentRadius,
-                );
-              }}
-            >
-              {Object.entries(graphPresets).map(([id, preset]) => (
-                <option key={id} value={id}>
-                  {preset.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          {showGenerationControls ? (
+            <details className="advanced-details">
+              <summary>Generation</summary>
+              <div className="field">
+                <label htmlFor="backend-select">Backend</label>
+                <select
+                  id="backend-select"
+                  value={backendId}
+                  onChange={(event) => setBackendId(event.target.value)}
+                >
+                  <option value="browserApproxBackend">
+                    Browser approximate
+                  </option>
+                  {exactBackendStubs.map((backend) => (
+                    <option key={backend.name} value={backend.name}>
+                      {backend.name} (external)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="graph-preset-select">Graph size</label>
+                <select
+                  id="graph-preset-select"
+                  value={graphPresetId}
+                  onChange={(event) => {
+                    const nextPresetId = event.target.value as GraphPresetId;
+                    const nextPreset = graphPresets[nextPresetId];
+                    setGraphPresetId(nextPresetId);
+                    setRadius((currentRadius) =>
+                      currentRadius > nextPreset.maxRadius
+                        ? nextPreset.maxRadius
+                        : currentRadius,
+                    );
+                  }}
+                >
+                  {Object.entries(graphPresets).map(([id, preset]) => (
+                    <option key={id} value={id}>
+                      {preset.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          <div className="field">
-            <label htmlFor="radius-input">Radius</label>
-            <input
-              id="radius-input"
-              data-testid="radius-input"
-              type="number"
-              min={0}
-              max={graphPreset.maxRadius}
-              disabled={activeDataset.kind !== "coxeter-system"}
-              value={radius}
-              onChange={(event) =>
-                setRadius(
-                  clampInteger(
-                    Number(event.target.value),
-                    0,
-                    graphPreset.maxRadius,
-                  ),
-                )
-              }
-            />
-          </div>
+              <div className="field">
+                <label htmlFor="radius-input">Radius</label>
+                <input
+                  id="radius-input"
+                  data-testid="radius-input"
+                  type="number"
+                  min={0}
+                  max={graphPreset.maxRadius}
+                  disabled={activeDataset.kind !== "coxeter-system"}
+                  value={radius}
+                  onChange={(event) =>
+                    setRadius(
+                      clampInteger(
+                        Number(event.target.value),
+                        0,
+                        graphPreset.maxRadius,
+                      ),
+                    )
+                  }
+                />
+              </div>
+            </details>
+          ) : null}
 
           {showResearchControls ? (
-            <>
+            <details className="advanced-details">
+              <summary>Files + Workspace</summary>
               <label
                 className="button file-button"
                 htmlFor="import-coxeter-input"
@@ -4901,7 +5879,7 @@ export function App() {
                   onClick={() => void revealWorkspaceArtifacts()}
                 >
                   <FolderOpen size={16} aria-hidden="true" />
-                  Artifacts
+                  Open artifact folder
                 </button>
                 <button
                   type="button"
@@ -4915,25 +5893,11 @@ export function App() {
                   className="button"
                   onClick={() => void exportDesktopDiagnostics()}
                 >
-                  Diagnostics
+                  Export diagnostic bundle
                 </button>
               </div>
-            </>
+            </details>
           ) : null}
-          <button
-            type="button"
-            className="button file-button"
-            onClick={openBaseOrbicomplex}
-          >
-            Open 3D Y_Gamma model
-          </button>
-          <button
-            type="button"
-            className="button file-button"
-            onClick={openDefiningGraph}
-          >
-            Open defining graph Gamma
-          </button>
           {showResearchControls ? (
             <details className="advanced-details">
               <summary>Quotient builder</summary>
@@ -5002,7 +5966,29 @@ export function App() {
         </Panel>
 
         {showReaderControls ? (
-          <Panel title="Reader Controls">
+          <Panel title="Start Here">
+            <p className="math-note compact-note">
+              Pick a goal. Each action changes the view and explanation only;
+              the Coxeter data and certificates are unchanged. The Focus
+              Inspector explains the selected object.
+            </p>
+            <div
+              className="task-card-grid start-here-grid"
+              aria-label="Start Here"
+            >
+              {startHereActions.map((action) => (
+                <button
+                  key={action.id}
+                  type="button"
+                  className="task-card"
+                  title={action.summary}
+                  onClick={() => runStartHereAction(action.id)}
+                >
+                  <strong>{action.label}</strong>
+                  <span>{action.summary}</span>
+                </button>
+              ))}
+            </div>
             <div className="reader-control-group">
               <span className="small-label">Focus</span>
               <div
@@ -5022,7 +6008,7 @@ export function App() {
                     }
                   }}
                 >
-                  All
+                  See all
                 </button>
                 <button
                   type="button"
@@ -5032,7 +6018,7 @@ export function App() {
                     applyViewPreset("local-chamber", { persist: false });
                   }}
                 >
-                  Local Chamber
+                  Look near a chamber
                 </button>
                 <button
                   type="button"
@@ -5051,7 +6037,7 @@ export function App() {
                     focusPairByKey(key);
                   }}
                 >
-                  One relation
+                  Read one relation
                 </button>
                 <button
                   type="button"
@@ -5069,7 +6055,7 @@ export function App() {
                     }
                   }}
                 >
-                  Generator star
+                  Show cells around one generator
                 </button>
                 <button
                   type="button"
@@ -5080,10 +6066,10 @@ export function App() {
                     if (!activeIsYGammaBaseComplex) {
                       openBaseOrbicomplex();
                     }
-                    focusRankThreeM2M3Demo();
+                    focusRankThreeCell();
                   }}
                 >
-                  Rank-three cell
+                  Read one rank-three cell
                 </button>
                 <button
                   type="button"
@@ -5097,7 +6083,7 @@ export function App() {
                     applyViewPreset("local-chamber", { persist: false });
                   }}
                 >
-                  Local link
+                  Open local link
                 </button>
               </div>
             </div>
@@ -5134,6 +6120,9 @@ export function App() {
                 </button>
               ))}
             </div>
+            <div className="reader-control-group">
+              <span className="small-label">Labels</span>
+            </div>
             <div className="reader-control-row">
               <Toggle
                 checked={showNodeLabels}
@@ -5143,6 +6132,8 @@ export function App() {
               <Toggle
                 checked={showEdgeLabels}
                 label="Show generator labels on edges"
+                ariaKeyShortcuts="Shift+E"
+                title="Shortcut: Shift+E. Plain E is reserved for camera movement."
                 onChange={setShowEdgeLabels}
               />
               <Toggle
@@ -5159,123 +6150,127 @@ export function App() {
           </Panel>
         ) : null}
 
-        <Panel title="Example Gallery">
-          <div className="gallery-list" aria-label="Walkthrough gallery">
-            {defaultGalleryEntries().map((entry) => (
-              <button
-                key={entry.id}
-                type="button"
-                className="gallery-card"
-                onClick={() => runGalleryAction(entry.id)}
-              >
-                <span className="small-label">{entry.family}</span>
-                <strong>{entry.label}</strong>
-                <span>{entry.summary}</span>
-                <span className="link-like">{entry.actionLabel}</span>
-              </button>
-            ))}
-          </div>
-          <details
-            className="catalogue-panel"
-            open={eightFacetCatalogueOpen}
-            onToggle={(event) =>
-              setEightFacetCatalogueOpen(event.currentTarget.open)
-            }
-          >
-            <summary>Example catalogue: 5D eight-facet cases</summary>
-            <p className="math-note">
-              Tumarkin lists 15 compact 5D Coxeter polytopes with 8 facets in{" "}
-              {tumarkinEightFacetSourceRef.locator}. These entries are
-              transcribed from the source EPS artwork, their dotted weights are
-              solved from the determinant equations, and each bundled JSON has a
-              passed rank/signature certificate.
-            </p>
-            <div className="field">
-              <label htmlFor="eight-facet-catalogue-search">
-                Search catalogue
-              </label>
-              <input
-                id="eight-facet-catalogue-search"
-                value={eightFacetCatalogueQuery}
-                onChange={(event) =>
-                  setEightFacetCatalogueQuery(event.target.value)
-                }
-                placeholder="G11411, 01, blocked, Table 4.10"
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="eight-facet-catalogue-filter">Filter</label>
-              <select
-                id="eight-facet-catalogue-filter"
-                value={eightFacetCatalogueFilter}
-                onChange={(event) =>
-                  setEightFacetCatalogueFilter(
-                    event.target.value as EightFacetCatalogueFilter,
-                  )
-                }
-              >
-                <option value="all">All 15 entries</option>
-                <option value="representative">
-                  Representative gallery entries
-                </option>
-                <option value="blocked">Uncertified or blocked</option>
-              </select>
-            </div>
-            <p className="math-note">
-              Showing {visibleEightFacetCatalogue.length}/
-              {tumarkinEightFacetCatalogue.length};{" "}
-              {countCertificationBlockedEntries()} still need transcription or
-              checker artifacts before certification.
-            </p>
-            <div
-              className="catalogue-list"
-              aria-label="Tumarkin eight-facet catalogue"
-            >
-              {visibleEightFacetCatalogue.map((entry) => (
-                <article key={entry.id} className="catalogue-entry">
-                  <div>
-                    <span className="small-label">
-                      {entry.galeDiagram} · #
-                      {entry.tableIndex.toString().padStart(2, "0")}
-                    </span>
-                    <strong>{entry.label}</strong>
-                  </div>
-                  <span className="status-pill">
-                    {entry.renderStatus.replace("-", " ")}
-                  </span>
-                  <span className="status-pill warning-pill">
-                    {entry.certificationStatus.replace(/-/g, " ")}
-                  </span>
-                  <p>{entry.sourceLocator}</p>
-                  <p className="math-note">
-                    {entry.renderable
-                      ? "Certified bundled Coxeter-system JSON is available."
-                      : `Certification needs: ${entry.requiredForCertification
-                          .slice(0, 2)
-                          .join(" ")}`}
-                  </p>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={!entry.renderable}
-                    onClick={() => void handleLoadEightFacetEntry(entry)}
-                  >
-                    Load example
-                  </button>
-                </article>
+        {showResearchControls ? (
+          <Panel title="Example Gallery">
+            <div className="gallery-list" aria-label="Walkthrough gallery">
+              {defaultGalleryEntries().map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  className="gallery-card"
+                  onClick={() => runGalleryAction(entry.id)}
+                >
+                  <span className="small-label">{entry.family}</span>
+                  <strong>{entry.label}</strong>
+                  <span>{entry.summary}</span>
+                  <span className="link-like">{entry.actionLabel}</span>
+                </button>
               ))}
             </div>
-          </details>
-        </Panel>
+            <details
+              className="catalogue-panel"
+              open={eightFacetCatalogueOpen}
+              onToggle={(event) =>
+                setEightFacetCatalogueOpen(event.currentTarget.open)
+              }
+            >
+              <summary>Example catalogue: 5D eight-facet cases</summary>
+              <p className="math-note">
+                Tumarkin lists 15 compact 5D Coxeter polytopes with 8 facets in{" "}
+                {tumarkinEightFacetSourceRef.locator}. These entries are
+                transcribed from the source EPS artwork, their dotted weights
+                are solved from the determinant equations, and each bundled JSON
+                has a passed rank/signature certificate.
+              </p>
+              <div className="field">
+                <label htmlFor="eight-facet-catalogue-search">
+                  Search catalogue
+                </label>
+                <input
+                  id="eight-facet-catalogue-search"
+                  value={eightFacetCatalogueQuery}
+                  onChange={(event) =>
+                    setEightFacetCatalogueQuery(event.target.value)
+                  }
+                  placeholder="G11411, 01, blocked, Table 4.10"
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="eight-facet-catalogue-filter">Filter</label>
+                <select
+                  id="eight-facet-catalogue-filter"
+                  value={eightFacetCatalogueFilter}
+                  onChange={(event) =>
+                    setEightFacetCatalogueFilter(
+                      event.target.value as EightFacetCatalogueFilter,
+                    )
+                  }
+                >
+                  <option value="all">All 15 entries</option>
+                  <option value="representative">
+                    Representative gallery entries
+                  </option>
+                  <option value="blocked">Uncertified or blocked</option>
+                </select>
+              </div>
+              <p className="math-note">
+                Showing {visibleEightFacetCatalogue.length}/
+                {tumarkinEightFacetCatalogue.length};{" "}
+                {countCertificationBlockedEntries()} still need transcription or
+                checker artifacts before certification.
+              </p>
+              <div
+                className="catalogue-list"
+                aria-label="Tumarkin eight-facet catalogue"
+              >
+                {visibleEightFacetCatalogue.map((entry) => (
+                  <article key={entry.id} className="catalogue-entry">
+                    <div>
+                      <span className="small-label">
+                        {entry.galeDiagram} · #
+                        {entry.tableIndex.toString().padStart(2, "0")}
+                      </span>
+                      <strong>{entry.label}</strong>
+                    </div>
+                    <span className="status-pill">
+                      {entry.renderStatus.replace("-", " ")}
+                    </span>
+                    <span className="status-pill warning-pill">
+                      {entry.certificationStatus.replace(/-/g, " ")}
+                    </span>
+                    <p>{entry.sourceLocator}</p>
+                    <p className="math-note">
+                      {entry.renderable
+                        ? "Certified bundled Coxeter-system JSON is available."
+                        : `Certification needs: ${entry.requiredForCertification
+                            .slice(0, 2)
+                            .join(" ")}`}
+                    </p>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={!entry.renderable}
+                      onClick={() => void handleLoadEightFacetEntry(entry)}
+                    >
+                      Load example
+                    </button>
+                  </article>
+                ))}
+              </div>
+            </details>
+          </Panel>
+        ) : null}
 
-        <Panel title="Guided Inspection">
-          <GuidedInspectionPanel
-            state={guidedInspection}
-            onStart={startGuidedInspection}
-            onStep={moveGuidedInspection}
-            onExit={() => setGuidedInspection(undefined)}
-          />
-        </Panel>
+        {showResearchControls ? (
+          <Panel title="Guided Inspection">
+            <GuidedInspectionPanel
+              state={guidedInspection}
+              onStart={startGuidedInspection}
+              onStep={moveGuidedInspection}
+              onExit={() => setGuidedInspection(undefined)}
+            />
+          </Panel>
+        ) : null}
 
         {uiMode === "research" ? (
           <Panel title="Research Workflow">
@@ -5313,6 +6308,7 @@ export function App() {
               }
               onMove={moveResearchWorkflow}
               onRunStep={() => runResearchWorkflowAction()}
+              onLoadJnwCube={loadJnwCubeWorkflow}
               onLens={applyTopologyLens}
               onLensGenerator={setTopologyLensGenerator}
               onSave={saveExperimentRun}
@@ -5323,23 +6319,40 @@ export function App() {
         ) : null}
 
         {activeIsYGammaBaseComplex && yGammaAtlas ? (
-          <Panel title="Y_Gamma 3D Reader">
+          <Panel title="Y_Gamma Reader">
             <YGammaReaderPanel
               atlas={yGammaAtlas}
               focusPreset={yGammaFocusPreset}
               activeGeneratorPairKey={activeGeneratorPairKey}
               focusGenerator={yGammaFocusGenerator}
               peelMode={yGammaPeelMode}
+              cellSeparation={yGammaCellSeparation}
+              separationValue={yGammaSeparationValue}
+              cutawayMode={yGammaCutawayMode}
+              relationStarActive={yGammaRelationStarActive}
+              inspectMode={yGammaInspectMode}
+              cameraPath={yGammaCameraPath}
+              smallAtlasOpen={yGammaSmallAtlasOpen}
+              compareDrawing={yGammaCompareDrawing}
               topologyMode={yGammaTopologyMode}
               cameraBookmark={yGammaCameraBookmark}
               rankThreeFocusAvailable={Boolean(yGammaRankThreeFocus)}
               onPreset={applyYGammaNarratedPreset}
+              onStarLens={applyYGammaStarLens}
               onFocusPair={focusPairByKey}
               onFocusGenerator={(generator) => {
                 setYGammaFocusGenerator(generator);
                 applyYGammaNarratedPreset("around-generator");
               }}
+              onRelationStar={extractYGammaRelationStar}
+              onCutawayMode={setYGammaCutawayMode}
+              onSeparationValue={applyYGammaSeparationValue}
+              onInspectMode={setYGammaInspectMode}
+              onCameraPath={runYGammaCameraPath}
+              onSmallAtlasOpen={setYGammaSmallAtlasOpen}
+              onCompareDrawing={setYGammaCompareDrawing}
               onPeelMode={setYGammaPeelMode}
+              onCellSeparation={applyYGammaCellSeparation}
               onTopologyMode={setYGammaTopologyMode}
               onCameraBookmark={snapYGammaCamera}
             />
@@ -5355,7 +6368,7 @@ export function App() {
                   aria-pressed={effectiveMode === "shell"}
                   onClick={() => setMode("shell")}
                 >
-                  Shell
+                  Shell drawing
                 </button>
                 <button
                   type="button"
@@ -5364,7 +6377,7 @@ export function App() {
                   disabled={!geometryAvailable}
                   onClick={() => setMode("geometric")}
                 >
-                  Geometric
+                  Geometric projection
                 </button>
               </div>
               {!geometryAvailable ? (
@@ -5383,12 +6396,16 @@ export function App() {
                       setProjection(event.target.value as HyperbolicProjection)
                     }
                   >
-                    <option value="poincare-axes">Poincare axes (ball)</option>
-                    <option value="klein-axes">Klein axes (ball)</option>
-                    <option value="poincare-pca">
-                      Poincare PCA (projected)
+                    <option value="poincare-axes">
+                      Poincare ball, coordinate axes
                     </option>
-                    <option value="klein-pca">Klein PCA (projected)</option>
+                    <option value="klein-axes">
+                      Klein ball, coordinate axes
+                    </option>
+                    <option value="poincare-pca">
+                      Poincare ball, PCA axes
+                    </option>
+                    <option value="klein-pca">Klein ball, PCA axes</option>
                   </select>
                 </div>
               ) : null}
@@ -5452,7 +6469,7 @@ export function App() {
                   aria-pressed={graphView === "global"}
                   onClick={() => setGraphView("global")}
                 >
-                  Global
+                  Whole ball
                 </button>
                 <button
                   type="button"
@@ -5460,7 +6477,7 @@ export function App() {
                   aria-pressed={graphView === "on-graph"}
                   onClick={() => setGraphView("on-graph")}
                 >
-                  On graph
+                  Neighborhood only
                 </button>
               </div>
               {graphView === "on-graph" ? (
@@ -5499,10 +6516,10 @@ export function App() {
                 </>
               ) : null}
               <p className="math-note">
-                Local Chamber uses a 3D readability layout: generator neighbors
-                live on a small sphere and deeper vertices move to separated
-                shells. Rank-two fills default to the displayed 1-skeleton;
-                lifted panels and petals are optional.
+                Look near a chamber uses a 3D readability layout: generator
+                neighbors live on a small sphere and deeper vertices move to
+                separated shells. Rank-two fills default to the displayed
+                1-skeleton; lifted panels and petals are optional.
               </p>
               <div className="breadcrumb" aria-label="Selected word breadcrumb">
                 {breadcrumb.map((entry, index) => (
@@ -5564,6 +6581,8 @@ export function App() {
               <Toggle
                 checked={showEdgeLabels}
                 label="Show generator labels on edges"
+                ariaKeyShortcuts="Shift+E"
+                title="Shortcut: Shift+E. Plain E is reserved for camera movement."
                 onChange={setShowEdgeLabels}
               />
               <p className="math-note">
@@ -5578,118 +6597,125 @@ export function App() {
                 label="Show filled rank-two cells"
                 onChange={setShowCells}
               />
-              <div className="button-row">
-                <button
-                  type="button"
-                  className="button"
-                  onClick={() => toggleAllRankTwoPairs(true)}
-                >
-                  All on
-                </button>
-                <button
-                  type="button"
-                  className="button"
-                  onClick={() => toggleAllRankTwoPairs(false)}
-                >
-                  All off
-                </button>
-                <button
-                  type="button"
-                  className="button"
-                  onClick={showOnlyM3Pairs}
-                >
-                  Only m=3
-                </button>
-                <button
-                  type="button"
-                  className="button"
-                  disabled={!activeGeneratorPairKey}
-                  onClick={showOnlyActivePair}
-                >
-                  Only active pair
-                </button>
-              </div>
-              <div className="field inline-field">
-                <label htmlFor="cell-render-mode-select">Cell drawing</label>
-                <select
-                  id="cell-render-mode-select"
-                  value={cellRenderMode}
-                  onChange={(event) =>
-                    setCellRenderMode(event.target.value as LocalCellRenderMode)
-                  }
-                >
-                  <option value="in-graph">Bounded by graph</option>
-                  <option value="lifted-panels">Lifted panels</option>
-                  <option value="petals">Petals</option>
-                  <option value="outline-only">Outline only</option>
-                </select>
-              </div>
-              <div className="field inline-field">
-                <label htmlFor="cell-focus-mode-select">Cell focus</label>
-                <select
-                  id="cell-focus-mode-select"
-                  value={cellFocusMode}
-                  onChange={(event) =>
-                    setCellFocusMode(event.target.value as CellFocusMode)
-                  }
-                >
-                  <option value="all-local">All local cells</option>
-                  <option value="incident-selected">
-                    Incident to selected
-                  </option>
-                  <option value="selected-pair">Selected pair only</option>
-                  <option value="selected-cell">Selected cell only</option>
-                </select>
-              </div>
-              <div className="field inline-field">
-                <label htmlFor="cell-neighborhood-select">Neighborhood</label>
-                <select
-                  id="cell-neighborhood-select"
-                  value={cellNeighborhoodMode}
-                  onChange={(event) =>
-                    setCellNeighborhoodMode(
-                      event.target.value as CellNeighborhoodMode,
-                    )
-                  }
-                >
-                  <option value="chamber">Chamber neighborhood</option>
-                  <option value="cell-boundary">Cell boundary</option>
-                  <option value="cell-plus-1">Cell + 1 shell</option>
-                  <option value="cell-plus-2">Cell + 2 shells</option>
-                </select>
-              </div>
-              <div className="field inline-field">
-                <label htmlFor="relation-walk-select">Relation walk</label>
-                <select
-                  id="relation-walk-select"
-                  value={relationWalkMode}
-                  onChange={(event) =>
-                    setRelationWalkMode(event.target.value as RelationWalkMode)
-                  }
-                >
-                  <option value="numbered">Number boundary</option>
-                  <option value="off">Off</option>
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="cell-opacity-input">Cell opacity</label>
-                <input
-                  id="cell-opacity-input"
-                  type="range"
-                  min="0.08"
-                  max="0.5"
-                  step="0.02"
-                  value={cellOpacity}
-                  onChange={(event) =>
-                    setCellOpacity(Number(event.target.value))
-                  }
+              <details className="advanced-details">
+                <summary>Cell drawing options</summary>
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => toggleAllRankTwoPairs(true)}
+                  >
+                    All on
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => toggleAllRankTwoPairs(false)}
+                  >
+                    All off
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={showOnlyM3Pairs}
+                  >
+                    Only m=3
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={!activeGeneratorPairKey}
+                    onClick={showOnlyActivePair}
+                  >
+                    Only active pair
+                  </button>
+                </div>
+                <div className="field inline-field">
+                  <label htmlFor="cell-render-mode-select">Cell drawing</label>
+                  <select
+                    id="cell-render-mode-select"
+                    value={cellRenderMode}
+                    onChange={(event) =>
+                      setCellRenderMode(
+                        event.target.value as LocalCellRenderMode,
+                      )
+                    }
+                  >
+                    <option value="in-graph">Bounded by graph</option>
+                    <option value="lifted-panels">Lifted panels</option>
+                    <option value="petals">Petals</option>
+                    <option value="outline-only">Outline only</option>
+                  </select>
+                </div>
+                <div className="field inline-field">
+                  <label htmlFor="cell-focus-mode-select">Cell focus</label>
+                  <select
+                    id="cell-focus-mode-select"
+                    value={cellFocusMode}
+                    onChange={(event) =>
+                      setCellFocusMode(event.target.value as CellFocusMode)
+                    }
+                  >
+                    <option value="all-local">All local cells</option>
+                    <option value="incident-selected">
+                      Incident to selected
+                    </option>
+                    <option value="selected-pair">Selected pair only</option>
+                    <option value="selected-cell">Selected cell only</option>
+                  </select>
+                </div>
+                <div className="field inline-field">
+                  <label htmlFor="cell-neighborhood-select">Neighborhood</label>
+                  <select
+                    id="cell-neighborhood-select"
+                    value={cellNeighborhoodMode}
+                    onChange={(event) =>
+                      setCellNeighborhoodMode(
+                        event.target.value as CellNeighborhoodMode,
+                      )
+                    }
+                  >
+                    <option value="chamber">Chamber neighborhood</option>
+                    <option value="cell-boundary">Cell boundary</option>
+                    <option value="cell-plus-1">Cell + 1 shell</option>
+                    <option value="cell-plus-2">Cell + 2 shells</option>
+                  </select>
+                </div>
+                <div className="field inline-field">
+                  <label htmlFor="relation-walk-select">Relation walk</label>
+                  <select
+                    id="relation-walk-select"
+                    value={relationWalkMode}
+                    onChange={(event) =>
+                      setRelationWalkMode(
+                        event.target.value as RelationWalkMode,
+                      )
+                    }
+                  >
+                    <option value="numbered">Number boundary</option>
+                    <option value="off">Off</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="cell-opacity-input">Cell opacity</label>
+                  <input
+                    id="cell-opacity-input"
+                    type="range"
+                    min="0.08"
+                    max="0.5"
+                    step="0.02"
+                    value={cellOpacity}
+                    onChange={(event) =>
+                      setCellOpacity(Number(event.target.value))
+                    }
+                  />
+                </div>
+                <Toggle
+                  checked={bringFocusedCellsForward}
+                  label="Bring focused cells forward"
+                  onChange={setBringFocusedCellsForward}
                 />
-              </div>
-              <Toggle
-                checked={bringFocusedCellsForward}
-                label="Bring focused cells forward"
-                onChange={setBringFocusedCellsForward}
-              />
+              </details>
               <div
                 className="chip-grid"
                 aria-label="Rank-two generator-pair filters"
@@ -5716,7 +6742,7 @@ export function App() {
               </p>
             </Panel>
 
-            <Panel title="Pair Matrix">
+            <Panel title="Relation atlas">
               <div className="pair-matrix" aria-label="Coxeter pair matrix">
                 {pairOptions.map((option) => (
                   <button
@@ -5783,142 +6809,18 @@ export function App() {
             </p>
           </div>
           <div className="stats-row" aria-live="polite">
-            {hasMathContext ? (
-              <div
-                className="segmented ygamma-view-switch"
-                role="group"
-                aria-label="Main mathematical view"
-              >
-                <button
-                  type="button"
-                  aria-pressed={!activeIsYGammaBaseComplex}
-                  onClick={() => showDavisComplexForSource()}
-                >
-                  Davis
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={
-                    activeIsYGammaBaseComplex && yGammaMainView === "complex"
-                  }
-                  onClick={() => {
-                    if (!activeIsYGammaBaseComplex) {
-                      openBaseOrbicomplex();
-                    } else {
-                      setYGammaMainView("complex");
-                    }
-                  }}
-                >
-                  Y_Gamma
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={
-                    activeIsYGammaBaseComplex && yGammaMainView === "gamma"
-                  }
-                  onClick={openDefiningGraph}
-                >
-                  Gamma
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={yGammaMainView === "nerve"}
-                  disabled={!activeIsYGammaBaseComplex}
-                  title="2D nerve/local-link diagnostic, not the defining graph Gamma."
-                  onClick={() => setYGammaMainView("nerve")}
-                >
-                  Nerve
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={effectiveMode === "geometric"}
-                  disabled={!geometryAvailable}
-                  title={
-                    geometryAvailable
-                      ? "Show the certified or numerical geometric projection for the source system."
-                      : "This example has no geometric reflection data."
-                  }
-                  onClick={openProjectionView}
-                >
-                  Projection
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={
-                    activeDataset.kind === "quotient-complex" &&
-                    !activeIsYGammaBaseComplex
-                  }
-                  onClick={openQuotientAndGames}
-                >
-                  Quotient
-                </button>
-              </div>
-            ) : null}
+            {renderModelSwitch("top")}
             <div className="current-model-badge" aria-label="Current model">
               <span>Current model</span>
-              <strong>{currentModelBadge.label}</strong>
+              <strong>{currentModelDisplayLabel}</strong>
+              <em>{currentModelExplanation.shortDescription}</em>
               <em>{currentModelBadge.status}</em>
+              {caveatCount > 0 ? (
+                <small>
+                  {caveatCount} view note{caveatCount === 1 ? "" : "s"}
+                </small>
+              ) : null}
             </div>
-            {showingYGammaComplex &&
-            yGammaDense &&
-            !yGammaRankThreeFocusEnabled ? (
-              <button
-                type="button"
-                className="button"
-                aria-pressed={yGammaShowAllFaces}
-                onClick={() => setYGammaShowAllFaces((value) => !value)}
-              >
-                {yGammaShowAllFaces ? "Active face family" : "Show full 3-cell"}
-              </button>
-            ) : null}
-            {showingYGammaComplex && yGammaRankThreeFocus ? (
-              <button
-                type="button"
-                className="button"
-                aria-pressed={yGammaRankThreeFocusEnabled}
-                onClick={() => {
-                  if (yGammaRankThreeFocusEnabled) {
-                    setYGammaRankThreeFocusEnabled(false);
-                  } else {
-                    focusRankThreeM2M3Demo();
-                  }
-                }}
-              >
-                {yGammaRankThreeFocusEnabled
-                  ? "Exit 3D cell focus"
-                  : "Focus 3D m=2/m=3 cell"}
-              </button>
-            ) : null}
-            {showingYGammaComplex &&
-            yGammaRankThreeFocus &&
-            yGammaRankThreeFocusEnabled ? (
-              <>
-                <button
-                  type="button"
-                  className="button"
-                  data-active={
-                    activeGeneratorPairKey === yGammaRankThreeFocus.pairKeys[0]
-                  }
-                  onClick={() =>
-                    focusRankThreeM2M3Demo(yGammaRankThreeFocus.pairKeys[0])
-                  }
-                >
-                  Look at m=2 squares
-                </button>
-                <button
-                  type="button"
-                  className="button"
-                  data-active={
-                    activeGeneratorPairKey === yGammaRankThreeFocus.pairKeys[1]
-                  }
-                  onClick={() =>
-                    focusRankThreeM2M3Demo(yGammaRankThreeFocus.pairKeys[1])
-                  }
-                >
-                  Look at m=3 hexagons
-                </button>
-              </>
-            ) : null}
             <button
               type="button"
               className="button"
@@ -5989,6 +6891,10 @@ export function App() {
           <div
             className={`viewer-with-overlay${
               showingYGammaComplex && yGammaAtlas ? " has-ygamma-atlas" : ""
+            }${
+              showingYGammaComplex && yGammaComparisonScenes
+                ? " is-comparing"
+                : ""
             }`}
           >
             {viewerOnly ? (
@@ -6000,7 +6906,9 @@ export function App() {
                 Show UI
               </button>
             ) : null}
-            {showingYGammaComplex && yGammaAtlas ? (
+            {showingYGammaComplex &&
+            yGammaAtlas &&
+            (uiMode === "research" || yGammaSmallAtlasOpen) ? (
               <YGammaMiniAtlasOverlay
                 atlas={yGammaAtlas}
                 activeGeneratorPairKey={activeGeneratorPairKey}
@@ -6028,72 +6936,94 @@ export function App() {
                 </span>
               </div>
             ) : null}
-            <SceneView
-              nodes={activeSceneNodes}
-              edges={gameDecoratedSceneEdges}
-              cells={activeSceneCells}
-              generators={system.generators}
-              structureVersion={activeSceneStructureVersion}
-              appearanceVersion={activeSceneAppearanceVersion}
-              selectedNodeId={activeSceneSelectedNodeId}
-              selectedCellId={selectedCellId}
-              showCells={showingDerivedScene || showCells || showHigherCells}
-              showNodeLabels={showingDerivedScene || showNodeLabels}
-              showEdgeLabels={showingDerivedScene || showEdgeLabels}
-              labelScope={showingDerivedScene ? "budgeted" : labelScope}
-              activeGeneratorPair={activeGeneratorPair}
-              localCellRenderMode={
-                showingDerivedScene ? "in-graph" : cellRenderMode
-              }
-              occlusionMode={occlusionMode}
-              cellOpacity={
-                showingYGammaComplex
-                  ? yGammaTopologyMode
-                    ? 0.18
-                    : 0.3
-                  : cellOpacity
-              }
-              panelOffsetStrength={
-                showingYGammaComplex
-                  ? 0
-                  : bringFocusedCellsForward
-                    ? panelOffsetStrength
-                    : 0
-              }
-              topologyMode={showingYGammaComplex && yGammaTopologyMode}
-              semanticLabelsOnly={showingYGammaComplex}
-              cameraFocusTarget={cameraFocusTarget}
-              cameraFocusOffset={cameraFocusOffset}
-              showReferenceBall={geometricReferenceBallVisible}
-              referenceBallRadius={geometricDisplayScale}
-              cameraPreset={
-                showingDerivedScene
-                  ? "global"
-                  : graphView === "on-graph"
-                    ? "on-graph"
-                    : "global"
-              }
-              resetSignal={resetSignal}
-              focusNodeId={activeSceneSelectedNodeId}
-              focusSignal={focusSignal}
-              maxNodeLabels={showingDerivedScene ? 120 : effectiveMaxNodeLabels}
-              maxEdgeLabels={
-                showingYGammaComplex
-                  ? Math.max(activeSceneEdges.length, 120)
-                  : showingDerivedScene
-                    ? 120
-                    : effectiveMaxEdgeLabels
-              }
-              pickingEnabled={!showingDerivedScene}
-              workerGenerationMs={generation.generationMs}
-              colorScheme={colorScheme}
-              layoutVersion={sceneLayoutSignal}
-              onCapturePngReady={handleCapturePngReady}
-              onRenderStats={setSceneStats}
-              onHoverCell={showingYGammaComplex ? setHoveredCellId : undefined}
-              onSelectNode={handleSceneSelectNode}
-              onSelectCell={handleSceneSelectCell}
-            />
+            {showingYGammaComplex && yGammaComparisonScenes ? (
+              <div
+                className="ygamma-comparison-grid"
+                aria-label="Coherent and expanded Y_Gamma drawing comparison"
+              >
+                <YGammaComparisonPane
+                  label="Coherent shared spine"
+                  testId="ygamma-comparison-left"
+                  scene={yGammaComparisonScenes.coherent}
+                  generators={system.generators}
+                  activeGeneratorPair={activeGeneratorPair}
+                  selectedCellId={selectedCellId}
+                  topologyMode={yGammaTopologyMode}
+                  colorScheme={colorScheme}
+                  focusSignal={focusSignal}
+                  onSelectCell={handleSceneSelectCell}
+                />
+                <YGammaComparisonPane
+                  label="Expanded readability"
+                  testId="ygamma-comparison-right"
+                  scene={yGammaComparisonScenes.expanded}
+                  generators={system.generators}
+                  activeGeneratorPair={activeGeneratorPair}
+                  selectedCellId={selectedCellId}
+                  topologyMode={yGammaTopologyMode}
+                  colorScheme={colorScheme}
+                  focusSignal={focusSignal}
+                  onSelectCell={handleSceneSelectCell}
+                />
+              </div>
+            ) : (
+              <SceneView
+                nodes={activeSceneNodes}
+                edges={gameDecoratedSceneEdges}
+                cells={activeSceneCells}
+                generators={system.generators}
+                structureVersion={activeSceneStructureVersion}
+                appearanceVersion={activeSceneAppearanceVersion}
+                revisionSet={activeSceneRevisionSet}
+                selectedNodeId={activeSceneSelectedNodeId}
+                selectedCellId={selectedCellId}
+                showCells={showingDerivedScene || showCells || showHigherCells}
+                showNodeLabels={forceBudgetedSceneLabels || showNodeLabels}
+                showEdgeLabels={showingDerivedScene || showEdgeLabels}
+                labelScope={sceneLabelScope}
+                activeGeneratorPair={activeGeneratorPair}
+                localCellRenderMode={activeLocalCellRenderMode}
+                occlusionMode={occlusionMode}
+                cellOpacity={activeCellOpacity}
+                panelOffsetStrength={
+                  showingYGammaComplex
+                    ? 0
+                    : bringFocusedCellsForward
+                      ? panelOffsetStrength
+                      : 0
+                }
+                topologyMode={showingYGammaComplex && yGammaTopologyMode}
+                semanticLabelsOnly={showingYGammaComplex}
+                cameraFocusTarget={cameraFocusTarget}
+                cameraFocusOffset={cameraFocusOffset}
+                showReferenceBall={geometricReferenceBallVisible}
+                referenceBallRadius={geometricDisplayScale}
+                cameraPreset={
+                  showingDerivedScene
+                    ? "global"
+                    : graphView === "on-graph"
+                      ? "on-graph"
+                      : "global"
+                }
+                resetSignal={resetSignal}
+                focusNodeId={activeSceneSelectedNodeId}
+                focusSignal={focusSignal}
+                maxNodeLabels={sceneMaxNodeLabels}
+                maxEdgeLabels={sceneMaxEdgeLabels}
+                pickingEnabled={!showingDerivedScene}
+                workerGenerationMs={generation.generationMs}
+                colorScheme={colorScheme}
+                sceneLabel={`${currentModelBadge.label}: ${currentModelBadge.status}`}
+                layoutVersion={sceneLayoutSignal}
+                onCapturePngReady={handleCapturePngReady}
+                onRenderStats={setSceneStats}
+                onHoverCell={
+                  showingYGammaComplex ? setHoveredCellId : undefined
+                }
+                onSelectNode={handleSceneSelectNode}
+                onSelectCell={handleSceneSelectCell}
+              />
+            )}
           </div>
         )}
       </section>
@@ -6190,10 +7120,18 @@ export function App() {
             explanation={topologyExplanation}
             compact={showReaderControls}
           />
+          {showReaderControls ? (
+            <div className="inspector-current-view">
+              <h3>Current view</h3>
+              <CompactWhatAmISeeingPanel summary={whatAmISeeing} />
+            </div>
+          ) : null}
           {showingGammaDefiningGraph && gammaDefiningGraphScene ? (
             <DefiningGraphPanel
               system={sourceSystem ?? system}
               scene={gammaDefiningGraphScene}
+              layoutMode={gammaLayoutMode}
+              onLayoutMode={setGammaLayoutMode}
             />
           ) : showingYGammaComplex && yGammaAtlas ? (
             <YGammaWhyPanel
@@ -6201,6 +7139,7 @@ export function App() {
               sceneCellId={yGammaHoveredOrActiveCell?.id}
               focusPreset={yGammaFocusPreset}
               peelMode={yGammaPeelMode}
+              cellSeparation={yGammaCellSeparation}
             />
           ) : (
             <RelationFocusPanel
@@ -6243,7 +7182,7 @@ export function App() {
               </ul>
             </Panel>
 
-            <Panel title="Research Status">
+            <Panel title="Status/tools">
               <ResearchStatusPanel
                 system={system}
                 ball={ball ?? undefined}
@@ -6258,7 +7197,7 @@ export function App() {
               />
             </Panel>
 
-            <Panel title="Experiment Notebook">
+            <Panel title="Notebook/export">
               <div className="field">
                 <label htmlFor="experiment-note">Note</label>
                 <textarea
@@ -6282,7 +7221,7 @@ export function App() {
                   disabled={savedExperiments.length === 0}
                   onClick={duplicateLatestExperimentRun}
                 >
-                  Duplicate latest
+                  Duplicate last run
                 </button>
                 <button
                   type="button"
@@ -6324,7 +7263,7 @@ export function App() {
               ) : null}
             </Panel>
 
-            <Panel title="Annotations And Bookmarks">
+            <Panel title="Figure + View Bookmarks">
               <div className="field">
                 <label htmlFor="annotation-draft">Figure annotation</label>
                 <textarea
@@ -6531,13 +7470,13 @@ export function App() {
                   if (!activeIsYGammaBaseComplex) {
                     openBaseOrbicomplex();
                   }
-                  focusRankThreeM2M3Demo();
+                  focusRankThreeCell();
                 }}
                 onFocusRankThreePair={(key) => {
                   if (!activeIsYGammaBaseComplex) {
                     openBaseOrbicomplex();
                   }
-                  focusRankThreeM2M3Demo(key);
+                  focusRankThreeCell(key);
                 }}
               />
             ) : (
@@ -6564,13 +7503,35 @@ export function App() {
                 jnwMoveSystem={activeJnwMoveSystem}
                 jnwInitialState={activeJnwInitialState}
                 jnwSummary={jnwSummary}
+                jnwSelectedStateId={activeJnwSelectedState?.id}
+                jnwSelectedRelationId={selectedCellId}
+                jnwLayerBreadcrumb={activeJnwLayerBreadcrumb}
+                jnwLayerCompareOpen={jnwLayerCompareOpen}
+                jnwReaderMode={jnwReaderMode}
+                jnwReaderLens={jnwReaderLens}
+                jnwRailGrouping={jnwRailGrouping}
+                selectedJnwGenerator={selectedJnwGenerator}
+                jnwQuotientSheetMode={jnwQuotientSheetMode}
+                jnwQuotientConstructionStage={jnwQuotientConstructionStage}
                 onGeneratorValueChange={updateGameGeneratorValue}
                 onPreset={applyGamePreset}
                 onJnwInitialStateChange={updateJnwInitialState}
                 onJnwMoveToggle={updateJnwMoveToggle}
                 onJnwPreset={applyJnwPreset}
                 onOpenJnwStateQuotient={openJnwStateQuotient}
+                onOpenJnwStateQuotientLens={openJnwStateQuotientLens}
+                onSelectJnwState={selectJnwState}
+                onShowJnwStateOnGamma={showJnwStateOnGamma}
                 onFocusJnwDiagnostic={focusJnwDiagnostic}
+                onSelectJnwGlueGenerator={selectJnwGlueGenerator}
+                onJnwLayerCompareOpenChange={setJnwLayerCompareOpen}
+                onJnwReaderModeChange={setJnwReaderMode}
+                onJnwReaderLensChange={setJnwReaderLens}
+                onJnwRailGroupingChange={setJnwRailGrouping}
+                onJnwQuotientSheetModeChange={setJnwQuotientSheetMode}
+                onJnwQuotientConstructionStageChange={
+                  setJnwQuotientConstructionStage
+                }
                 onFocusCell={focusGameBoundaryCell}
               />
             ) : (
@@ -6606,9 +7567,11 @@ export function App() {
           </Panel>
         ) : null}
 
-        <Panel title="What Am I Seeing?">
-          <CompactWhatAmISeeingPanel summary={whatAmISeeing} />
-        </Panel>
+        {showResearchControls ? (
+          <Panel title="What Am I Seeing?">
+            <CompactWhatAmISeeingPanel summary={whatAmISeeing} />
+          </Panel>
+        ) : null}
 
         <Panel title="Caveats">
           {warningGroups.length > 0 ? (
@@ -6629,8 +7592,13 @@ export function App() {
 function describeCurrentModel(input: {
   activeDatasetKind: ViewerDataset["kind"];
   activeIsYGammaBaseComplex: boolean;
+  activeIsJnwStateQuotient: boolean;
+  activePreset: ViewPresetId;
+  cellFocusMode: CellFocusMode;
   effectiveMode: ViewerMode;
   geometryIntervalCertified: boolean;
+  graphView: GraphViewMode;
+  projection: HyperbolicProjection;
   showingGammaDefiningGraph: boolean;
   showingYGammaComplex: boolean;
   yGammaMainView: YGammaMainView;
@@ -6645,20 +7613,32 @@ function describeCurrentModel(input: {
     input.activeIsYGammaBaseComplex &&
     (input.showingYGammaComplex || input.yGammaMainView === "nerve")
   ) {
+    const focus =
+      input.cellFocusMode === "selected-cell"
+        ? "selected relation"
+        : input.activePreset === "rank-two-cells"
+          ? "relation focus"
+          : "local topology";
     return {
       label: input.yGammaMainView === "nerve" ? "Y_Gamma nerve" : "Y_Gamma",
       status:
         input.yGammaMainView === "nerve"
           ? "2D diagnostic"
-          : "exact incidence, 3D drawing",
+          : `${focus}, exact incidence drawing`,
     };
   }
   if (
     input.activeDatasetKind === "quotient-complex" &&
     !input.activeIsYGammaBaseComplex
   ) {
+    if (input.activeIsJnwStateQuotient) {
+      return {
+        label: "Quotient + Games",
+        status: "JNW state quotient / browser diagnostic",
+      };
+    }
     return {
-      label: "Quotient",
+      label: "Quotient + Games",
       status: "imported or derived complex",
     };
   }
@@ -6666,14 +7646,29 @@ function describeCurrentModel(input: {
     return {
       label: "Projection",
       status: input.geometryIntervalCertified
-        ? "certified data, projected view"
-        : "visualization-grade projection",
+        ? `${projectionLabel(input.projection)}, certified source data`
+        : `${projectionLabel(input.projection)}, visualization-grade`,
     };
   }
+  const locality =
+    input.graphView === "on-graph" ? "look near a chamber" : "see all";
   return {
     label: "Davis",
-    status: "Cayley ball with Davis cells",
+    status: `${locality}, ${input.activePreset.replaceAll("-", " ")}`,
   };
+}
+
+function projectionLabel(projection: HyperbolicProjection): string {
+  switch (projection) {
+    case "poincare-axes":
+      return "Poincare axes";
+    case "klein-axes":
+      return "Klein axes";
+    case "poincare-pca":
+      return "Poincare PCA";
+    case "klein-pca":
+      return "Klein PCA";
+  }
 }
 
 function TopologyFirstInspector({
@@ -6710,18 +7705,21 @@ function TopologyFirstInspector({
 
   return (
     <div className="topology-inspector">
+      {explanation.actionHint ? (
+        <p className="inspector-action-hint">{explanation.actionHint}</p>
+      ) : null}
       <div className="inspector-question">
-        <h3>What is selected?</h3>
+        <h3>{inspectorAnswers[0].heading}</h3>
         <p className="math-note">
           <strong>{explanation.title}</strong>
         </p>
       </div>
       <div className="inspector-question">
-        <h3>Why is it here?</h3>
+        <h3>{inspectorAnswers[1].heading}</h3>
         <p className="math-note">{explanation.summary}</p>
       </div>
       <div className="inspector-question">
-        <h3>Exact or drawing?</h3>
+        <h3>{inspectorAnswers[2].heading}</h3>
         <div className="status-row">
           <span className="status-badge">{explanation.layer}</span>
           <span className="status-badge muted">{explanation.status}</span>
@@ -6785,10 +7783,20 @@ function CompactWhatAmISeeingPanel({
 function DefiningGraphPanel({
   system,
   scene,
+  layoutMode,
+  onLayoutMode,
 }: {
   system: CoxeterSystemInput;
   scene: DefiningGraphScene;
+  layoutMode: DefiningGraphLayoutMode;
+  onLayoutMode: (mode: DefiningGraphLayoutMode) => void;
 }) {
+  const stateHighlightWarning = scene.warnings.find((warning) =>
+    warning.includes("is highlighted on Gamma"),
+  );
+  const highlightedStateLabels = scene.nodes
+    .filter((node) => node.stateRole === "in-state")
+    .map((node) => node.compactLabel ?? node.label ?? node.id);
   return (
     <div className="topology-inspector">
       <div className="status-row">
@@ -6797,8 +7805,34 @@ function DefiningGraphPanel({
       </div>
       <h3>Coxeter defining graph</h3>
       <p className="math-note">
-        Vertices are the Coxeter generators of {system.name}. Drawn edges are
-        exactly the non-right entries of the Coxeter matrix.
+        Vertices are the Coxeter generators of {system.name}. Each drawn edge is
+        a finite relation edge, including commuting m=2 pairs. Pairs with m=inf
+        are omitted because they are not finite relations.
+      </p>
+      <div
+        className="segmented gamma-layout-toggle"
+        role="group"
+        aria-label="Gamma drawing mode"
+      >
+        <button
+          type="button"
+          aria-pressed={layoutMode === "3d"}
+          onClick={() => onLayoutMode("3d")}
+        >
+          3D viewer
+        </button>
+        <button
+          type="button"
+          aria-pressed={layoutMode === "planar"}
+          onClick={() => onLayoutMode("planar")}
+        >
+          2D planar
+        </button>
+      </div>
+      <p className="inspector-action-hint">
+        {layoutMode === "planar"
+          ? "Planar mode places the generators on one plane. If Gamma is non-planar, crossings are part of the obstruction, not a renderer mistake."
+          : "3D mode separates the defining graph in space so dense relation data is easier to orbit."}
       </p>
       <table className="inspector-table">
         <tbody>
@@ -6809,15 +7843,49 @@ function DefiningGraphPanel({
             </td>
           </tr>
           <tr>
-            <th>Drawn edges</th>
+            <th>Finite relation edges</th>
             <td>{scene.records.length}</td>
           </tr>
           <tr>
-            <th>Omitted m=2 pairs</th>
-            <td>{scene.omittedRightAnglePairs}</td>
+            <th>k(Gamma)</th>
+            <td>
+              {formatCurvature(scene.charneyDavisCurvature)} = 1 - {system.rank}
+              /2 + {scene.records.length}/4
+            </td>
           </tr>
+          <tr>
+            <th>m=2 commuting edges</th>
+            <td>{scene.rightAnglePairCount}</td>
+          </tr>
+          <tr>
+            <th>Planarity</th>
+            <td>{scene.planarity.isPlanar ? "not ruled out" : "non-planar"}</td>
+          </tr>
+          {highlightedStateLabels.length > 0 ? (
+            <tr>
+              <th>State vertices</th>
+              <td>{highlightedStateLabels.join(", ")}</td>
+            </tr>
+          ) : null}
         </tbody>
       </table>
+      <div className="topology-summary gamma-planarity-note">
+        <span className="small-label">Why crossings remain</span>
+        <strong>
+          {scene.planarity.obstruction
+            ? `${scene.planarity.obstruction.kind} obstruction`
+            : scene.planarity.isPlanar
+              ? "No simple obstruction found"
+              : "Non-planar by edge count"}
+        </strong>
+        <p>{scene.planarity.reason}</p>
+      </div>
+      {stateHighlightWarning ? (
+        <div className="topology-summary gamma-planarity-note">
+          <strong>Selected JNW state on Gamma</strong>
+          <p>{stateHighlightWarning}</p>
+        </div>
+      ) : null}
       {scene.legend.length > 0 ? (
         <div className="gamma-legend" aria-label="Gamma relation color legend">
           {scene.legend.map((entry) => (
@@ -6854,12 +7922,20 @@ function DefiningGraphPanel({
         </ul>
       ) : (
         <p className="math-note">
-          No non-right relation edges are drawn; this Gamma has only omitted
-          commuting pairs.
+          No finite rank-two relation edges are drawn. For example, a universal
+          Coxeter system has only m=inf off-diagonal entries, so Gamma has
+          isolated generator vertices.
         </p>
       )}
     </div>
   );
+}
+
+function formatCurvature(value: number): string {
+  if (Number.isInteger(value)) {
+    return String(value);
+  }
+  return value.toFixed(2).replace(/\.?0+$/, "");
 }
 
 function ResearchWorkflowPanel({
@@ -6880,6 +7956,7 @@ function ResearchWorkflowPanel({
   onSetStep,
   onMove,
   onRunStep,
+  onLoadJnwCube,
   onLens,
   onLensGenerator,
   onSave,
@@ -6903,6 +7980,7 @@ function ResearchWorkflowPanel({
   onSetStep: (stepId: ResearchWorkflowStepId) => void;
   onMove: (delta: number) => void;
   onRunStep: () => void;
+  onLoadJnwCube: () => void;
   onLens: (lensId: TopologyLensId) => void;
   onLensGenerator: (generator: number) => void;
   onSave: () => void;
@@ -6963,6 +8041,9 @@ function ResearchWorkflowPanel({
           </button>
           <button type="button" className="button" onClick={onRunStep}>
             {activeStep.primaryAction}
+          </button>
+          <button type="button" className="button" onClick={onLoadJnwCube}>
+            Load JNW cube game
           </button>
           <button
             type="button"
@@ -7215,13 +8296,30 @@ function YGammaReaderPanel({
   activeGeneratorPairKey,
   focusGenerator,
   peelMode,
+  cellSeparation,
+  separationValue,
+  cutawayMode,
+  relationStarActive,
+  inspectMode,
+  cameraPath,
+  smallAtlasOpen,
+  compareDrawing,
   topologyMode,
   cameraBookmark,
   rankThreeFocusAvailable,
   onPreset,
+  onStarLens,
   onFocusPair,
   onFocusGenerator,
+  onRelationStar,
+  onCutawayMode,
+  onSeparationValue,
+  onInspectMode,
+  onCameraPath,
+  onSmallAtlasOpen,
+  onCompareDrawing,
   onPeelMode,
+  onCellSeparation,
   onTopologyMode,
   onCameraBookmark,
 }: {
@@ -7230,13 +8328,30 @@ function YGammaReaderPanel({
   activeGeneratorPairKey?: string;
   focusGenerator: number;
   peelMode: YGammaPeelMode;
+  cellSeparation: YGammaCellSeparation;
+  separationValue: YGammaSeparationValue;
+  cutawayMode: YGammaCutawayMode;
+  relationStarActive: boolean;
+  inspectMode: YGammaInspectMode;
+  cameraPath: YGammaCameraPath;
+  smallAtlasOpen: boolean;
+  compareDrawing: boolean;
   topologyMode: boolean;
   cameraBookmark: YGammaCameraBookmark;
   rankThreeFocusAvailable: boolean;
   onPreset: (preset: YGammaFocusPreset) => void;
+  onStarLens: (lens: YGammaStarLens) => void;
   onFocusPair: (key: string) => void;
   onFocusGenerator: (generator: number) => void;
+  onRelationStar: () => void;
+  onCutawayMode: (mode: YGammaCutawayMode) => void;
+  onSeparationValue: (value: YGammaSeparationValue) => void;
+  onInspectMode: (mode: YGammaInspectMode) => void;
+  onCameraPath: (path: YGammaCameraPath) => void;
+  onSmallAtlasOpen: (open: boolean) => void;
+  onCompareDrawing: (enabled: boolean) => void;
   onPeelMode: (mode: YGammaPeelMode) => void;
+  onCellSeparation: (separation: YGammaCellSeparation) => void;
   onTopologyMode: (enabled: boolean) => void;
   onCameraBookmark: (bookmark: YGammaCameraBookmark) => void;
 }) {
@@ -7251,24 +8366,33 @@ function YGammaReaderPanel({
     label: string;
     disabled?: boolean;
   }> = [
-    { id: "one-relation", label: "One relation" },
+    { id: "one-relation", label: "Read one relation" },
     {
       id: "rank-three-cell",
-      label: "One rank-three cell",
+      label: "Read one rank-three cell",
       disabled: !rankThreeFocusAvailable,
     },
-    { id: "around-generator", label: "Around generator" },
-    { id: "m2-squares", label: "m=2 squares", disabled: !hasM2 },
-    { id: "m3-hexagons", label: "m=3 hexagons", disabled: !hasM3 },
-    { id: "full-skeleton", label: "Full 2-skeleton" },
+    { id: "around-generator", label: "Show cells around one generator" },
+    { id: "m2-squares", label: "Show m=2 square relations", disabled: !hasM2 },
+    {
+      id: "m3-hexagons",
+      label: "Show m=3 hexagon relations",
+      disabled: !hasM3,
+    },
+    { id: "full-skeleton", label: "Show all relation faces" },
   ];
 
   return (
-    <>
+    <div className="ygamma-reader" data-testid="ygamma-reader">
+      <p className="math-note compact-note">
+        These controls change the drawing and focus, not the underlying{" "}
+        <span className="matrix-key">Y_Gamma</span> cell complex.
+      </p>
       <div
         className="preset-grid ygamma-focus-presets"
         role="group"
         aria-label="Narrated Y_Gamma focus presets"
+        data-testid="ygamma-focus-presets"
       >
         {presets.map((preset) => (
           <button
@@ -7282,8 +8406,41 @@ function YGammaReaderPanel({
           </button>
         ))}
       </div>
+      <div
+        className="preset-grid compact-grid"
+        role="group"
+        aria-label="Y_Gamma topology star lenses"
+        data-testid="ygamma-star-lenses"
+      >
+        {(
+          [
+            ["generator-star", "Show cells around one generator"],
+            ["edge-star", "Edge star"],
+            ["relation-star", "Relation star"],
+            ["rank-three-cell-star", "Read one rank-three cell"],
+            ["jnw-ascending-star", "Ascending star"],
+            ["jnw-descending-star", "Descending star"],
+          ] as const
+        ).map(([lens, label]) => (
+          <button
+            key={lens}
+            type="button"
+            aria-pressed={
+              (lens === "relation-star" && relationStarActive) ||
+              (lens === "rank-three-cell-star" &&
+                focusPreset === "rank-three-cell")
+            }
+            disabled={
+              lens === "rank-three-cell-star" && !rankThreeFocusAvailable
+            }
+            onClick={() => onStarLens(lens)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <div className="field inline-field">
-        <label htmlFor="ygamma-focus-relation">Focus relation</label>
+        <label htmlFor="ygamma-focus-relation">Focus relation star</label>
         <select
           id="ygamma-focus-relation"
           value={activeGeneratorPairKey ?? ""}
@@ -7300,9 +8457,15 @@ function YGammaReaderPanel({
             </option>
           ))}
         </select>
+        <small className="field-help">
+          Choose the finite generator pair whose relation cells should carry the
+          focus, labels, and inspector explanation.
+        </small>
       </div>
       <div className="field inline-field">
-        <label htmlFor="ygamma-focus-generator">Around generator</label>
+        <label htmlFor="ygamma-focus-generator">
+          Show cells around one generator
+        </label>
         <select
           id="ygamma-focus-generator"
           value={focusGenerator}
@@ -7315,6 +8478,118 @@ function YGammaReaderPanel({
           ))}
         </select>
       </div>
+      <div className="field inline-field" data-testid="ygamma-cutaway">
+        <span className="field-label">Show only...</span>
+        <div
+          className="segmented segmented-three"
+          role="group"
+          aria-label="Y_Gamma cutaway mode"
+        >
+          {(
+            [
+              ["none", "See all"],
+              ["generator-family", "Generator"],
+              ["relation-order", "Same m"],
+              ["rank", "Rank 3"],
+              ["incident-to-selected-edge", "Edge star"],
+              ["incident-to-selected-relation", "Relation star"],
+            ] as const
+          ).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              data-cutaway-mode={mode}
+              aria-pressed={cutawayMode === mode}
+              onClick={() => onCutawayMode(mode)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <small className="field-help">
+          Nonmatching cells are hidden or ghosted in the drawing. Their
+          incidence data is not rewritten.
+        </small>
+      </div>
+      <div className="field inline-field">
+        <span className="field-label">Separate cells for reading</span>
+        <div
+          className="segmented segmented-three"
+          role="group"
+          aria-label="Y_Gamma separate cells for reading"
+          data-testid="ygamma-drawing"
+        >
+          {(
+            [
+              ["coherent", "Coherent"],
+              ["readable", "Readable"],
+              ["expanded", "Expanded"],
+            ] as const
+          ).map(([separation, label]) => (
+            <button
+              key={separation}
+              type="button"
+              data-separation-preset={separation}
+              aria-pressed={cellSeparation === separation}
+              onClick={() => onCellSeparation(separation)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <small className="field-help">
+          Separates relation sheets in the drawing only. The shared Y_Gamma
+          incidence data does not change.
+        </small>
+        <input
+          aria-label="Y_Gamma cell separation value"
+          className="range-control"
+          max={100}
+          min={0}
+          step={5}
+          type="range"
+          value={separationValue}
+          onChange={(event) => onSeparationValue(Number(event.target.value))}
+        />
+        <div className="range-ticks" aria-hidden="true">
+          <span>Coherent</span>
+          <span>Readable</span>
+          <span>Expanded</span>
+        </div>
+      </div>
+      <div data-testid="ygamma-labels">
+        <Toggle
+          checked={topologyMode}
+          label="Glassy topology drawing"
+          onChange={onTopologyMode}
+        />
+      </div>
+      <div className="field inline-field">
+        <span className="field-label">Click behavior</span>
+        <div
+          className="segmented segmented-three"
+          role="group"
+          aria-label="Y_Gamma click behavior"
+        >
+          {(
+            [
+              ["inspect-cell", "Inspect cell"],
+              ["inspect-edge", "Inspect edge"],
+              ["select-relation-family", "Select relation family"],
+              ["orbit-selected-object", "Orbit selected object"],
+            ] as const
+          ).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={inspectMode === mode}
+              onClick={() => onInspectMode(mode)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
       <div
         className="segmented segmented-three"
         role="group"
@@ -7323,8 +8598,8 @@ function YGammaReaderPanel({
         {(
           [
             ["selected-face", "Face"],
-            ["adjacent-faces", "Adjacent"],
-            ["same-rank-three", "3-cell"],
+            ["adjacent-faces", "Show cells incident to this edge"],
+            ["same-rank-three", "Show full rank-three cell"],
           ] as const
         ).map(([mode, label]) => (
           <button
@@ -7332,6 +8607,39 @@ function YGammaReaderPanel({
             type="button"
             aria-pressed={peelMode === mode}
             onClick={() => onPeelMode(mode)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <p className="math-note compact-note">
+        Cell peeling changes how much of the selected rank-three cell is shown:
+        <strong> Face</strong> keeps one relation face,{" "}
+        <strong>Show cells incident to this edge</strong> keeps faces sharing an
+        edge with it, and <strong>Show full rank-three cell</strong> keeps all
+        faces of that rank-three boundary.
+      </p>
+      <div
+        className="segmented segmented-three"
+        role="group"
+        aria-label="Y_Gamma camera paths"
+        data-testid="ygamma-camera-path"
+      >
+        {(
+          [
+            ["selected-relation", "See relation"],
+            ["square-family", "Squares"],
+            ["hexagon-family", "Hexagons"],
+            ["shared-generator", "Shared gen"],
+            ["relation-star", "Orbit star"],
+          ] as const
+        ).map(([path, label]) => (
+          <button
+            key={path}
+            type="button"
+            data-camera-path={path}
+            aria-pressed={cameraPath === path}
+            onClick={() => onCameraPath(path)}
           >
             {label}
           </button>
@@ -7346,7 +8654,7 @@ function YGammaReaderPanel({
           [
             ["front", "Front"],
             ["top", "Top"],
-            ["rank-three-cell", "3-cell"],
+            ["rank-three-cell", "Rank-three"],
             ["square-family", "Squares"],
             ["hexagon-family", "Hexagons"],
           ] as const
@@ -7361,17 +8669,52 @@ function YGammaReaderPanel({
           </button>
         ))}
       </div>
-      <Toggle
-        checked={topologyMode}
-        label="Transparent topology mode"
-        onChange={onTopologyMode}
-      />
+      <details
+        className="catalogue-panel compact-details"
+        data-testid="ygamma-advanced-readability"
+      >
+        <summary>Advanced readability</summary>
+        <div className="button-row">
+          <button
+            type="button"
+            className="secondary-button"
+            data-readable-action="relation-star"
+            aria-pressed={relationStarActive}
+            onClick={onRelationStar}
+          >
+            Extract relation star
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            data-readable-action="relation-atlas"
+            aria-pressed={smallAtlasOpen}
+            onClick={() => onSmallAtlasOpen(!smallAtlasOpen)}
+          >
+            {smallAtlasOpen ? "Hide relation atlas" : "Show relation atlas"}
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            data-readable-action="compare-drawing"
+            aria-pressed={compareDrawing}
+            onClick={() => onCompareDrawing(!compareDrawing)}
+          >
+            Compare shared vs separated drawing
+          </button>
+        </div>
+        <p className="math-note compact-note">
+          Relation star keeps the selected relation, incident higher cells, and
+          a faint context layer. Compare shared vs separated drawing shows two
+          versions of the same incidence data.
+        </p>
+      </details>
       <p className="math-note">
         This reader changes visibility, labels, camera, opacity, and the
-        explanation together. The normal Cayley/Davis controls are under
-        research panels.
+        explanation together. Use Focus relation star to choose a finite pair;
+        use camera bookmarks only to change the viewing angle.
       </p>
-    </>
+    </div>
   );
 }
 
@@ -7384,30 +8727,155 @@ function YGammaMiniAtlasOverlay({
   activeGeneratorPairKey?: string;
   onFocusPair: (key: string) => void;
 }) {
+  const entries = yGammaPairMatrixEntries(atlas);
+  const groups = [
+    {
+      id: "m2",
+      label: "m=2",
+      entries: entries.filter((entry) => entry.m === 2),
+    },
+    {
+      id: "m3",
+      label: "m=3",
+      entries: entries.filter((entry) => entry.m === 3),
+    },
+    {
+      id: "m4plus",
+      label: "m>=4",
+      entries: entries.filter((entry) => entry.m !== undefined && entry.m >= 4),
+    },
+    {
+      id: "infinite",
+      label: "inf",
+      entries: entries.filter((entry) => entry.m === undefined),
+    },
+  ].filter((group) => group.entries.length > 0);
+
   return (
-    <aside className="ygamma-mini-atlas" aria-label="Y_Gamma relation picker">
-      <strong>Relation picker</strong>
-      <div className="ygamma-mini-grid">
-        {yGammaPairMatrixEntries(atlas).map((entry) => (
-          <button
-            key={entry.key}
-            type="button"
-            disabled={entry.m === undefined}
-            data-active={activeGeneratorPairKey === entry.key}
-            onClick={() => onFocusPair(entry.key)}
-            title={
-              entry.m === undefined
-                ? `${entry.label}: infinite pair, no rank-two cell`
-                : `${entry.label}: m=${entry.m}, ${entry.polygonLabel}`
-            }
-          >
-            <span>{entry.label}</span>
-            <strong>{entry.m === undefined ? "inf" : `m=${entry.m}`}</strong>
-            <small>{entry.polygonLabel}</small>
-          </button>
-        ))}
-      </div>
+    <aside
+      className="ygamma-mini-atlas"
+      aria-label="Y_Gamma relation atlas"
+      data-testid="ygamma-relation-atlas"
+    >
+      <strong>Relation atlas</strong>
+      {groups.map((group) => (
+        <div key={group.id} className="ygamma-mini-group">
+          <span className="small-label">{group.label}</span>
+          <div className="ygamma-mini-grid">
+            {group.entries.map((entry) => (
+              <button
+                key={entry.key}
+                type="button"
+                disabled={entry.m === undefined}
+                data-active={activeGeneratorPairKey === entry.key}
+                data-relation-key={entry.key}
+                data-relation-order={entry.m ?? "inf"}
+                onClick={() => onFocusPair(entry.key)}
+                title={
+                  entry.m === undefined
+                    ? `${entry.label}: infinite pair, no rank-two cell`
+                    : `${entry.label}: m=${entry.m}, ${entry.polygonLabel}`
+                }
+              >
+                <span>{entry.label}</span>
+                <strong>
+                  {entry.m === undefined ? "inf" : `m=${entry.m}`}
+                </strong>
+                <small>{entry.polygonLabel}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
     </aside>
+  );
+}
+
+function YGammaComparisonPane({
+  label,
+  testId,
+  scene,
+  generators,
+  activeGeneratorPair,
+  selectedCellId,
+  topologyMode,
+  colorScheme,
+  focusSignal,
+  onSelectCell,
+}: {
+  label: string;
+  testId: string;
+  scene: YGamma2SkeletonScene;
+  generators: SceneGenerator[];
+  activeGeneratorPair?: [number, number];
+  selectedCellId?: string;
+  topologyMode: boolean;
+  colorScheme: "light" | "dark";
+  focusSignal: number;
+  onSelectCell: (cellId: string) => void;
+}) {
+  const revisionSet = useMemo(
+    () =>
+      buildSceneRevisionSet({
+        nodes: scene.nodes,
+        edges: scene.edges,
+        cells: scene.cells,
+        appearanceParts: [
+          `comparison:${label}`,
+          `selected-cell:${selectedCellId ?? ""}`,
+          `pair:${activeGeneratorPair ? pairKey(activeGeneratorPair) : ""}`,
+          `topology:${topologyMode}`,
+          `theme:${colorScheme}`,
+        ],
+        labelParts: [`edge-labels:${scene.edges.length}`],
+      }),
+    [
+      activeGeneratorPair,
+      colorScheme,
+      label,
+      scene,
+      selectedCellId,
+      topologyMode,
+    ],
+  );
+
+  return (
+    <div className="ygamma-comparison-pane" data-testid={testId}>
+      <span className="small-label">{label}</span>
+      <SceneView
+        nodes={scene.nodes}
+        edges={scene.edges}
+        cells={scene.cells}
+        generators={generators}
+        structureVersion={revisionSet.structureVersion}
+        appearanceVersion={revisionSet.renderAppearanceVersion}
+        revisionSet={revisionSet}
+        selectedNodeId={scene.selectedNodeId}
+        selectedCellId={selectedCellId}
+        showCells
+        showNodeLabels={false}
+        showEdgeLabels
+        labelScope="budgeted"
+        activeGeneratorPair={activeGeneratorPair}
+        localCellRenderMode="in-graph"
+        occlusionMode="x-ray"
+        cellOpacity={topologyMode ? 0.16 : 0.3}
+        panelOffsetStrength={0}
+        topologyMode={topologyMode}
+        semanticLabelsOnly
+        cameraPreset="global"
+        resetSignal={0}
+        focusNodeId={scene.selectedNodeId}
+        focusSignal={focusSignal}
+        maxNodeLabels={0}
+        maxEdgeLabels={Math.max(scene.edges.length, 160)}
+        pickingEnabled
+        colorScheme={colorScheme}
+        sceneLabel={label}
+        onSelectNode={() => undefined}
+        onSelectCell={onSelectCell}
+      />
+    </div>
   );
 }
 
@@ -7416,11 +8884,13 @@ function YGammaWhyPanel({
   sceneCellId,
   focusPreset,
   peelMode,
+  cellSeparation,
 }: {
   relation?: YGammaCellRecord;
   sceneCellId?: string;
   focusPreset: YGammaFocusPreset;
   peelMode: YGammaPeelMode;
+  cellSeparation: YGammaCellSeparation;
 }) {
   if (!relation || relation.m === undefined) {
     return (
@@ -7465,14 +8935,18 @@ function YGammaWhyPanel({
             <td>{yGammaPeelLabel(peelMode)}</td>
           </tr>
           <tr>
+            <th>Drawing status</th>
+            <td>{yGammaCellSeparationLabel(cellSeparation)}</td>
+          </tr>
+          <tr>
             <th>Boundary</th>
             <td>{relation.boundaryLength} directed edge steps</td>
           </tr>
         </tbody>
       </table>
       <p className="math-note">
-        The numbered labels in the 3D view label relation edges, not auxiliary
-        construction vertices.
+        Edge labels in the 3D view name generators. The numbered list above is
+        the relation walk around the selected face.
       </p>
     </>
   );
@@ -7634,6 +9108,18 @@ function yGammaPeelLabel(peelMode: YGammaPeelMode): string {
       return "same rank-three cell";
     case "all":
       return "all visible faces";
+  }
+}
+
+function yGammaCellSeparationLabel(separation: YGammaCellSeparation): string {
+  switch (separation) {
+    case "coherent":
+      return "coherent shared spine";
+    case "expanded":
+      return "expanded relation sheets";
+    case "readable":
+    default:
+      return "readable relation sheets";
   }
 }
 
@@ -7851,6 +9337,7 @@ function YGammaAtlasPanel({
     (cell) => relationCellPairKey(cell.generators) === activeGeneratorPairKey,
   );
   const higherRankGroups = atlas.rankGroups.filter((group) => group.rank >= 3);
+  const rankThreePairs = rankThreeFocusPairOptions(atlas, rankThreeFocus);
 
   return (
     <>
@@ -7917,44 +9404,35 @@ function YGammaAtlasPanel({
           className="button"
           disabled={!rankThreeFocus}
           aria-pressed={rankThreeFocusEnabled}
+          title="Focus a rank-three cell containing the active relation, when one is available."
           onClick={onFocusRankThree}
         >
-          Show full m=2/m=3 3-cell
+          Focus rank-three cell containing this relation
         </button>
       </div>
       {rankThreeFocus ? (
         <>
           <p className="math-note">
-            Full rank-three focus:{" "}
+            Active rank-three focus:{" "}
             <span className="matrix-key">{rankThreeFocus.cellId}</span> with{" "}
             <span className="matrix-key">
               {rankThreeFocus.pairKeys.join(" + ")}
             </span>
-            . The 3D object shows the square and hexagon face families together;
-            these buttons steer the camera and highlight one family without
-            removing the other.
+            . Use the buttons below or the relation picker to choose which
+            rank-two relation family anchors the view.
           </p>
           <div className="button-row">
-            <button
-              type="button"
-              className="button"
-              data-active={
-                activeGeneratorPairKey === rankThreeFocus.pairKeys[0]
-              }
-              onClick={() => onFocusRankThreePair(rankThreeFocus.pairKeys[0])}
-            >
-              Look at m=2 squares
-            </button>
-            <button
-              type="button"
-              className="button"
-              data-active={
-                activeGeneratorPairKey === rankThreeFocus.pairKeys[1]
-              }
-              onClick={() => onFocusRankThreePair(rankThreeFocus.pairKeys[1])}
-            >
-              Look at m=3 hexagons
-            </button>
+            {rankThreePairs.map((pair) => (
+              <button
+                type="button"
+                className="button"
+                key={pair.key}
+                data-active={activeGeneratorPairKey === pair.key}
+                onClick={() => onFocusRankThreePair(pair.key)}
+              >
+                {pair.buttonLabel}
+              </button>
+            ))}
           </div>
         </>
       ) : null}
@@ -8019,57 +9497,6 @@ function relationCellPairKey(generators: number[]): string {
   return pairKey([generators[0] ?? 0, generators[1] ?? 0]);
 }
 
-function findSharedM2M3RankThreeFocus(
-  atlas: YGammaCellAtlas,
-): YGammaRankThreeFocus | undefined {
-  const rankTwoByKey = new Map(
-    atlas.rankTwoCells.map((cell) => [
-      relationCellPairKey(cell.generators),
-      cell,
-    ]),
-  );
-  for (const cell of atlas.higherCells.filter((entry) => entry.rank === 3)) {
-    const generatorSet = new Set(cell.generators);
-    const pairCells = [...rankTwoByKey.values()].filter((pairCell) =>
-      pairCell.generators.every((generator) => generatorSet.has(generator)),
-    );
-    const squarePairs = pairCells.filter((pairCell) => pairCell.m === 2);
-    const hexagonPairs = pairCells.filter((pairCell) => pairCell.m === 3);
-    for (const square of squarePairs) {
-      for (const hexagon of hexagonPairs) {
-        const sharedGeneratorCount = square.generators.filter((generator) =>
-          hexagon.generators.includes(generator),
-        ).length;
-        if (sharedGeneratorCount === 1) {
-          return {
-            cellId: cell.id,
-            generatorSet: [...cell.generators].sort(
-              (left, right) => left - right,
-            ),
-            pairKeys: [
-              relationCellPairKey(square.generators),
-              relationCellPairKey(hexagon.generators),
-              ...pairCells
-                .map((pairCell) => relationCellPairKey(pairCell.generators))
-                .filter(
-                  (key) =>
-                    key !== relationCellPairKey(square.generators) &&
-                    key !== relationCellPairKey(hexagon.generators),
-                )
-                .sort(),
-            ],
-            mode: "full-cell",
-            exposeConstructionVertices: true,
-            showOnlyFundamentalFaces: false,
-            restrictGeneratorSpine: false,
-          };
-        }
-      }
-    }
-  }
-  return undefined;
-}
-
 function generatorPalette(index: number): string {
   const colors = [
     "#2563eb",
@@ -8124,93 +9551,121 @@ function ResearchStatusPanel({
     (summary) => summary.status === "passed",
   ).length;
 
+  const foundToolCount = desktopTools.filter((tool) => tool.found).length;
+  const desktopRuntime = desktopStatus
+    ? desktopStatus.nativeAvailable
+      ? "desktop bridge"
+      : desktopStatus.runtime
+    : "checking";
+
   return (
-    <ul className="subset-list">
-      <li>
-        <span className="subset-rank">data</span>
-        <span>{status}</span>
-      </li>
-      <li>
-        <span className="subset-rank">cert</span>
-        <span>{certification}</span>
-      </li>
-      <li>
-        <span className="subset-rank">sources</span>
-        <span>{system.sourceRefs?.length ?? 0}</span>
-      </li>
-      <li>
-        <span className="subset-rank">geom</span>
-        <span>{geometryCertificate}</span>
-      </li>
-      <li>
-        <span className="subset-rank">geom scopes</span>
-        <span>{geometryScopes}</span>
-      </li>
-      <li>
-        <span className="subset-rank">checks</span>
-        <span>{externalChecks ?? 0}</span>
-      </li>
-      <li>
-        <span className="subset-rank">Davis</span>
-        <span>
-          {davisIncidence
-            ? `${davisIncidence.records.length} records (${davisIncidence.status})`
-            : "not computed"}
-        </span>
-      </li>
-      <li>
-        <span className="subset-rank">scene</span>
-        <span>
-          {sceneStats
-            ? `${sceneStats.renderedNodes} nodes, ${sceneStats.renderedEdgeSegments} edges`
-            : "not sampled"}
-        </span>
-      </li>
-      <li>
-        <span className="subset-rank">workspace</span>
-        <span>{desktopStatus?.workspace.label ?? "checking workspace"}</span>
-      </li>
-      <li>
-        <span className="subset-rank">runtime</span>
-        <span>
-          {desktopStatus
-            ? desktopStatus.nativeAvailable
-              ? "desktop bridge"
-              : desktopStatus.runtime
-            : "checking"}
-        </span>
-      </li>
-      <li>
-        <span className="subset-rank">session</span>
-        <span>{sessionDirty ? "unsaved changes" : "saved"}</span>
-      </li>
-      <li>
-        <span className="subset-rank">recent</span>
-        <span>{recentSessions.length} sessions</span>
-      </li>
-      <li>
-        <span className="subset-rank">tools</span>
-        <span>
-          {desktopTools.length > 0
-            ? `${desktopTools.filter((tool) => tool.found).length}/${desktopTools.length} found`
-            : "not checked"}
-        </span>
-      </li>
-      <li>
-        <span className="subset-rank">jobs</span>
-        <span>
-          {desktopJobs.length > 0
-            ? `${desktopJobs[0].kind}: ${desktopJobs[0].status}`
-            : "none"}
-        </span>
-      </li>
-      {desktopMessage ? (
-        <li>
-          <span className="subset-rank">desktop</span>
-          <span>{desktopMessage}</span>
-        </li>
-      ) : null}
-    </ul>
+    <div className="research-status-cards">
+      <details className="research-status-card" open>
+        <summary>
+          <strong>Data</strong>
+          <span>
+            {status}, {certification}
+          </span>
+        </summary>
+        <ul className="subset-list">
+          <li>
+            <span className="subset-rank">sources</span>
+            <span>{system.sourceRefs?.length ?? 0}</span>
+          </li>
+          <li>
+            <span className="subset-rank">external checks</span>
+            <span>{externalChecks ?? 0}</span>
+          </li>
+          <li>
+            <span className="subset-rank">Davis</span>
+            <span>
+              {davisIncidence
+                ? `${davisIncidence.records.length} records (${davisIncidence.status})`
+                : "not computed"}
+            </span>
+          </li>
+          <li>
+            <span className="subset-rank">scene</span>
+            <span>
+              {sceneStats
+                ? `${sceneStats.renderedNodes} nodes, ${sceneStats.renderedEdgeSegments} edges`
+                : "not sampled"}
+            </span>
+          </li>
+        </ul>
+      </details>
+
+      <details className="research-status-card">
+        <summary>
+          <strong>Geometry</strong>
+          <span>{geometryCertificate}</span>
+        </summary>
+        <ul className="subset-list">
+          <li>
+            <span className="subset-rank">scopes</span>
+            <span>{geometryScopes}</span>
+          </li>
+        </ul>
+      </details>
+
+      <details className="research-status-card">
+        <summary>
+          <strong>Desktop</strong>
+          <span>{desktopRuntime}</span>
+        </summary>
+        <ul className="subset-list">
+          <li>
+            <span className="subset-rank">workspace</span>
+            <span>
+              {desktopStatus?.workspace.label ?? "checking workspace"}
+            </span>
+          </li>
+          <li>
+            <span className="subset-rank">session</span>
+            <span>{sessionDirty ? "unsaved changes" : "saved"}</span>
+          </li>
+          <li>
+            <span className="subset-rank">recent</span>
+            <span>{recentSessions.length} sessions</span>
+          </li>
+          {desktopMessage ? (
+            <li>
+              <span className="subset-rank">message</span>
+              <span>{desktopMessage}</span>
+            </li>
+          ) : null}
+        </ul>
+      </details>
+
+      <details className="research-status-card">
+        <summary>
+          <strong>External tools</strong>
+          <span>
+            {desktopTools.length > 0
+              ? `${foundToolCount}/${desktopTools.length} found`
+              : "not checked"}
+          </span>
+        </summary>
+        <ul className="subset-list">
+          <li>
+            <span className="subset-rank">tools</span>
+            <span>
+              {desktopTools.length > 0
+                ? `${foundToolCount}/${desktopTools.length} found`
+                : "not checked"}
+            </span>
+          </li>
+          <li>
+            <span className="subset-rank">jobs</span>
+            <span>
+              {desktopJobs.length > 0
+                ? `${desktopJobs[0].kind}: ${desktopJobs[0].status}`
+                : "none"}
+            </span>
+          </li>
+        </ul>
+      </details>
+    </div>
   );
 }
 
@@ -8226,35 +9681,51 @@ function WarningGroupsView({
   const allWarnings = groups.flatMap((group) =>
     group.warnings.map((warning) => ({ group, warning })),
   );
-  const visibleWarnings = showAll ? allWarnings : allWarnings.slice(0, 3);
+  const headlineWarning =
+    allWarnings.find(
+      ({ group }) => group.id === "important" || group.id === "approximation",
+    ) ?? allWarnings[0];
 
   return (
     <>
-      <div className="compact-warning-summary">
-        <strong>
-          {allWarnings.length} caveat{allWarnings.length === 1 ? "" : "s"}
-        </strong>
-        <div className="warning-chip-row" aria-label="Caveat categories">
-          {groups.map((group) => (
-            <span className="warning-group-label" key={group.id}>
-              {group.label}: {group.warnings.length}
-            </span>
-          ))}
-        </div>
-      </div>
-      <ul className="warning-list">
-        {visibleWarnings.map(({ group, warning }) => (
-          <li key={`${group.id}:${warning}`}>
-            <span className="warning-group-label">{group.label}</span>
-            {warning}
-          </li>
-        ))}
-      </ul>
-      {allWarnings.length > 3 ? (
-        <button type="button" className="button" onClick={onToggleShowAll}>
-          {showAll ? "Show fewer caveats" : `Show all ${allWarnings.length}`}
-        </button>
+      {!showAll && headlineWarning ? (
+        <p className="caveat-headline">
+          <span className="warning-group-label">
+            {headlineWarning.group.label}
+          </span>
+          {headlineWarning.warning}
+        </p>
       ) : null}
+      <details
+        className="caveats-drawer"
+        open={showAll}
+        onToggle={(event) => {
+          if (event.currentTarget.open !== showAll) {
+            onToggleShowAll();
+          }
+        }}
+      >
+        <summary>
+          <span>
+            {allWarnings.length} caveat{allWarnings.length === 1 ? "" : "s"}
+          </span>
+          <span className="warning-chip-row" aria-label="Caveat categories">
+            {groups.map((group) => (
+              <span className="warning-group-label" key={group.id}>
+                {group.label}: {group.warnings.length}
+              </span>
+            ))}
+          </span>
+        </summary>
+        <ul className="warning-list">
+          {allWarnings.map(({ group, warning }) => (
+            <li key={`${group.id}:${warning}`}>
+              <span className="warning-group-label">{group.label}</span>
+              {warning}
+            </li>
+          ))}
+        </ul>
+      </details>
     </>
   );
 }
@@ -8738,7 +10209,8 @@ function decorateSceneEdgesForGame(input: {
   }
 
   return input.edges.map((edge) => {
-    const flow = input.flowByEdgeId.get(edge.id);
+    const semanticEdgeId = baseJnwSemanticEdgeId(edge.id);
+    const flow = input.flowByEdgeId.get(semanticEdgeId);
     const value = input.generatorValueById.get(edge.generator);
     const classification = input.yGamma
       ? value === undefined
@@ -8760,6 +10232,20 @@ function decorateSceneEdgesForGame(input: {
       selectedHighlight: "outline",
     };
   });
+}
+
+function baseJnwSemanticEdgeId(edgeId: string): string {
+  const fromIndex = edgeId.indexOf(":from:");
+  if (fromIndex >= 0) {
+    return edgeId.slice(0, fromIndex);
+  }
+  const glueIndex = edgeId.indexOf(":glue:");
+  if (glueIndex >= 0) {
+    return edgeId.slice(0, glueIndex);
+  }
+  return edgeId.endsWith(":continuation")
+    ? edgeId.slice(0, -":continuation".length)
+    : edgeId;
 }
 
 function gameFlowColor(classification: string) {
@@ -8803,6 +10289,29 @@ function GameWorkflowModelCards() {
   );
 }
 
+function GameWorkflowSteps() {
+  return (
+    <ol className="workflow-mini-steps" aria-label="Orientation workflow">
+      <li>
+        <strong>Assign</strong>
+        <span>Choose generator values or JNW state/move data.</span>
+      </li>
+      <li>
+        <strong>Check</strong>
+        <span>Read boundary sums or state-orbit diagnostics.</span>
+      </li>
+      <li>
+        <strong>Inspect</strong>
+        <span>Focus failed cells or ascending/descending links.</span>
+      </li>
+      <li>
+        <strong>Export</strong>
+        <span>Save the run with notes and hashes.</span>
+      </li>
+    </ol>
+  );
+}
+
 function QuotientGamePanel({
   quotient,
   selectedVertexId,
@@ -8815,13 +10324,33 @@ function QuotientGamePanel({
   jnwMoveSystem,
   jnwInitialState,
   jnwSummary,
+  jnwSelectedStateId,
+  jnwSelectedRelationId,
+  jnwLayerBreadcrumb,
+  jnwLayerCompareOpen,
+  jnwReaderMode,
+  jnwReaderLens,
+  jnwRailGrouping,
+  selectedJnwGenerator,
+  jnwQuotientSheetMode,
+  jnwQuotientConstructionStage,
   onGeneratorValueChange,
   onPreset,
   onJnwInitialStateChange,
   onJnwMoveToggle,
   onJnwPreset,
   onOpenJnwStateQuotient,
+  onOpenJnwStateQuotientLens,
+  onSelectJnwState,
+  onShowJnwStateOnGamma,
   onFocusJnwDiagnostic,
+  onSelectJnwGlueGenerator,
+  onJnwLayerCompareOpenChange,
+  onJnwReaderModeChange,
+  onJnwReaderLensChange,
+  onJnwRailGroupingChange,
+  onJnwQuotientSheetModeChange,
+  onJnwQuotientConstructionStageChange,
   onFocusCell,
 }: {
   quotient: import("../quotient").QuotientComplex;
@@ -8835,6 +10364,16 @@ function QuotientGamePanel({
   jnwMoveSystem: JnwMoveSystem;
   jnwInitialState: JnwState;
   jnwSummary: JnwLegalOrbitSummary;
+  jnwSelectedStateId?: string;
+  jnwSelectedRelationId?: string;
+  jnwLayerBreadcrumb?: import("../game").JnwLayerBreadcrumb;
+  jnwLayerCompareOpen: boolean;
+  jnwReaderMode: JnwReaderMode;
+  jnwReaderLens: JnwReaderLens;
+  jnwRailGrouping: JnwRailGrouping;
+  selectedJnwGenerator: number;
+  jnwQuotientSheetMode: JnwQuotientSheetMode;
+  jnwQuotientConstructionStage: JnwQuotientConstructionStage;
   onGeneratorValueChange: (generator: number, value: number) => void;
   onPreset: (preset: "zero" | "height" | "invert" | "clear") => void;
   onJnwInitialStateChange: (generator: number, enabled: boolean) => void;
@@ -8846,8 +10385,20 @@ function QuotientGamePanel({
   onJnwPreset: (
     preset: "singletons" | "bipartite" | "clear" | "invert-state",
   ) => void;
-  onOpenJnwStateQuotient: () => void;
+  onOpenJnwStateQuotient: (stateId?: string) => void;
+  onOpenJnwStateQuotientLens: (lensId: TopologyLensId) => void;
+  onSelectJnwState: (stateId: string) => void;
+  onShowJnwStateOnGamma: (stateId: string) => void;
   onFocusJnwDiagnostic: (diagnosticId: string) => void;
+  onSelectJnwGlueGenerator: (generator: number) => void;
+  onJnwLayerCompareOpenChange: (open: boolean) => void;
+  onJnwReaderModeChange: (mode: JnwReaderMode) => void;
+  onJnwReaderLensChange: (lens: JnwReaderLens) => void;
+  onJnwRailGroupingChange: (grouping: JnwRailGrouping) => void;
+  onJnwQuotientSheetModeChange: (mode: JnwQuotientSheetMode) => void;
+  onJnwQuotientConstructionStageChange: (
+    stage: JnwQuotientConstructionStage,
+  ) => void;
   onFocusCell: (cellId: string) => void;
 }) {
   const status = quotientManifoldStatus(quotient);
@@ -8859,6 +10410,7 @@ function QuotientGamePanel({
   return (
     <>
       <GameWorkflowModelCards />
+      <GameWorkflowSteps />
       <p className="math-note">
         {status.label}: {status.reason}
       </p>
@@ -8891,11 +10443,33 @@ function QuotientGamePanel({
           moveSystem={jnwMoveSystem}
           initialState={jnwInitialState}
           summary={jnwSummary}
+          selectedStateId={jnwSelectedStateId}
+          selectedRelationId={jnwSelectedRelationId}
+          layerBreadcrumb={jnwLayerBreadcrumb}
+          layerCompareOpen={jnwLayerCompareOpen}
+          readerMode={jnwReaderMode}
+          readerLens={jnwReaderLens}
+          railGrouping={jnwRailGrouping}
+          selectedGenerator={selectedJnwGenerator}
+          quotientSheetMode={jnwQuotientSheetMode}
+          quotientConstructionStage={jnwQuotientConstructionStage}
           onInitialStateChange={onJnwInitialStateChange}
           onMoveToggle={onJnwMoveToggle}
           onPreset={onJnwPreset}
           onOpenStateQuotient={onOpenJnwStateQuotient}
+          onOpenStateQuotientLens={onOpenJnwStateQuotientLens}
+          onSelectState={onSelectJnwState}
+          onShowStateOnGamma={onShowJnwStateOnGamma}
           onFocusDiagnostic={onFocusJnwDiagnostic}
+          onSelectGlueGenerator={onSelectJnwGlueGenerator}
+          onLayerCompareOpenChange={onJnwLayerCompareOpenChange}
+          onReaderModeChange={onJnwReaderModeChange}
+          onReaderLensChange={onJnwReaderLensChange}
+          onRailGroupingChange={onJnwRailGroupingChange}
+          onQuotientSheetModeChange={onJnwQuotientSheetModeChange}
+          onQuotientConstructionStageChange={
+            onJnwQuotientConstructionStageChange
+          }
         />
       )}
     </>
@@ -9118,16 +10692,46 @@ function JnwLegalSystemPanel({
   moveSystem,
   initialState,
   summary,
+  selectedStateId,
+  selectedRelationId,
+  layerBreadcrumb,
+  layerCompareOpen,
+  readerMode,
+  readerLens,
+  railGrouping,
+  selectedGenerator,
+  quotientSheetMode,
+  quotientConstructionStage,
   onInitialStateChange,
   onMoveToggle,
   onPreset,
   onOpenStateQuotient,
+  onOpenStateQuotientLens,
+  onSelectState,
+  onShowStateOnGamma,
   onFocusDiagnostic,
+  onSelectGlueGenerator,
+  onLayerCompareOpenChange,
+  onReaderModeChange,
+  onReaderLensChange,
+  onRailGroupingChange,
+  onQuotientSheetModeChange,
+  onQuotientConstructionStageChange,
 }: {
   system: CoxeterSystemInput;
   moveSystem: JnwMoveSystem;
   initialState: JnwState;
   summary: JnwLegalOrbitSummary;
+  selectedStateId?: string;
+  selectedRelationId?: string;
+  layerBreadcrumb?: import("../game").JnwLayerBreadcrumb;
+  layerCompareOpen: boolean;
+  readerMode: JnwReaderMode;
+  readerLens: JnwReaderLens;
+  railGrouping: JnwRailGrouping;
+  selectedGenerator: number;
+  quotientSheetMode: JnwQuotientSheetMode;
+  quotientConstructionStage: JnwQuotientConstructionStage;
   onInitialStateChange: (generator: number, enabled: boolean) => void;
   onMoveToggle: (
     moveGenerator: number,
@@ -9137,8 +10741,20 @@ function JnwLegalSystemPanel({
   onPreset: (
     preset: "singletons" | "bipartite" | "clear" | "invert-state",
   ) => void;
-  onOpenStateQuotient: () => void;
+  onOpenStateQuotient: (stateId?: string) => void;
+  onOpenStateQuotientLens: (lensId: TopologyLensId) => void;
+  onSelectState: (stateId: string) => void;
+  onShowStateOnGamma: (stateId: string) => void;
   onFocusDiagnostic: (diagnosticId: string) => void;
+  onSelectGlueGenerator: (generator: number) => void;
+  onLayerCompareOpenChange: (open: boolean) => void;
+  onReaderModeChange: (mode: JnwReaderMode) => void;
+  onReaderLensChange: (lens: JnwReaderLens) => void;
+  onRailGroupingChange: (grouping: JnwRailGrouping) => void;
+  onQuotientSheetModeChange: (mode: JnwQuotientSheetMode) => void;
+  onQuotientConstructionStageChange: (
+    stage: JnwQuotientConstructionStage,
+  ) => void;
 }) {
   const generatorLabels = system.generators.map(
     (generator, index) => generator.label ?? `s${index}`,
@@ -9156,160 +10772,848 @@ function JnwLegalSystemPanel({
     (diagnostic) => !diagnostic.ok,
   );
   const selectedState = new Set(initialState.generators);
+  const selectedOrbitState =
+    summary.states.find((state) => state.id === selectedStateId) ??
+    summary.states.find((state) => state.id === initialState.id) ??
+    summary.states[0];
+  const selectedStateName = selectedOrbitState
+    ? formatJnwStateName(summary, selectedOrbitState)
+    : "none";
+  const selectedStateSubsetLabel = selectedOrbitState
+    ? formatJnwStateLabel(selectedOrbitState, system)
+    : "none";
+  const selectedStateColor = selectedOrbitState
+    ? jnwStateChartColor(summary, selectedOrbitState.id)
+    : "#14b8a6";
+  const moveSystemIsJnw21Preset =
+    system.name === "JNW cube graph RACG" &&
+    moveSystem.id === "jnw-bipartite-color-moves";
+  const selectedStateDiagram = useMemo(
+    () => buildJnwGammaStateDiagram(system, selectedOrbitState),
+    [selectedOrbitState, system],
+  );
+  const selectedRelationDiagnostic = selectedRelationId
+    ? summary.rankTwoDiagnostics.find(
+        (diagnostic) => diagnostic.id === selectedRelationId,
+      )
+    : undefined;
+  const selectedRelationWalk =
+    selectedRelationDiagnostic?.boundaryStateIds.map((stateId, step) => {
+      const generator =
+        step % 2 === 0
+          ? selectedRelationDiagnostic.generatorPair[0]
+          : selectedRelationDiagnostic.generatorPair[1];
+      const stateName = formatJnwStateName(
+        summary,
+        summary.states.find((state) => state.id === stateId) ?? {
+          id: stateId,
+          generators: [],
+        },
+      );
+      return {
+        step,
+        stateId,
+        stateName,
+        generatorLabel: generatorLabels[generator] ?? `s${generator}`,
+      };
+    }) ?? [];
+  const selectedStateIndex = selectedOrbitState
+    ? Math.max(
+        0,
+        summary.states.findIndex((state) => state.id === selectedOrbitState.id),
+      )
+    : 0;
+  const previousState =
+    summary.states.length > 0
+      ? summary.states[
+          (selectedStateIndex - 1 + summary.states.length) %
+            summary.states.length
+        ]
+      : undefined;
+  const nextState =
+    summary.states.length > 0
+      ? summary.states[(selectedStateIndex + 1) % summary.states.length]
+      : undefined;
+  const closedDiagnostics = summary.rankTwoDiagnostics.filter(
+    (diagnostic) => diagnostic.ok,
+  );
+  const selectedDiagnosticIndex = selectedRelationDiagnostic
+    ? closedDiagnostics.findIndex(
+        (diagnostic) => diagnostic.id === selectedRelationDiagnostic.id,
+      )
+    : -1;
+  const nextDiagnostic =
+    closedDiagnostics[
+      selectedDiagnosticIndex >= 0
+        ? (selectedDiagnosticIndex + 1) % closedDiagnostics.length
+        : 0
+    ];
+  const selectedGlueEdge = summary.edges.find(
+    (edge) =>
+      edge.generator === selectedGenerator &&
+      selectedOrbitState &&
+      (edge.undirectedSource === selectedOrbitState.id ||
+        edge.undirectedTarget === selectedOrbitState.id),
+  );
+  const selectedGlueTarget =
+    selectedGlueEdge && selectedOrbitState
+      ? selectedGlueEdge.undirectedSource === selectedOrbitState.id
+        ? selectedGlueEdge.undirectedTarget
+        : selectedGlueEdge.undirectedSource
+      : undefined;
+  const selectedGlueTargetName = selectedGlueTarget
+    ? formatJnwStateName(summary, selectedGlueTarget)
+    : undefined;
+  const linkLensActive =
+    readerLens === "ascending-link" ||
+    readerLens === "descending-link" ||
+    readerLens === "level-link";
+  const workflowSteps: Array<{
+    id: string;
+    label: string;
+    status: "complete" | "active" | "ready" | "attention";
+    detail: string;
+  }> = [
+    {
+      id: "source",
+      label: "Source",
+      status: "complete",
+      detail: system.name,
+    },
+    {
+      id: "moves",
+      label: "Moves",
+      status: failedMoves.length > 0 ? "attention" : "complete",
+      detail: moveSystem.label ?? moveSystem.id,
+    },
+    {
+      id: "quotient",
+      label: "State quotient",
+      status:
+        readerLens === "state" || readerLens === "none" ? "active" : "complete",
+      detail: `${summary.states.length} states, ${summary.edges.length} rails`,
+    },
+    {
+      id: "relation",
+      label: "Relation",
+      status: readerLens === "relation" ? "active" : "ready",
+      detail: selectedRelationDiagnostic
+        ? formatJnwRelationOption(
+            selectedRelationDiagnostic,
+            Math.max(0, selectedDiagnosticIndex) + 1,
+            generatorLabels,
+            summary,
+          )
+        : `${closedDiagnostics.length} closed relations`,
+    },
+    {
+      id: "link",
+      label: "Link",
+      status: linkLensActive ? "active" : "ready",
+      detail: `at ${selectedStateName}`,
+    },
+    {
+      id: "export",
+      label: "Export",
+      status: "ready",
+      detail: "save from notebook",
+    },
+  ];
 
   return (
     <div className="game-editor" aria-label="JNW legal-system game editor">
-      <p className="math-note">
-        JNW directions are state dependent: applying generator{" "}
-        <span className="matrix-key">s_i</span> changes the state by symmetric
-        difference with <span className="matrix-key">m_i</span>. Only
-        right-angled systems with a passing move property and legal orbit are
-        labeled JNW faithful.
-      </p>
-      <p className="math-note">
-        <strong>{claimLabel}</strong>. Orbit states: {summary.states.length};
-        legal states: {summary.legalStateCount}/{summary.states.length};
-        strongly legal: {summary.stronglyLegalStateCount}/
-        {summary.states.length}.
-      </p>
-      <div className="button-row">
-        <button
-          type="button"
-          className="button"
-          onClick={() => onPreset("singletons")}
-        >
-          Singleton moves
-        </button>
-        <button
-          type="button"
-          className="button"
-          onClick={() => onPreset("bipartite")}
-        >
-          Bipartite/color moves
-        </button>
-        <button
-          type="button"
-          className="button"
-          onClick={() => onPreset("invert-state")}
-        >
-          Invert state
-        </button>
-        <button
-          type="button"
-          className="button"
-          onClick={() => onPreset("clear")}
-        >
-          Clear state
-        </button>
-        <button
-          type="button"
-          className="button primary"
-          onClick={onOpenStateQuotient}
-        >
-          Show state quotient
-        </button>
-      </div>
-      <h4>Initial state</h4>
-      <div className="chip-grid" aria-label="JNW initial state">
-        {generatorLabels.map((label, generator) => (
-          <button
-            type="button"
-            key={generator}
-            className="chip-button"
-            aria-pressed={selectedState.has(generator)}
-            onClick={() =>
-              onInitialStateChange(generator, !selectedState.has(generator))
-            }
-          >
-            {label}
-          </button>
+      <ol className="jnw-workflow-rail" aria-label="JNW workflow path">
+        {workflowSteps.map((step, index) => (
+          <li key={step.id} data-status={step.status}>
+            <span>{index + 1}</span>
+            <strong>{step.label}</strong>
+            <small>{step.detail}</small>
+          </li>
         ))}
+      </ol>
+      <div className="jnw-setup-card" aria-label="Current JNW setup">
+        <strong>Current setup</strong>
+        <dl>
+          <div>
+            <dt>Move system</dt>
+            <dd>
+              {moveSystem.label ?? moveSystem.id}
+              {moveSystemIsJnw21Preset
+                ? " (JNW cube bipartition/color-class preset)"
+                : ""}
+            </dd>
+          </div>
+          <div>
+            <dt>Selected state</dt>
+            <dd>
+              {selectedStateName}
+              {selectedStateSubsetLabel !== "none"
+                ? ` = ${selectedStateSubsetLabel}`
+                : ""}
+            </dd>
+          </div>
+          <div>
+            <dt>Check status</dt>
+            <dd>
+              {claimLabel}; {summary.legalStateCount}/{summary.states.length}{" "}
+              legal, {summary.stronglyLegalStateCount}/{summary.states.length}{" "}
+              strongly legal.
+            </dd>
+          </div>
+        </dl>
       </div>
-      <h4>Moves</h4>
-      <table className="inspector-table">
-        <tbody>
-          {moveSystem.moves.map((move) => {
-            const toggles = new Set(move.toggles);
-            return (
-              <tr key={move.generator}>
-                <th>m_{generatorLabels[move.generator]}</th>
-                <td>
-                  <div className="chip-grid">
-                    {generatorLabels.map((label, generator) => (
-                      <button
-                        type="button"
-                        key={generator}
-                        className="chip-button"
-                        aria-pressed={toggles.has(generator)}
-                        onClick={() =>
-                          onMoveToggle(
-                            move.generator,
-                            generator,
-                            !toggles.has(generator),
-                          )
-                        }
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      {failedMoves.length > 0 ? (
-        <ul className="warning-list">
-          {failedMoves.map((check) => (
-            <li key={check.generator}>
-              m_{generatorLabels[check.generator]}{" "}
-              {!check.includesSelf
-                ? "does not contain itself"
-                : "contains adjacent generators"}{" "}
-              {check.adjacentGeneratorViolations
-                .map((generator) => generatorLabels[generator])
-                .join(", ")}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {[...summary.warnings, ...summary.errors].length > 0 ? (
-        <ul className="warning-list">
-          {[...summary.warnings, ...summary.errors]
-            .slice(0, 8)
-            .map((message) => (
-              <li key={message}>{message}</li>
-            ))}
-        </ul>
-      ) : null}
-      <ul className="subset-list">
-        {summary.rankTwoDiagnostics.slice(0, 8).map((diagnostic) => (
-          <li key={diagnostic.id}>
-            <span className="subset-rank">
-              {diagnostic.ok ? "closed" : "failed"}
-            </span>
-            <span>
-              {generatorLabels[diagnostic.generatorPair[0]]}-
-              {generatorLabels[diagnostic.generatorPair[1]]}: {2 * diagnostic.m}
-              -step diagnostic
-            </span>
+      <p className="math-note reader-kicker">
+        You are reading four local <span className="matrix-key">Y_Gamma</span>{" "}
+        charts glued by generator moves. Use the controls below as a path:
+        choose a state, read a relation, then inspect a link.
+      </p>
+      <JnwStateGammaDiagramView
+        diagram={selectedStateDiagram}
+        stateName={selectedStateName}
+        stateSubsetLabel={selectedStateSubsetLabel}
+        stateColor={selectedStateColor}
+      />
+      <div className="jnw-reader-groups" aria-label="JNW reader controls">
+        <section aria-label="Choose JNW state">
+          <strong>Choose state</strong>
+          <div className="button-row">
             <button
               type="button"
               className="button"
-              onClick={() => onFocusDiagnostic(diagnostic.id)}
+              onClick={() => previousState && onSelectState(previousState.id)}
             >
-              Focus
+              Previous state
             </button>
-          </li>
-        ))}
-      </ul>
-      {failedDiagnostics.length > 8 ? (
-        <p className="math-note">
-          {failedDiagnostics.length - 8} more failed diagnostics are hidden in
-          the compact list.
-        </p>
+            <button
+              type="button"
+              className="button"
+              onClick={() => nextState && onSelectState(nextState.id)}
+            >
+              Next state
+            </button>
+            <button
+              type="button"
+              className="button"
+              onClick={() =>
+                selectedOrbitState
+                  ? onShowStateOnGamma(selectedOrbitState.id)
+                  : undefined
+              }
+            >
+              Mirror selected state on Gamma
+            </button>
+            <button
+              type="button"
+              className="button primary"
+              onClick={() => onOpenStateQuotient(selectedOrbitState?.id)}
+            >
+              Show JNW state quotient
+            </button>
+          </div>
+          <div className="chip-grid">
+            {summary.states.map((state) => {
+              const stateName = formatJnwStateName(summary, state);
+              return (
+                <button
+                  type="button"
+                  key={state.id}
+                  className="chip-button"
+                  aria-pressed={state.id === selectedOrbitState?.id}
+                  onClick={() => onSelectState(state.id)}
+                >
+                  {stateName}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+        <section>
+          <strong>Read one relation</strong>
+          <div className="button-row">
+            <button
+              type="button"
+              className="button"
+              disabled={!nextDiagnostic}
+              onClick={() =>
+                nextDiagnostic
+                  ? onFocusDiagnostic(nextDiagnostic.id)
+                  : undefined
+              }
+            >
+              Next relation
+            </button>
+            <button
+              type="button"
+              className="button primary"
+              disabled={!selectedRelationDiagnostic}
+              onClick={() =>
+                selectedRelationDiagnostic
+                  ? onFocusDiagnostic(selectedRelationDiagnostic.id)
+                  : undefined
+              }
+            >
+              Focus selected relation
+            </button>
+            <button
+              type="button"
+              className="button"
+              onClick={() => {
+                onReaderLensChange("state");
+                onOpenStateQuotient(selectedOrbitState?.id);
+              }}
+            >
+              Return to selected state
+            </button>
+          </div>
+          <label className="compact-field">
+            Choose relation
+            <select
+              value={selectedRelationDiagnostic?.id ?? ""}
+              disabled={closedDiagnostics.length === 0}
+              onChange={(event) => {
+                const diagnosticId = event.currentTarget.value;
+                if (diagnosticId) {
+                  onFocusDiagnostic(diagnosticId);
+                }
+              }}
+            >
+              <option value="">Select a relation</option>
+              {closedDiagnostics.map((diagnostic, index) => (
+                <option key={diagnostic.id} value={diagnostic.id}>
+                  {formatJnwRelationOption(
+                    diagnostic,
+                    index + 1,
+                    generatorLabels,
+                    summary,
+                  )}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="chip-grid" aria-label="Generator gluing controls">
+            {generatorLabels.map((label, generator) => (
+              <button
+                type="button"
+                key={generator}
+                className="chip-button"
+                aria-pressed={
+                  readerLens === "glue" && selectedGenerator === generator
+                }
+                onClick={() => onSelectGlueGenerator(generator)}
+              >
+                Highlight {label}-edge gluing
+              </button>
+            ))}
+          </div>
+          {readerLens === "glue" ? (
+            <p className="math-note">
+              Glue lens: {selectedStateName} --
+              {generatorLabels[selectedGenerator]}--{" "}
+              {selectedGlueTargetName ?? "state"}. The highlighted rail is the
+              exact move edge{" "}
+              <span className="matrix-key">S -&gt; S xor m_g</span>.
+            </p>
+          ) : null}
+        </section>
+        <section>
+          <strong>Inspect link</strong>
+          <div className="button-row">
+            <button
+              type="button"
+              className="button"
+              onClick={() => onOpenStateQuotientLens("ascending-link")}
+            >
+              Ascending link at selected state
+            </button>
+            <button
+              type="button"
+              className="button"
+              onClick={() => onOpenStateQuotientLens("descending-link")}
+            >
+              Descending link at selected state
+            </button>
+            <button
+              type="button"
+              className="button"
+              onClick={() => onOpenStateQuotientLens("level-link")}
+            >
+              Level link at selected state
+            </button>
+          </div>
+        </section>
+        <section aria-label="JNW quotient reader">
+          <strong>Drawing options</strong>
+          <div
+            className="segmented segmented-three"
+            aria-label="JNW reader mode"
+          >
+            <button
+              type="button"
+              aria-pressed={readerMode === "exact-skeleton"}
+              onClick={() => onReaderModeChange("exact-skeleton")}
+            >
+              Exact state skeleton
+            </button>
+            <button
+              type="button"
+              aria-pressed={readerMode === "readable-chart"}
+              onClick={() => onReaderModeChange("readable-chart")}
+            >
+              Readable quotient drawing
+            </button>
+          </div>
+          <div
+            className="segmented segmented-three"
+            aria-label="JNW rail grouping"
+          >
+            <button
+              type="button"
+              aria-pressed={railGrouping === "individual"}
+              onClick={() => onRailGroupingChange("individual")}
+            >
+              Show every generator rail
+            </button>
+            <button
+              type="button"
+              aria-pressed={railGrouping === "move-class-overview"}
+              onClick={() => onRailGroupingChange("move-class-overview")}
+            >
+              Bundle equal moves
+            </button>
+          </div>
+          <details className="advanced-details compact-advanced">
+            <summary>Drawing details</summary>
+            <label className="range-control">
+              Build quotient in stages {quotientConstructionStage}:{" "}
+              {jnwConstructionStageLabel(quotientConstructionStage)}
+              <input
+                type="range"
+                min={1}
+                max={5}
+                step={1}
+                value={quotientConstructionStage}
+                onChange={(event) =>
+                  onQuotientConstructionStageChange(
+                    clampJnwConstructionStage(
+                      Number(event.currentTarget.value),
+                    ),
+                  )
+                }
+              />
+            </label>
+            <div
+              className="segmented segmented-three"
+              aria-label="JNW quotient sheet display"
+            >
+              {jnwSheetModeOptions.map((option) => (
+                <button
+                  type="button"
+                  key={option.id}
+                  aria-pressed={quotientSheetMode === option.id}
+                  onClick={() => onQuotientSheetModeChange(option.id)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </details>
+          {railGrouping === "move-class-overview" ? (
+            <p className="warning-inline">
+              Bundled drawing: expand to individual rails to see every generator
+              edge.
+            </p>
+          ) : null}
+        </section>
+      </div>
+      {selectedRelationDiagnostic ? (
+        <div className="topology-lens-readout">
+          <strong>Selected relation boundary</strong>
+          <p className="math-note">
+            Pair{" "}
+            <span className="matrix-key">
+              {generatorLabels[selectedRelationDiagnostic.generatorPair[0]]}-
+              {generatorLabels[selectedRelationDiagnostic.generatorPair[1]]}
+            </span>{" "}
+            has a {selectedRelationDiagnostic.boundaryStateIds.length}-step
+            alternating boundary. The matching edges are bold in the quotient;
+            other quotient edges are ghosted.
+          </p>
+          <ol className="relation-walk-list">
+            {selectedRelationWalk.map((entry) => (
+              <li key={`${entry.stateId}:${entry.step}`}>
+                <span>
+                  {entry.step}: {entry.stateName} --{entry.generatorLabel}--
+                </span>
+                <small>{entry.stateId}</small>
+              </li>
+            ))}
+          </ol>
+        </div>
       ) : null}
+      <div className="button-row" aria-label="Compare JNW layers">
+        <button
+          type="button"
+          className="button"
+          aria-pressed={layerCompareOpen}
+          onClick={() => onLayerCompareOpenChange(!layerCompareOpen)}
+        >
+          Compare source chart with state link
+        </button>
+      </div>
+      {layerCompareOpen ? (
+        <div
+          className="jnw-layer-comparison"
+          aria-label="Y_Gamma and JNW state-link comparison"
+        >
+          <article>
+            <strong>Y_Gamma fundamental domain</strong>
+            <span>
+              One base vertex with generator arrows and relation cells from the
+              source Coxeter system.
+            </span>
+          </article>
+          <article>
+            <strong>JNW state quotient local link</strong>
+            <span>
+              Selected state {selectedStateName}
+              {selectedStateSubsetLabel !== "none"
+                ? ` = ${selectedStateSubsetLabel}`
+                : ""}
+              . Each quotient state carries the same local generator data, but
+              the JNW move system classifies directions state-by-state.
+            </span>
+          </article>
+        </div>
+      ) : null}
+      <details className="advanced-details">
+        <summary>Advanced JNW diagnostics</summary>
+        <div
+          className="jnw-state-picker"
+          aria-label="Advanced JNW state picker"
+        >
+          <strong>Choose state to inspect</strong>
+          <div className="chip-grid">
+            {summary.states.map((state) => {
+              const stateName = formatJnwStateName(summary, state);
+              const stateLabel = formatJnwStateLabel(state, system);
+              return (
+                <button
+                  type="button"
+                  key={state.id}
+                  className="chip-button"
+                  aria-pressed={state.id === selectedOrbitState?.id}
+                  title={`${stateName} = ${stateLabel}`}
+                  onClick={() => onSelectState(state.id)}
+                >
+                  {stateName}
+                </button>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            className="button"
+            onClick={() =>
+              selectedOrbitState
+                ? onShowStateOnGamma(selectedOrbitState.id)
+                : undefined
+            }
+          >
+            Mirror selected state on Gamma
+          </button>
+        </div>
+        <div className="jnw-layer-breadcrumb" aria-label="Where am I in JNW?">
+          {(
+            layerBreadcrumb?.items ?? [
+              "Coxeter system Gamma",
+              "Y_Gamma fundamental domain",
+              "JNW state quotient",
+              `link at state ${selectedStateName}`,
+            ]
+          ).map((item, index, items) => (
+            <span key={`${item}:${index}`}>
+              {item}
+              {index < items.length - 1 ? (
+                <em aria-hidden="true">-&gt;</em>
+              ) : null}
+            </span>
+          ))}
+        </div>
+        <p className="math-note">
+          Ascending, descending, and level links below are links at the selected
+          state vertex in the derived state quotient. They are not drawn as
+          ambient links in the universal Davis complex. In the 3D state
+          quotient, each <span className="matrix-key">S_i</span> is a state
+          vertex, each generator-labeled rail is the move{" "}
+          <span className="matrix-key">S_i {"->"} S_i + m_g</span>, and each
+          relation face is the alternating state cycle for a commuting pair
+          drawn on separated rails. Highlighted Gamma vertices record which
+          defining-graph vertices lie in the selected state. This is the visual
+          bridge: <span className="matrix-key">Y_Gamma</span> supplies the local
+          generator/relation data, and the JNW state quotient records how the
+          move system orients that data at each state.
+        </p>
+        <div className="button-row">
+          <button
+            type="button"
+            className="button"
+            onClick={() => onPreset("singletons")}
+          >
+            Singleton moves
+          </button>
+          <button
+            type="button"
+            className="button"
+            onClick={() => onPreset("bipartite")}
+          >
+            Bipartite/color moves
+          </button>
+          <button
+            type="button"
+            className="button"
+            onClick={() => onPreset("invert-state")}
+          >
+            Invert state
+          </button>
+          <button
+            type="button"
+            className="button"
+            onClick={() => onPreset("clear")}
+          >
+            Clear state
+          </button>
+          <button
+            type="button"
+            className="button primary"
+            onClick={() => onOpenStateQuotient(selectedOrbitState?.id)}
+          >
+            Show JNW state quotient
+          </button>
+        </div>
+        <div
+          className="jnw-reader-controls"
+          aria-label="Advanced reader details"
+        >
+          <strong>JNW State Quotient Reader</strong>
+          <span className="reader-kicker">
+            {summary.states.length} state vertices, {summary.edges.length}{" "}
+            generator edges,{" "}
+            {
+              summary.rankTwoDiagnostics.filter((diagnostic) => diagnostic.ok)
+                .length
+            }{" "}
+            relation cells.
+          </span>
+          <dl className="jnw-object-key" aria-label="JNW quotient object key">
+            <div>
+              <dt>S_i</dt>
+              <dd>state vertex</dd>
+            </div>
+            <div>
+              <dt>g edge</dt>
+              <dd>labeled quotient rail</dd>
+            </div>
+            <div>
+              <dt>small g bead</dt>
+              <dd>drawing handle for a local chart</dd>
+            </div>
+            <div>
+              <dt>square face</dt>
+              <dd>commuting relation cycle</dd>
+            </div>
+            <div>
+              <dt>state color</dt>
+              <dd>local chart/star at S_i</dd>
+            </div>
+          </dl>
+          <p className="math-note">
+            You are reading one quotient object. The state vertices and
+            generator-labeled rails form the quotient 1-skeleton; relation faces
+            attach along the same exact state cycles, but are drawn on separated
+            chart rails so the four local charts do not collapse into one blob.
+            A local <span className="matrix-key">Y_Gamma</span> chart at{" "}
+            <span className="matrix-key">S_i</span> means the visible generator
+            star and relation sheets incident to that state inside this one
+            glued quotient object.
+          </p>
+        </div>
+        <h4>Initial state</h4>
+        <div className="chip-grid" aria-label="JNW initial state">
+          {generatorLabels.map((label, generator) => (
+            <button
+              type="button"
+              key={generator}
+              className="chip-button"
+              aria-pressed={selectedState.has(generator)}
+              onClick={() =>
+                onInitialStateChange(generator, !selectedState.has(generator))
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <h4>Moves</h4>
+        <table className="inspector-table">
+          <tbody>
+            {moveSystem.moves.map((move) => {
+              const toggles = new Set(move.toggles);
+              return (
+                <tr key={move.generator}>
+                  <th>m_{generatorLabels[move.generator]}</th>
+                  <td>
+                    <div className="chip-grid">
+                      {generatorLabels.map((label, generator) => (
+                        <button
+                          type="button"
+                          key={generator}
+                          className="chip-button"
+                          aria-pressed={toggles.has(generator)}
+                          onClick={() =>
+                            onMoveToggle(
+                              move.generator,
+                              generator,
+                              !toggles.has(generator),
+                            )
+                          }
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {failedMoves.length > 0 ? (
+          <ul className="warning-list">
+            {failedMoves.map((check) => (
+              <li key={check.generator}>
+                m_{generatorLabels[check.generator]}{" "}
+                {!check.includesSelf
+                  ? "does not contain itself"
+                  : "contains adjacent generators"}{" "}
+                {check.adjacentGeneratorViolations
+                  .map((generator) => generatorLabels[generator])
+                  .join(", ")}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {[...summary.warnings, ...summary.errors].length > 0 ? (
+          <ul className="warning-list">
+            {[...summary.warnings, ...summary.errors]
+              .slice(0, 8)
+              .map((message) => (
+                <li key={message}>{message}</li>
+              ))}
+          </ul>
+        ) : null}
+        <ul className="subset-list">
+          {summary.rankTwoDiagnostics.slice(0, 8).map((diagnostic) => (
+            <li key={diagnostic.id}>
+              <span className="subset-rank">
+                {diagnostic.ok ? "closed" : "failed"}
+              </span>
+              <span>
+                {generatorLabels[diagnostic.generatorPair[0]]}-
+                {generatorLabels[diagnostic.generatorPair[1]]}:{" "}
+                {2 * diagnostic.m}
+                -step diagnostic
+              </span>
+              <button
+                type="button"
+                className="button"
+                onClick={() => onFocusDiagnostic(diagnostic.id)}
+              >
+                Focus relation
+              </button>
+            </li>
+          ))}
+        </ul>
+        {failedDiagnostics.length > 8 ? (
+          <p className="math-note">
+            {failedDiagnostics.length - 8} more failed diagnostics are hidden in
+            the compact list.
+          </p>
+        ) : null}
+      </details>
+    </div>
+  );
+}
+
+function JnwStateGammaDiagramView({
+  diagram,
+  stateName,
+  stateSubsetLabel,
+  stateColor,
+}: {
+  diagram: ReturnType<typeof buildJnwGammaStateDiagram>;
+  stateName: string;
+  stateSubsetLabel: string;
+  stateColor: string;
+}) {
+  const project = (x: number, y: number, z: number) => ({
+    x: 80 + (x + 0.42 * z) * 36,
+    y: 70 - (y - 0.28 * z) * 36,
+  });
+
+  return (
+    <div
+      className="jnw-state-gamma-map"
+      aria-label={`Gamma vertices highlighted for ${stateName}`}
+    >
+      <div>
+        <strong>{stateName} as vertices of Gamma</strong>
+        <span>{stateSubsetLabel === "none" ? "{}" : stateSubsetLabel}</span>
+      </div>
+      <svg
+        viewBox="0 0 160 140"
+        role="img"
+        aria-label="Selected JNW state in Gamma"
+      >
+        {diagram.edges.map((edge) => {
+          const source = diagram.vertices[edge.source];
+          const target = diagram.vertices[edge.target];
+          if (!source || !target) {
+            return null;
+          }
+          const sourcePoint = project(source.x, source.y, source.z);
+          const targetPoint = project(target.x, target.y, target.z);
+          return (
+            <line
+              key={edge.id}
+              x1={sourcePoint.x}
+              y1={sourcePoint.y}
+              x2={targetPoint.x}
+              y2={targetPoint.y}
+            />
+          );
+        })}
+        {diagram.vertices.map((vertex) => {
+          const point = project(vertex.x, vertex.y, vertex.z);
+          return (
+            <g key={vertex.generator}>
+              <circle
+                cx={point.x}
+                cy={point.y}
+                r={vertex.active ? 7 : 5}
+                className={vertex.active ? "is-active" : undefined}
+                style={vertex.active ? { fill: stateColor } : undefined}
+              />
+              <text x={point.x} y={point.y - 10}>
+                {vertex.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      <p className="math-note">
+        Colored vertices are in the current state. Gray vertices are
+        defining-graph vertices not in the state.
+      </p>
     </div>
   );
 }
@@ -9353,6 +11657,208 @@ function isQuotientLinkLens(lensId: TopologyLensId): boolean {
     lensId === "level-link" ||
     lensId === "full-local-link"
   );
+}
+
+function jnwReaderLensForTopologyLens(
+  lensId: TopologyLensId,
+  fallback: JnwReaderLens,
+): JnwReaderLens {
+  if (lensId === "ascending-link") {
+    return "ascending-link";
+  }
+  if (lensId === "descending-link") {
+    return "descending-link";
+  }
+  if (lensId === "level-link") {
+    return "level-link";
+  }
+  return fallback;
+}
+
+function isJnwStateQuotient(
+  quotient: import("../quotient").QuotientComplex | undefined,
+): boolean {
+  if (!quotient) {
+    return false;
+  }
+  return (
+    quotient.name.toLowerCase().includes("jnw state quotient") ||
+    quotient.game?.assignments.some(
+      (assignment) => assignment.id === "jnw-state-directions",
+    ) === true
+  );
+}
+
+function defaultJnwMoveSystemForSystem(
+  system: CoxeterSystemInput,
+): JnwMoveSystem {
+  if (isBundledJnwCubeSystem(system)) {
+    return (
+      createBipartiteJnwMoveSystem(system) ?? createDefaultJnwMoveSystem(system)
+    );
+  }
+  return createDefaultJnwMoveSystem(system);
+}
+
+function defaultJnwInitialStateForSystem(system: CoxeterSystemInput): JnwState {
+  return isBundledJnwCubeSystem(system)
+    ? createJnwState(jnwCubeLegalInitialState)
+    : createDefaultJnwState(system);
+}
+
+function isBundledJnwCubeSystem(system: CoxeterSystemInput): boolean {
+  return (
+    system.rank === 8 &&
+    (system.name === "JNW cube graph RACG" ||
+      system.sourceRefs?.some((ref) =>
+        ref.id.includes("jankiewicz-norin-wise"),
+      ) === true)
+  );
+}
+
+function spreadParallelStateQuotientEdges(edges: SceneEdge[]): SceneEdge[] {
+  const quotientEdges = edges.filter((edge) => !isJnwAnnotationEdge(edge.id));
+  const annotationEdges = edges.filter((edge) => isJnwAnnotationEdge(edge.id));
+  const groups = new Map<string, SceneEdge[]>();
+  for (const edge of quotientEdges) {
+    const [left, right] = [edge.source, edge.target].sort();
+    const key = `${left}|${right}`;
+    const group = groups.get(key) ?? [];
+    group.push(edge);
+    groups.set(key, group);
+  }
+
+  const offsetsById = new Map<
+    string,
+    { offset: number; priority: number; total: number }
+  >();
+  for (const group of groups.values()) {
+    const sorted = [...group].sort(
+      (left, right) =>
+        left.generator - right.generator || left.id.localeCompare(right.id),
+    );
+    const center = (sorted.length - 1) / 2;
+    sorted.forEach((edge, index) => {
+      offsetsById.set(edge.id, {
+        offset: (index - center) * 0.16,
+        priority: 1_200 - index,
+        total: sorted.length,
+      });
+    });
+  }
+
+  return [
+    ...quotientEdges.map((edge) => {
+      const offset = offsetsById.get(edge.id);
+      if (!offset || offset.total <= 1) {
+        return {
+          ...edge,
+          alwaysLabel: true,
+          labelPriority: Math.max(edge.labelPriority ?? 0, 1_000),
+        };
+      }
+      return {
+        ...edge,
+        alwaysLabel: true,
+        labelLeader: true,
+        labelPriority: Math.max(edge.labelPriority ?? 0, offset.priority),
+        visualOffset: offset.offset,
+      };
+    }),
+    ...annotationEdges,
+  ];
+}
+
+function isJnwAnnotationEdge(edgeId: string): boolean {
+  return (
+    edgeId.startsWith("jnw:gamma-glyph-edge:") ||
+    edgeId.startsWith("jnw:state-membership:")
+  );
+}
+
+function formatJnwRelationOption(
+  diagnostic: JnwRankTwoDiagnostic,
+  index: number,
+  generatorLabels: readonly string[],
+  summary: JnwLegalOrbitSummary,
+): string {
+  const left =
+    generatorLabels[diagnostic.generatorPair[0]] ??
+    `s${diagnostic.generatorPair[0]}`;
+  const right =
+    generatorLabels[diagnostic.generatorPair[1]] ??
+    `s${diagnostic.generatorPair[1]}`;
+  const sides = 2 * diagnostic.m;
+  const firstStateName = formatJnwStateName(
+    summary,
+    diagnostic.boundaryStateIds[0] ?? "",
+  );
+  return `${index}. ${left}-${right} ${jnwPolygonName(sides)} (${sides} steps) at ${firstStateName}`;
+}
+
+function jnwPolygonName(sides: number): string {
+  switch (sides) {
+    case 4:
+      return "square";
+    case 6:
+      return "hexagon";
+    case 8:
+      return "octagon";
+    case 10:
+      return "decagon";
+    default:
+      return `${sides}-gon`;
+  }
+}
+
+function topologyLensLabel(lensId: TopologyLensId): string {
+  switch (lensId) {
+    case "ascending-link":
+      return "Ascending link at selected state";
+    case "descending-link":
+      return "Descending link at selected state";
+    case "level-link":
+      return "Level link at selected state";
+    case "full-local-link":
+      return "Full local link at selected state";
+    case "state-quotient-orbit":
+      return "JNW state quotient";
+    default:
+      return "State-quotient link at selected state";
+  }
+}
+
+const jnwSheetModeOptions: Array<{
+  id: JnwQuotientSheetMode;
+  label: string;
+}> = [
+  { id: "outlines", label: "Outlines only" },
+  { id: "glass", label: "Glass faces" },
+  { id: "filled", label: "Filled faces" },
+];
+
+function clampJnwConstructionStage(
+  value: number,
+): JnwQuotientConstructionStage {
+  const rounded = Math.min(5, Math.max(1, Math.round(value)));
+  return rounded as JnwQuotientConstructionStage;
+}
+
+function jnwConstructionStageLabel(
+  stage: JnwQuotientConstructionStage,
+): string {
+  switch (stage) {
+    case 1:
+      return "4 state vertices";
+    case 2:
+      return "generator edges";
+    case 3:
+      return "relation-cycle boundaries";
+    case 4:
+      return "glassy relation faces";
+    case 5:
+      return "state-dependent directions";
+  }
 }
 
 function downloadText(filename: string, text: string) {

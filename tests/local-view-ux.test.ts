@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import A3 from "../public/examples/A3.json";
 import I2_5 from "../public/examples/I2_5.json";
 import compact5CubeGamma1 from "../public/examples/compact_5_cube_gamma1.json";
+import jnwCubeGraph from "../public/examples/jnw_cube_graph.json";
 import { generateViewerBall } from "../src/app/generationPipeline";
 import {
   baseOrbicomplexForSystem,
@@ -14,6 +15,10 @@ import {
   isYGammaBaseComplex,
 } from "../src/app/yGammaAtlas";
 import { buildYGamma2SkeletonScene } from "../src/app/yGammaScene";
+import {
+  findRankThreeFocusContainingPair,
+  rankThreeFocusPairOptions,
+} from "../src/app/yGammaRankThreeFocus";
 import {
   buildLocalNeighborhoodExport,
   cellBoundaryEdgeKeys,
@@ -71,6 +76,17 @@ function centroid3(
   ];
 }
 
+function sceneBoundaryEdgeKeys(
+  boundaryNodeIds: readonly string[],
+): Set<string> {
+  const keys = new Set<string>();
+  boundaryNodeIds.forEach((nodeId, index) => {
+    const nextNodeId = boundaryNodeIds[(index + 1) % boundaryNodeIds.length];
+    keys.add([nodeId, nextNodeId].sort().join("|"));
+  });
+  return keys;
+}
+
 function subtract3(
   left: [number, number, number],
   right: [number, number, number],
@@ -80,6 +96,31 @@ function subtract3(
 
 function dot3(left: [number, number, number], right: [number, number, number]) {
   return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
+}
+
+function pointSegmentDistance2D(
+  point: [number, number, number],
+  source: [number, number, number],
+  target: [number, number, number],
+) {
+  const segment = [target[0] - source[0], target[1] - source[1]];
+  const lengthSquared = segment[0] ** 2 + segment[1] ** 2;
+  if (lengthSquared === 0) {
+    return Math.hypot(point[0] - source[0], point[1] - source[1]);
+  }
+  const t = Math.max(
+    0,
+    Math.min(
+      1,
+      ((point[0] - source[0]) * segment[0] +
+        (point[1] - source[1]) * segment[1]) /
+        lengthSquared,
+    ),
+  );
+  return Math.hypot(
+    point[0] - (source[0] + segment[0] * t),
+    point[1] - (source[1] + segment[1] * t),
+  );
 }
 
 function cross3(
@@ -173,6 +214,10 @@ function segmentsProperlyIntersect(
   const cdA = orient(c, d, a);
   const cdB = orient(c, d, b);
   return abC * abD < -1e-8 && cdA * cdB < -1e-8;
+}
+
+function undirectedKey(left: string, right: string): string {
+  return left < right ? `${left}|${right}` : `${right}|${left}`;
 }
 
 describe("local chamber UX helpers", () => {
@@ -538,6 +583,88 @@ describe("local chamber UX helpers", () => {
     expect(arrowEdges.every((edge) => edge.alwaysLabel)).toBe(true);
   });
 
+  it("expands compact 5-cube all-relations Y_Gamma view and labels every relation edge by generator", () => {
+    const system = compact5CubeGamma1 as CoxeterSystemInput;
+    const atlas = buildYGammaCellAtlas(system);
+    const coherent = buildYGamma2SkeletonScene(atlas, {
+      faceMode: "all",
+      includeRankThreeCells: false,
+      cellSeparation: "coherent",
+    });
+    const readable = buildYGamma2SkeletonScene(atlas, {
+      faceMode: "all",
+      includeRankThreeCells: false,
+      cellSeparation: "readable",
+    });
+    const expansive = buildYGamma2SkeletonScene(atlas, {
+      faceMode: "all",
+      includeRankThreeCells: false,
+      layoutScale: "expansive",
+      cellSeparation: "expanded",
+    });
+    const fullExpansive = buildYGamma2SkeletonScene(atlas, {
+      faceMode: "all",
+      includeRankThreeCells: true,
+      layoutScale: "expansive",
+      cellSeparation: "expanded",
+    });
+
+    const relationRadius = (scene: typeof coherent) =>
+      Math.max(
+        ...scene.nodes
+          .filter((node) => node.isRelationBoundary)
+          .map((node) => Math.hypot(...(node.position ?? [0, 0, 0]))),
+      );
+    const expectedBoundaryEdges = atlas.rankTwoCells.reduce(
+      (total, cell) => total + (cell.boundaryLength ?? 2 * (cell.m ?? 2)),
+      0,
+    );
+    const sourceGeneratorLabels = new Set(
+      system.generators.map((generator) => generator.label),
+    );
+    const relationEdges = expansive.edges.filter((edge) =>
+      edge.id.includes(":boundary:"),
+    );
+
+    expect(relationRadius(readable)).toBeGreaterThan(
+      relationRadius(coherent) * 1.15,
+    );
+    expect(relationRadius(expansive)).toBeGreaterThan(
+      relationRadius(readable) * 1.25,
+    );
+    expect(relationEdges).toHaveLength(expectedBoundaryEdges);
+    expect(
+      relationEdges.every((edge) =>
+        sourceGeneratorLabels.has(edge.compactLabel ?? ""),
+      ),
+    ).toBe(true);
+    expect(
+      relationEdges.every((edge) => !/^\d+:/.test(edge.compactLabel ?? "")),
+    ).toBe(true);
+    expect(expansive.warnings.join(" ")).toContain("expanded construction");
+
+    const fullEdgeKeys = new Set(
+      fullExpansive.edges
+        .filter((edge) => edge.isRelationBoundary)
+        .map((edge) => undirectedKey(edge.source, edge.target)),
+    );
+    const fullBoundaryKeys = fullExpansive.cells.flatMap((cell) =>
+      cell.boundaryNodeIds.map((nodeId, index) =>
+        undirectedKey(
+          nodeId,
+          cell.boundaryNodeIds[(index + 1) % cell.boundaryNodeIds.length],
+        ),
+      ),
+    );
+    expect(fullBoundaryKeys.length).toBeGreaterThan(relationEdges.length);
+    expect(fullBoundaryKeys.every((key) => fullEdgeKeys.has(key))).toBe(true);
+    expect(
+      fullExpansive.edges
+        .filter((edge) => edge.isRelationBoundary)
+        .every((edge) => sourceGeneratorLabels.has(edge.compactLabel ?? "")),
+    ).toBe(true);
+  });
+
   it("draws finite Y_Gamma relation polygons as simple lifted 3D faces for every m", () => {
     for (const m of [2, 3, 4, 5, 6, 7]) {
       const system: CoxeterSystemInput = {
@@ -591,7 +718,7 @@ describe("local chamber UX helpers", () => {
     }
   });
 
-  it("can focus the full m=2/m=3 rank-three Y_Gamma cell boundary", () => {
+  it("can focus the full square/hexagon rank-three Y_Gamma cell boundary", () => {
     const system = A3 as CoxeterSystemInput;
     const atlas = buildYGammaCellAtlas(system);
     const rankThreeFocus = buildYGamma2SkeletonScene(atlas, {
@@ -657,6 +784,53 @@ describe("local chamber UX helpers", () => {
       }),
     );
     expect(hasSeparatedFaceDirections).toBe(true);
+  });
+
+  it("anchors rank-three Y_Gamma focus on a selected m=5 relation", () => {
+    const system: CoxeterSystemInput = {
+      schemaVersion: 1,
+      name: "H3-style rank-three focus fixture",
+      rank: 3,
+      generators: [
+        { id: "s0", label: "s0" },
+        { id: "s1", label: "s1" },
+        { id: "s2", label: "s2" },
+      ],
+      coxeterMatrix: [
+        [1, 5, 2],
+        [5, 1, 3],
+        [2, 3, 1],
+      ],
+    };
+    const atlas = buildYGammaCellAtlas(system);
+    const focus = findRankThreeFocusContainingPair(atlas, "0-1");
+    const pairOptions = rankThreeFocusPairOptions(atlas, focus);
+
+    expect(focus?.cellId).toBe("Y:higher:0-1-2");
+    expect(focus?.pairKeys[0]).toBe("0-1");
+    expect(pairOptions[0]).toMatchObject({
+      key: "0-1",
+      m: 5,
+      polygonLabel: "decagon",
+      buttonLabel: "Look at m=5 decagon",
+    });
+
+    const scene = buildYGamma2SkeletonScene(atlas, {
+      activeGeneratorPairKey: "0-1",
+      includeRankThreeCells: true,
+      rankThreeFocus: focus,
+      peelMode: "same-rank-three",
+    });
+    const focusedDecagons = scene.cells.filter(
+      (cell) =>
+        cell.sourceCellId === "Y:higher:0-1-2" &&
+        pairKey(cell.generatorPair) === "0-1",
+    );
+
+    expect(focusedDecagons.length).toBeGreaterThan(0);
+    expect(
+      focusedDecagons.every((cell) => cell.boundaryNodeIds.length === 10),
+    ).toBe(true);
   });
 
   it("uses the actual Y_Gamma 3-cell boundary for the active hexagon family", () => {
@@ -935,25 +1109,194 @@ describe("local chamber UX helpers", () => {
     ]);
     expect(scene.records.map((record) => record.id).sort()).toEqual([
       "Gamma:e:0-1",
+      "Gamma:e:0-2",
       "Gamma:e:1-2",
     ]);
     expect(scene.edges.map((edge) => edge.compactLabel)).toEqual([
       "m=3",
+      "m=2",
       "m=3",
     ]);
     expect(scene.edges.map((edge) => edge.colorHint)).toEqual([
       "#2563eb",
+      "#06b6d4",
       "#2563eb",
     ]);
     expect(
       scene.edges.every((edge) => edge.selectedHighlight === "outline"),
     ).toBe(true);
     expect(scene.legend).toEqual([
+      { label: "m=2", color: "#06b6d4", count: 1 },
       { label: "m=3", color: "#2563eb", count: 2 },
     ]);
-    expect(scene.omittedRightAnglePairs).toBe(1);
-    expect(scene.warnings.join(" ")).toContain("m=2");
+    expect(scene.charneyDavisCurvature).toBe(0.25);
+    expect(scene.rightAnglePairCount).toBe(1);
+    expect(scene.warnings.join(" ")).toContain("drawn intentionally");
     expect(scene.edges.every((edge) => edge.isRelationBoundary)).toBe(true);
+    expect(scene.edges.every((edge) => edge.alwaysLabel)).toBe(true);
+    expect(scene.edges.every((edge) => edge.labelLeader)).toBe(true);
+  });
+
+  it("marks every compact 5-cube Gamma relation as a required edge label", () => {
+    const scene = buildDefiningGraphScene(
+      compact5CubeGamma1 as CoxeterSystemInput,
+    );
+    const planarScene = buildDefiningGraphScene(
+      compact5CubeGamma1 as CoxeterSystemInput,
+      { layoutMode: "planar" },
+    );
+    const expectedEdgeCount = compact5CubeGamma1.coxeterMatrix.reduce(
+      (total, row, left) =>
+        total +
+        row.filter((entry, right) => right > left && typeof entry === "number")
+          .length,
+      0,
+    );
+
+    expect(scene.edges).toHaveLength(expectedEdgeCount);
+    expect(
+      scene.edges.every((edge) => edge.compactLabel?.startsWith("m=")),
+    ).toBe(true);
+    expect(scene.edges.every((edge) => edge.alwaysLabel)).toBe(true);
+    expect(scene.edges.every((edge) => edge.labelLeader)).toBe(true);
+    expect(
+      scene.edges.every((edge) => typeof edge.labelPriority === "number"),
+    ).toBe(true);
+    expect(planarScene.layoutMode).toBe("planar");
+    expect(planarScene.nodes.every((node) => node.position?.[2] === 0)).toBe(
+      true,
+    );
+    expect(
+      planarScene.nodes.every(
+        (node) =>
+          node.position !== undefined &&
+          Math.hypot(node.position[0], node.position[1]) > 7,
+      ),
+    ).toBe(true);
+    const planarNodePositions = new Map(
+      planarScene.nodes.map((node) => [node.id, node.position] as const),
+    );
+    const labelPositions: Array<[number, number, number]> = [];
+    const unrelatedEdgeClearances: number[] = [];
+    for (const edge of planarScene.edges) {
+      expect(edge.labelAnchor).toBeDefined();
+      expect(edge.labelPosition).toBeDefined();
+      const source = planarNodePositions.get(edge.source);
+      const target = planarNodePositions.get(edge.target);
+      expect(source).toBeDefined();
+      expect(target).toBeDefined();
+      if (!source || !target || !edge.labelAnchor || !edge.labelPosition) {
+        continue;
+      }
+      labelPositions.push(edge.labelPosition);
+      const otherEdgeClearance = Math.min(
+        ...planarScene.edges
+          .filter((other) => other.id !== edge.id)
+          .map((other) => {
+            const otherSource = planarNodePositions.get(other.source);
+            const otherTarget = planarNodePositions.get(other.target);
+            return otherSource && otherTarget
+              ? pointSegmentDistance2D(
+                  edge.labelPosition!,
+                  otherSource,
+                  otherTarget,
+                )
+              : Number.POSITIVE_INFINITY;
+          }),
+      );
+      unrelatedEdgeClearances.push(otherEdgeClearance);
+      const segment = [
+        target[0] - source[0],
+        target[1] - source[1],
+        target[2] - source[2],
+      ];
+      const anchor = [
+        edge.labelAnchor[0] - source[0],
+        edge.labelAnchor[1] - source[1],
+        edge.labelAnchor[2] - source[2],
+      ];
+      const segmentLengthSq =
+        segment[0] ** 2 + segment[1] ** 2 + segment[2] ** 2;
+      const fraction =
+        (anchor[0] * segment[0] +
+          anchor[1] * segment[1] +
+          anchor[2] * segment[2]) /
+        segmentLengthSq;
+      const closest = [
+        source[0] + segment[0] * fraction,
+        source[1] + segment[1] * fraction,
+        source[2] + segment[2] * fraction,
+      ];
+      expect(fraction).toBeGreaterThan(0.1);
+      expect(fraction).toBeLessThan(0.9);
+      expect(
+        Math.hypot(
+          edge.labelPosition[0] - edge.labelAnchor[0],
+          edge.labelPosition[1] - edge.labelAnchor[1],
+          edge.labelPosition[2] - edge.labelAnchor[2],
+        ),
+      ).toBeLessThan(1.05);
+      expect(
+        Math.hypot(
+          ...closest.map((value, index) => value - edge.labelAnchor![index]),
+        ),
+      ).toBeLessThan(1e-8);
+    }
+    const closestLabelGap = labelPositions.reduce(
+      (minimum, position, index) =>
+        Math.min(
+          minimum,
+          ...labelPositions
+            .slice(index + 1)
+            .map((other) =>
+              Math.hypot(
+                position[0] - other[0],
+                position[1] - other[1],
+                position[2] - other[2],
+              ),
+            ),
+        ),
+      Number.POSITIVE_INFINITY,
+    );
+    expect(closestLabelGap).toBeGreaterThan(0.55);
+    expect(Math.min(...unrelatedEdgeClearances)).toBeGreaterThan(0.18);
+    expect(planarScene.planarity.isPlanar).toBe(false);
+    expect(planarScene.planarity.obstruction?.kind).toBe("K5");
+    expect(planarScene.planarity.reason).toContain("K5");
+  });
+
+  it("highlights a selected JNW state directly on Gamma", () => {
+    const scene = buildDefiningGraphScene(jnwCubeGraph as CoxeterSystemInput, {
+      highlightedGenerators: [0, 1, 2, 5],
+      highlightLabel: "S_1",
+      highlightColor: "#38bdf8",
+    });
+
+    const activeNodes = scene.nodes.filter(
+      (node) => node.colorHint === "#38bdf8",
+    );
+    const mutedNodes = scene.nodes.filter(
+      (node) => node.colorHint === "#64748b",
+    );
+
+    expect(activeNodes.map((node) => node.compactLabel).sort()).toEqual([
+      "v000",
+      "v001",
+      "v010",
+      "v101",
+    ]);
+    expect(activeNodes.every((node) => node.stateRole === "in-state")).toBe(
+      true,
+    );
+    expect(mutedNodes.every((node) => node.stateRole === "out-of-state")).toBe(
+      true,
+    );
+    expect(activeNodes.every((node) => node.nodeScale === 2.05)).toBe(true);
+    expect(scene.nodes.every((node) => node.alwaysLabel === true)).toBe(true);
+    expect(mutedNodes).toHaveLength(4);
+    expect(scene.selectedNodeId).toBeUndefined();
+    expect(scene.warnings.join(" ")).toContain("S_1 is highlighted on Gamma");
+    expect(scene.warnings.join(" ")).toContain("colored generator vertices");
   });
 
   it("colors Coxeter defining graph Gamma edges by relation type", () => {
@@ -980,19 +1323,21 @@ describe("local chamber UX helpers", () => {
       scene.records.map((record) => [record.label, record.color]),
     );
 
+    expect(scene.records).toHaveLength(5);
+    expect(scene.records.some((record) => record.entry === "inf")).toBe(false);
+    expect(colorsByLabel.get("m=2")).toBe("#06b6d4");
     expect(colorsByLabel.get("m=3")).toBe("#2563eb");
     expect(colorsByLabel.get("m=4")).toBe("#16a34a");
     expect(colorsByLabel.get("m=5")).toBe("#f59e0b");
-    expect(colorsByLabel.get("m=inf")).toBe("#ec4899");
     expect(scene.legend.map((entry) => entry.label)).toEqual([
+      "m=2",
       "m=3",
       "m=4",
       "m=5",
-      "m=inf",
     ]);
   });
 
-  it("numbers active Y_Gamma relation edges while leaving construction vertices unlabeled", () => {
+  it("labels active Y_Gamma relation edges by generator while leaving construction vertices unlabeled", () => {
     const system = A3 as CoxeterSystemInput;
     const atlas = buildYGammaCellAtlas(system);
     const scene = buildYGamma2SkeletonScene(atlas, {
@@ -1005,12 +1350,12 @@ describe("local chamber UX helpers", () => {
     );
 
     expect(boundaryEdges.map((edge) => edge.compactLabel)).toEqual([
-      "0: s0",
-      "1: s1",
-      "2: s0",
-      "3: s1",
-      "4: s0",
-      "5: s1",
+      "s0",
+      "s1",
+      "s0",
+      "s1",
+      "s0",
+      "s1",
     ]);
     expect(
       scene.nodes
@@ -1041,7 +1386,7 @@ describe("local chamber UX helpers", () => {
       relationScene.edges
         .filter((edge) => edge.id.startsWith("Y:cell:0-1:boundary:"))
         .map((edge) => edge.compactLabel),
-    ).toEqual(["0: p0", "1: p1", "2: p0", "3: p1", "4: p0", "5: p1"]);
+    ).toEqual(["p0", "p1", "p0", "p1", "p0", "p1"]);
 
     const focusBase = {
       cellId: "Y:higher:0-1-2",
@@ -1168,6 +1513,144 @@ describe("local chamber UX helpers", () => {
         (node) => node.hidden && node.id.includes(":coxeter-vertex:"),
       ),
     ).toHaveLength(4);
+  });
+
+  it("extracts a Y_Gamma relation star without rewriting cell metadata", () => {
+    const atlas = buildYGammaCellAtlas(A3 as CoxeterSystemInput);
+    const normal = buildYGamma2SkeletonScene(atlas, {
+      faceMode: "all",
+      includeRankThreeCells: true,
+    });
+    const relationStar = buildYGamma2SkeletonScene(atlas, {
+      activeGeneratorPairKey: "0-1",
+      faceMode: "all",
+      includeRankThreeCells: true,
+      relationStar: { active: true, pairKey: "0-1" },
+    });
+    const normalById = new Map(normal.cells.map((cell) => [cell.id, cell]));
+
+    expect(relationStar.cells.length).toBeGreaterThan(0);
+    for (const cell of relationStar.cells) {
+      const original = normalById.get(cell.id);
+      expect(original).toBeDefined();
+      expect(cell.generatorPair).toEqual(original?.generatorPair);
+      expect(cell.boundaryNodeIds).toEqual(original?.boundaryNodeIds);
+    }
+
+    const activeFace = relationStar.cells.find(
+      (cell) => pairKey(cell.generatorPair) === "0-1",
+    );
+    expect(activeFace?.readabilityRole).toBe("focus");
+    expect(relationStar.warnings.join(" ")).toContain("drawing filter");
+  });
+
+  it("hides disjoint relation faces in a focused Y_Gamma relation star", () => {
+    const rankFourWithDisjointRelations: CoxeterSystemInput = {
+      schemaVersion: 1,
+      name: "Two disjoint relations",
+      dataStatus: "toy",
+      rank: 4,
+      generators: [
+        { id: "s0", label: "s0" },
+        { id: "s1", label: "s1" },
+        { id: "s2", label: "s2" },
+        { id: "s3", label: "s3" },
+      ],
+      coxeterMatrix: [
+        [1, 3, "inf", "inf"],
+        [3, 1, "inf", "inf"],
+        ["inf", "inf", 1, 3],
+        ["inf", "inf", 3, 1],
+      ],
+    };
+    const atlas = buildYGammaCellAtlas(rankFourWithDisjointRelations);
+    const relationStar = buildYGamma2SkeletonScene(atlas, {
+      activeGeneratorPairKey: "0-1",
+      faceMode: "all",
+      relationStar: { active: true, pairKey: "0-1" },
+    });
+
+    expect(
+      relationStar.cells.some((cell) => pairKey(cell.generatorPair) === "2-3"),
+    ).toBe(false);
+    expect(
+      relationStar.cells.some((cell) => pairKey(cell.generatorPair) === "0-1"),
+    ).toBe(true);
+  });
+
+  it("keeps rank-three incidence faces in a Y_Gamma relation star", () => {
+    const atlas = buildYGammaCellAtlas(A3 as CoxeterSystemInput);
+    const relationStar = buildYGamma2SkeletonScene(atlas, {
+      activeGeneratorPairKey: "0-1",
+      faceMode: "all",
+      includeRankThreeCells: true,
+      relationStar: { active: true, pairKey: "0-1" },
+    });
+    const visibleBoundaryKeys = new Set(
+      relationStar.edges.map((edge) =>
+        [edge.source, edge.target].sort().join("|"),
+      ),
+    );
+    const rankThreeFaces = relationStar.cells.filter(
+      (cell) => cell.sourceCellId === "Y:higher:0-1-2",
+    );
+
+    expect(rankThreeFaces.length).toBeGreaterThan(0);
+    expect(
+      rankThreeFaces.every((cell) => cell.readabilityRole === "incident"),
+    ).toBe(true);
+    for (const cell of rankThreeFaces) {
+      const boundaryKeys = sceneBoundaryEdgeKeys(cell.boundaryNodeIds);
+      expect(
+        [...boundaryKeys].every((key) => visibleBoundaryKeys.has(key)),
+      ).toBe(true);
+    }
+  });
+
+  it("changes Y_Gamma separation as drawing state without changing incidence", () => {
+    const atlas = buildYGammaCellAtlas(A3 as CoxeterSystemInput);
+    const coherent = buildYGamma2SkeletonScene(atlas, {
+      activeGeneratorPairKey: "0-1",
+      faceMode: "all",
+      cellSeparation: "coherent",
+      separationValue: 0,
+    });
+    const expanded = buildYGamma2SkeletonScene(atlas, {
+      activeGeneratorPairKey: "0-1",
+      faceMode: "all",
+      cellSeparation: "expanded",
+      separationValue: 100,
+    });
+
+    expect(expanded.cells.map((cell) => cell.id)).toEqual(
+      coherent.cells.map((cell) => cell.id),
+    );
+    expect(
+      expanded.cells.map((cell) => [
+        cell.id,
+        pairKey(cell.generatorPair),
+        cell.boundaryNodeIds.join("|"),
+      ]),
+    ).toEqual(
+      coherent.cells.map((cell) => [
+        cell.id,
+        pairKey(cell.generatorPair),
+        cell.boundaryNodeIds.join("|"),
+      ]),
+    );
+    expect(expanded.nodes.map((node) => node.id)).toEqual(
+      coherent.nodes.map((node) => node.id),
+    );
+    expect(
+      expanded.nodes.some((node, index) => {
+        const previous = coherent.nodes[index]?.position;
+        return (
+          previous !== undefined &&
+          node.position !== undefined &&
+          node.position.some((value, axis) => value !== previous[axis])
+        );
+      }),
+    ).toBe(true);
   });
 
   it("steps by generator when the adjacent chamber is inside the finite ball", () => {

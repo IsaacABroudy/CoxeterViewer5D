@@ -148,6 +148,13 @@ describe("optional exact exporter tooling", () => {
       "validate_research_grade.mjs",
     );
     expect(packageJson.scripts["bench:timed"]).toContain("benchmark_timed.mjs");
+    expect(packageJson.scripts["bench:timed:check"]).toContain("--check");
+    expect(packageJson.scripts["bench:timed:machine:check"]).toContain(
+      "benchmark_machine.mjs",
+    );
+    expect(packageJson.scripts["bench:timed:hard-gate"]).toContain(
+      "--hard-gates",
+    );
     expect(packageJson.scripts["bench:catalogue:check"]).toContain("--check");
     expect(packageJson.scripts["bench:catalogue:write"]).toContain("--write");
   });
@@ -918,11 +925,84 @@ describe("optional exact exporter tooling", () => {
     expect(stored.benchmark).toBe("catalogue-static-v1");
     expect(stored.elapsedMs).toBeUndefined();
     expect(stored.totals).toMatchObject({
-      examples: 24,
+      examples: 25,
       generated: 6,
       generatedNodes: 80,
       generatedEdges: 104,
       generatedTwoCells: 32,
     });
+  });
+});
+
+describe("release orientation documentation", () => {
+  it("keeps the README front door organized around first-user questions", () => {
+    const readme = readWorkspaceFile("README.md");
+
+    for (const heading of [
+      "## What Is This App For?",
+      "## What Can I Click First?",
+      "## What Is Exact?",
+      "## What Is Only A Drawing?",
+      "## How Do I Run Web/Desktop?",
+    ]) {
+      expect(readme).toContain(heading);
+    }
+    for (const action of [
+      "Explore a Coxeter example",
+      "Find a relation cell",
+      "Understand Y_Gamma",
+      "Study a quotient/game",
+      "Inspect exactness and data status",
+    ]) {
+      expect(readme).toContain(action);
+    }
+  });
+
+  it("documents visual vocabulary, walkthroughs, UI map, and limits", () => {
+    const glossary = readWorkspaceFile("docs/glossary.md");
+    const walkthroughs = readWorkspaceFile("docs/walkthroughs.md");
+    const uiMap = readWorkspaceFile("docs/ui-map.md");
+    const limits = readWorkspaceFile("docs/known-limits.md");
+
+    for (const term of [
+      "Cayley graph",
+      "Davis cell",
+      "`Y_Gamma`",
+      "Gamma",
+      "Quotient complex",
+      "Cocycle/cochain",
+      "JNW legal system",
+      "Projection",
+    ]) {
+      expect(glossary).toContain(term);
+    }
+    for (const walkthrough of [
+      "Find A Hexagon",
+      "Inspect A3",
+      "Defining Graph `Gamma`: Read Compact 5-Cube",
+      "The Base Complex `Y_Gamma`: Inspect P2",
+      "Quotient And Game Demo: Run I2(5)",
+      "JNW Legal-System Demo: Play The Cube Graph",
+    ]) {
+      expect(walkthroughs).toContain(walkthrough);
+    }
+    for (const region of [
+      "Model switch",
+      "Focus controls",
+      "Inspector",
+      "Caveats drawer",
+      "Research tools",
+      "Export + notebook",
+    ]) {
+      expect(uiMap).toContain(region);
+    }
+    for (const limit of [
+      "Dense Complexes",
+      "Projection Caveats",
+      "Non-Planar Gamma",
+      "External Tool Constraints",
+    ]) {
+      expect(limits).toContain(limit);
+    }
   });
 });

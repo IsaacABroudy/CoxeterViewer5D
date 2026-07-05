@@ -33,7 +33,8 @@ export type TopologyLensId =
   | "ascending-link"
   | "descending-link"
   | "level-link"
-  | "full-local-link";
+  | "full-local-link"
+  | "state-quotient-orbit";
 
 export type TopologyLensScope = "star" | "family" | "quotient-link";
 
@@ -69,7 +70,7 @@ const workflowSteps: ResearchWorkflowStep[] = [
     id: "source-system",
     label: "Source",
     title: "Choose the source Coxeter system",
-    body: "Start with I2(5) for the golden quotient/game demo. Compact examples remain source systems until a subgroup/coset artifact is imported.",
+    body: "Start with I2(5) for the quotient/cocycle demo, or load the JNW cube graph for the right-angled legal-system game. Compact examples remain source systems until a subgroup/coset artifact is imported.",
     primaryAction: "Load I2(5)",
   },
   {
@@ -90,7 +91,7 @@ const workflowSteps: ResearchWorkflowStep[] = [
     id: "cocycle-game",
     label: "Cocycle",
     title: "Choose the cocycle/game assignment",
-    body: "The demo cocycle labels s0 by +1 and s1 by -1. Boundary sums around the decagon vanish, so ascending and descending edges are visible at each vertex.",
+    body: "The I2(5) demo cocycle labels s0 by +1 and s1 by -1. The JNW cube demo instead uses state-dependent directions from bipartition moves.",
     primaryAction: "Show cocycle links",
   },
   {
@@ -167,38 +168,47 @@ const topologyLenses: TopologyLensDefinition[] = [
   },
   {
     id: "ascending-link",
-    label: "Ascending Link",
+    label: "Ascending link at selected state",
     summary:
-      "Show quotient edges with positive cocycle value away from the selected vertex.",
+      "Show the state-quotient link edges classified as ascending at the selected state.",
     scope: "quotient-link",
     statusText:
-      "Ascending-link lens: positive cocycle edges leave the selected quotient vertex.",
+      "Ascending-link lens: state-quotient link at the selected state, classified by the active game data.",
   },
   {
     id: "descending-link",
-    label: "Descending Link",
+    label: "Descending link at selected state",
     summary:
-      "Show quotient edges with negative cocycle value away from the selected vertex.",
+      "Show the state-quotient link edges classified as descending at the selected state.",
     scope: "quotient-link",
     statusText:
-      "Descending-link lens: negative cocycle edges leave the selected quotient vertex.",
+      "Descending-link lens: state-quotient link at the selected state, classified by the active game data.",
   },
   {
     id: "level-link",
-    label: "Level Link",
+    label: "Level link at selected state",
     summary:
-      "Show quotient edges with zero cocycle value away from the selected vertex.",
+      "Show the state-quotient link edges classified as level at the selected state.",
     scope: "quotient-link",
     statusText:
-      "Level-link lens: zero cocycle edges are separated from ascending and descending directions.",
+      "Level-link lens: state-quotient link at the selected state, with level edges separated from ascending and descending directions.",
   },
   {
     id: "full-local-link",
-    label: "Full Local Link",
-    summary: "Show every incident quotient edge at the selected vertex.",
+    label: "Full local link at selected state",
+    summary: "Show every incident state-quotient edge at the selected state.",
     scope: "quotient-link",
     statusText:
-      "Full-local-link lens: every incident quotient edge at the selected vertex remains visible.",
+      "Full-local-link lens: every incident state-quotient edge at the selected state remains visible.",
+  },
+  {
+    id: "state-quotient-orbit",
+    label: "JNW State Quotient",
+    summary:
+      "Show the state orbit quotient with state vertices, generator-labeled edges, and relation cycles.",
+    scope: "quotient-link",
+    statusText:
+      "JNW state quotient: vertices are states S_i, generator edges apply moves m_g, and relation cycles are inspected through the link lenses.",
   },
 ];
 
