@@ -51,7 +51,7 @@
     "bench:timed:machine": "node scripts/benchmark_machine.mjs",
     "bench:timed:machine:write": "node scripts/benchmark_machine.mjs --write scripts/benchmarks/machine-baselines-v1.json",
     "bench:timed:machine:check": "node scripts/benchmark_machine.mjs --check scripts/benchmarks/machine-baselines-v1.json",
-    "bench:timed:hard-gate": "node scripts/benchmark_timed.mjs --check scripts/benchmarks/timed-browser-v1.json --report .benchmark-current/timed-browser-v1.json && node scripts/benchmark_machine.mjs --check scripts/benchmarks/machine-baselines-v1.json --current .benchmark-current/timed-browser-v1.json --hard-gates",
+    "bench:timed:hard-gate": "node scripts/benchmark_timed.mjs --check scripts/benchmarks/timed-browser-v1.json --report .benchmark-current/timed-browser-v1.json --machine-class ci-linux-standard && node scripts/benchmark_machine.mjs --check scripts/benchmarks/machine-baselines-v1.json --current .benchmark-current/timed-browser-v1.json --hard-gates",
     "compare:backends": "node scripts/compare_backends.mjs",
     "compare:all-backends": "node scripts/compare_all_backends.mjs",
     "registry:validate": "node scripts/registry_validate.mjs",

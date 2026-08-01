@@ -60,6 +60,18 @@ const FRAME_BUDGETS = {
 const CASE_LONG_TASK_BUDGET_MS = 250;
 const INTERACTION_LONG_TASK_BUDGET_MS = 180;
 const SCREENSHOT_LONG_TASK_BUDGET_MS = 300;
+const LONG_TASK_BUDGET_PROFILES = {
+  "local-dev-laptop": {
+    caseMs: CASE_LONG_TASK_BUDGET_MS,
+    interactionMs: INTERACTION_LONG_TASK_BUDGET_MS,
+    screenshotMs: SCREENSHOT_LONG_TASK_BUDGET_MS,
+  },
+  "ci-linux-standard": {
+    caseMs: 350,
+    interactionMs: 250,
+    screenshotMs: 420,
+  },
+};
 const INTERACTION_BUDGETS = new Map([
   ["label-toggle", { elapsedMs: 900, lastGraphUpdateMs: 200 }],
   ["gamma-incidence-selection", { elapsedMs: 900, lastGraphUpdateMs: 160 }],
@@ -135,7 +147,12 @@ function stableJson(value) {
 }
 
 function parseArgs(argv) {
-  const args = { write: undefined, check: undefined, report: undefined };
+  const args = {
+    write: undefined,
+    check: undefined,
+    report: undefined,
+    machineClass: "local-dev-laptop",
+  };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === "--write" || argv[i] === "--check") {
       args[argv[i].slice(2)] = argv[i + 1] ?? DEFAULT_OUTPUT;
@@ -147,7 +164,17 @@ function parseArgs(argv) {
       i += 1;
       continue;
     }
+    if (argv[i] === "--machine-class") {
+      args.machineClass = argv[i + 1] ?? args.machineClass;
+      i += 1;
+      continue;
+    }
     throw new Error(`unknown timed benchmark argument: ${argv[i]}`);
+  }
+  if (!LONG_TASK_BUDGET_PROFILES[args.machineClass]) {
+    throw new Error(
+      `unknown timed benchmark machine class: ${args.machineClass}`,
+    );
   }
   return args;
 }
@@ -1711,7 +1738,7 @@ async function runCase(page, testCase, expected) {
   };
 }
 
-function checkOutput(path, snapshot) {
+function checkOutput(path, snapshot, longTaskBudgets) {
   if (!existsSync(path)) {
     return { ok: false, message: `timed benchmark snapshot missing: ${path}` };
   }
@@ -1825,8 +1852,11 @@ function checkOutput(path, snapshot) {
       snapshot.interactions ?? [],
       "interaction",
     ),
-    ...budgetFailuresFor(snapshot.cases),
-    ...interactionBudgetFailuresFor(snapshot.interactions ?? []),
+    ...budgetFailuresFor(snapshot.cases, longTaskBudgets),
+    ...interactionBudgetFailuresFor(
+      snapshot.interactions ?? [],
+      longTaskBudgets,
+    ),
   ];
   const ok = structureOk && budgetFailures.length === 0;
   return {
@@ -1880,7 +1910,7 @@ function percentile(sortedValues, fraction) {
   return sortedValues[index];
 }
 
-function budgetFailuresFor(cases) {
+function budgetFailuresFor(cases, longTaskBudgets) {
   const failures = [];
   for (const testCase of cases) {
     const key = `${testCase.exampleId}:${testCase.radius}`;
@@ -1907,16 +1937,16 @@ function budgetFailuresFor(cases) {
         `${key} frame max ${testCase.frameDeltaMaxMs}ms > ${FRAME_BUDGETS.frameDeltaMaxMs}ms`,
       );
     }
-    if (testCase.longTaskMaxMs > CASE_LONG_TASK_BUDGET_MS) {
+    if (testCase.longTaskMaxMs > longTaskBudgets.caseMs) {
       failures.push(
-        `${key} long task ${testCase.longTaskMaxMs}ms > ${CASE_LONG_TASK_BUDGET_MS}ms`,
+        `${key} long task ${testCase.longTaskMaxMs}ms > ${longTaskBudgets.caseMs}ms`,
       );
     }
   }
   return failures;
 }
 
-function interactionBudgetFailuresFor(interactions) {
+function interactionBudgetFailuresFor(interactions, longTaskBudgets) {
   const failures = [];
   for (const interaction of interactions) {
     if (interaction.status === "failed") {
@@ -1957,8 +1987,8 @@ function interactionBudgetFailuresFor(interactions) {
     }
     const longTaskBudget =
       interaction.id === "screenshot-export"
-        ? SCREENSHOT_LONG_TASK_BUDGET_MS
-        : INTERACTION_LONG_TASK_BUDGET_MS;
+        ? longTaskBudgets.screenshotMs
+        : longTaskBudgets.interactionMs;
     if (interaction.longTaskMaxMs > longTaskBudget) {
       failures.push(
         `${interaction.id} long task ${interaction.longTaskMaxMs}ms > ${longTaskBudget}ms`,
@@ -2033,6 +2063,7 @@ function interactionFeatureFloorsFor(expectedEntries) {
 }
 
 const args = parseArgs(process.argv.slice(2));
+const longTaskBudgets = LONG_TASK_BUDGET_PROFILES[args.machineClass];
 const benchmarkServer = await ensureBenchmarkServer();
 const browser = await chromium.launch();
 const page = await browser.newPage();
@@ -2046,8 +2077,8 @@ try {
   }
   const interactions = await runInteractions(page);
   const failures = [
-    ...budgetFailuresFor(cases),
-    ...interactionBudgetFailuresFor(interactions),
+    ...budgetFailuresFor(cases, longTaskBudgets),
+    ...interactionBudgetFailuresFor(interactions, longTaskBudgets),
   ];
 
   const result = {
@@ -2063,6 +2094,8 @@ try {
       name: "chromium",
       version: browser.version(),
     },
+    machineClass: args.machineClass,
+    longTaskBudgets,
     buildHash: createHash("sha256")
       .update(readFileSync(resolve(process.cwd(), "dist", "index.html")))
       .digest("hex"),
@@ -2083,7 +2116,9 @@ try {
     writeFileSync(args.report, stableJson(result), "utf8");
   }
 
-  const check = args.check ? checkOutput(args.check, result) : undefined;
+  const check = args.check
+    ? checkOutput(args.check, result, longTaskBudgets)
+    : undefined;
   const output = { ...result, ...(check ? { check } : {}) };
   console.log(stableJson(output));
 

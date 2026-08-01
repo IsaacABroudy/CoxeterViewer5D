@@ -155,6 +155,9 @@ describe("optional exact exporter tooling", () => {
     expect(packageJson.scripts["bench:timed:hard-gate"]).toContain(
       "--hard-gates",
     );
+    expect(packageJson.scripts["bench:timed:hard-gate"]).toContain(
+      "--machine-class ci-linux-standard",
+    );
     expect(packageJson.scripts["bench:catalogue:check"]).toContain("--check");
     expect(packageJson.scripts["bench:catalogue:write"]).toContain("--write");
   });

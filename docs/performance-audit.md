@@ -13,6 +13,12 @@ records interaction time, graph-update time, render count, long tasks, draw
 calls, triangles, estimated scene memory, JavaScript heap use, and semantic
 object counts.
 
+Long-task ceilings are machine-classed. Local checks retain the stricter
+`local-dev-laptop` budget, while the hard CI command uses a documented
+`ci-linux-standard` budget for shared-runner variance. The CI profile does not
+relax semantic floors, elapsed-time limits, graph-update limits, or the
+zero-idle-render requirement.
+
 On the audit machine, ordinary graph updates took about `0.5-6 ms`. Selecting a
 Gamma incidence partition took about `16-17 ms`. Repeated production runs put a
 dense `Y_Gamma` cutaway between `14-99 ms` and relation-star focus between
