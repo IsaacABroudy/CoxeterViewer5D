@@ -126,8 +126,9 @@ Optional exact-tool paths remain outside the container contract:
 When an external runtime is used, record the path and command shape in an
 artifact manifest rather than hiding it in local machine state.
 
-Tumarkin's 15 compact 5D eight-facet `G11411` examples are regenerated and
-checked by a dedicated in-repo certifier:
+Tumarkin's full compact 5D eight-facet list, consisting of 15 `G11411` cases
+and the unique `G12221` case, is regenerated and checked by a dedicated in-repo
+certifier:
 
 ```bash
 python -m pip install -r requirements-ci.txt
@@ -139,7 +140,7 @@ python scripts/certify_tumarkin_8facet.py
 
 The first command parses the arXiv EPS artwork into source-vector diagram
 records, the second solves the dotted weights, and the certifier writes or
-validates the bundled `tumarkin_5d_8facet_g11411_*.json` files. The pinned
+validates the bundled `tumarkin_5d_8facet_*.json` files. The pinned
 Python requirements are intentionally small: SymPy is used for the exact
 algebraic equations, while the rank/signature check uses an in-repo numerical
 Jacobi routine so CI does not depend on NumPy. These scripts certify the source
@@ -203,10 +204,21 @@ pnpm bench:timed:check
 pnpm bench:timed:machine
 ```
 
+The timed command builds against the production `dist/` server by default. It
+records long tasks, heap use, renderer work, label renderer (`sprite` or
+`sdf-batch`), picking strategy/build/query time, the cache policy used for the
+run, and semantic object floors. It fails if any interaction scenario fails. See
+[performance-audit.md](performance-audit.md) for the current measurements and
+the remaining architecture thresholds.
+
 `bench:timed:machine` turns the stored timed benchmark into machine-class
 budgets for `ci-linux-standard`, `local-dev-laptop`, and
 `research-workstation`. CI should hard-gate only the standard class; local
 classes are records for comparison as topology and quotient scenes grow.
+
+CI runs the timed hard gate as its own fresh step. `validate:research-grade`
+does not repeat browser timing after the CPU-heavy exact-tool checks; doing so
+measures residual host contention rather than a stable application baseline.
 
 Demo media is storyboard-first so normal validation does not depend on video
 tooling:
@@ -295,8 +307,9 @@ then `make`.
 The primary quotient/game demo is the identity-subgroup quotient of `I2(5)`.
 It carries ten cosets, one decagon quotient cell, and the named
 generator-uniform cochain `s0=+1, s1=-1`. The browser also has a separate JNW
-Legal-System Game tab for state/move diagnostics. That JNW tab can derive a
-state quotient for inspection, but only right-angled systems with passing
+Legal-System Game tab for state/move diagnostics. For the cube preset it derives
+the four-state move-kernel cover `ker(mu o alpha) \ Sigma`, not the 256-vertex
+commutator cover named `X` in JNW21. Only right-angled systems with passing
 move-property and legal-orbit checks are labeled JNW faithful; non-right-angled
 systems are marked as experimental diagnostics.
 
@@ -469,7 +482,7 @@ the file can be diffed in git. `bench:catalogue:check` compares the current
 deterministic result to that stored file, while `bench:catalogue` prints the
 same data plus an `elapsedMs` measurement.
 
-For browser-level timing, start the dev server and run:
+For browser-level timing, build the app and run:
 
 ```bash
 pnpm bench:timed
@@ -477,6 +490,11 @@ pnpm bench:timed:write
 pnpm bench:timed:check
 ```
 
+The benchmark starts its own local production server over `dist/`. Set
+`COXETER_BENCHMARK_URL` only when deliberately measuring another build.
+
 The timed benchmark selects the core examples/radii in the app and records
-scene stats from the renderer. The structural snapshot ignores elapsed times so
-performance changes can be inspected without introducing timestamp churn.
+scene stats from the renderer. Those stats include which dense-text and picking
+path was active, so a speedup cannot quietly come from dropping labels or
+selection work. The structural snapshot ignores elapsed times so performance
+changes can be inspected without introducing timestamp churn.

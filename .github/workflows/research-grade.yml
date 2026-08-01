@@ -46,6 +46,17 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Performance regression gate
+        run: pnpm bench:timed:hard-gate
+
+      - name: Upload performance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: timed-performance-report
+          path: .benchmark-current/timed-browser-v1.json
+          if-no-files-found: ignore
+
       - name: Playwright
         run: pnpm exec playwright test
 

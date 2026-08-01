@@ -29,6 +29,14 @@ export {
   validateQuotientGameData,
   validateRankTwoCocycle,
 } from "./cocycles";
+export { deriveJnwStateLinks } from "./jnwLinks";
+export type {
+  JnwFiniteSimplicialLink,
+  JnwLinkKind,
+  JnwLinkSimplex,
+  JnwLinkVertex,
+  JnwStateLinks,
+} from "./jnwLinks";
 export type { JnwLayerBreadcrumb } from "./jnwLegalSystem";
 export type {
   BoundaryEquation,

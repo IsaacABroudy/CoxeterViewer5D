@@ -12,27 +12,37 @@ import {
 import { validateCoxeterSystemInput } from "../src/coxeter";
 
 describe("Tumarkin 5D eight-facet catalogue", () => {
-  it("records all 15 certified Table 4.10 entries", () => {
-    expect(tumarkinEightFacetCatalogue).toHaveLength(15);
+  it("records all 16 certified Table 4.10 entries", () => {
+    expect(tumarkinEightFacetCatalogue).toHaveLength(16);
     expect(
       new Set(tumarkinEightFacetCatalogue.map((entry) => entry.id)).size,
-    ).toBe(15);
+    ).toBe(16);
     expect(tumarkinEightFacetSourceRef.locator).toContain("Table 4.10");
 
     for (const [index, entry] of tumarkinEightFacetCatalogue.entries()) {
       expect(entry.dimension).toBe(5);
       expect(entry.facets).toBe(8);
       expect(entry.tableIndex).toBe(index + 1);
-      expect(entry.galeDiagram).toBe("G11411");
+      expect(["G11411", "G12221"]).toContain(entry.galeDiagram);
       expect(entry.dataStatus).toBe("certified");
       expect(entry.renderable).toBe(true);
       expect(entry.renderStatus).toBe("renderable-example");
       expect(entry.certificationStatus).toBe("certified");
       expect(entry.exampleFile).toMatch(
-        /^tumarkin_5d_8facet_g11411_\d\d\.json$/,
+        /^tumarkin_5d_8facet_(?:g11411_\d\d|g12221_01)\.json$/,
       );
       expect(entry.requiredForCertification).toHaveLength(0);
     }
+    expect(
+      tumarkinEightFacetCatalogue.filter(
+        (entry) => entry.galeDiagram === "G11411",
+      ),
+    ).toHaveLength(15);
+    expect(
+      tumarkinEightFacetCatalogue
+        .filter((entry) => entry.galeDiagram === "G12221")
+        .map((entry) => entry.tableIndex),
+    ).toEqual([16]);
   });
 
   it("keeps only a small representative set in the main gallery", () => {
@@ -50,6 +60,12 @@ describe("Tumarkin 5D eight-facet catalogue", () => {
         (entry) => entry.tableIndex,
       ),
     ).toEqual([8]);
+    expect(
+      filterTumarkinEightFacetCatalogue({
+        query: "G12221",
+        filter: "all",
+      }).map((entry) => entry.tableIndex),
+    ).toEqual([16]);
     expect(
       filterTumarkinEightFacetCatalogue({
         query: "",
@@ -79,6 +95,16 @@ describe("Tumarkin 5D eight-facet catalogue", () => {
       expect(example.certificate?.status).toBe("passed");
       expect(example.certificate?.scopes).toContain("source-transcription");
       expect(example.certificate?.scopes).toContain("gram-signature");
+      if (entry.galeDiagram === "G12221") {
+        const dotted = example.certificate?.diagnostics?.dottedWeights;
+        expect(dotted).toHaveLength(1);
+        expect(dotted[0].minimalPolynomial).toEqual([4, 0, -6, 0, 1]);
+        expect(example.certificate?.diagnostics?.signature).toEqual({
+          positive: 5,
+          negative: 1,
+          zero: 2,
+        });
+      }
     }
   });
 });

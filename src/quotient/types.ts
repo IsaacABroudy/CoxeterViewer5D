@@ -146,6 +146,32 @@ export interface QuotientPLDiagnostics {
   notes?: string[];
 }
 
+/**
+ * Records a finite cover of the project-defined Y_Gamma base orbicomplex.
+ *
+ * The maps below are cell identifiers, not drawing coordinates. In the JNW
+ * move cover every state vertex lies over the base vertex, every generator
+ * rail lies over the matching generator arrow, and every relation cell lies
+ * over the matching finite-pair cell.
+ */
+export interface QuotientCoverProjection {
+  kind: "jnw-move-kernel";
+  baseComplexName: string;
+  deckGroupOrder: number;
+  fundamentalDomainCopyIds: string[];
+  vertexImages: Record<string, string>;
+  edgeImages: Record<string, string>;
+  twoCellImages: Record<string, string>;
+  status: "in-repo-checked" | "failed" | "incomplete";
+  checks: {
+    totalGeneratorAction: boolean;
+    involutiveGeneratorAction: boolean;
+    relationBoundariesClose: boolean;
+    projectionPreservesLabels: boolean;
+  };
+  warnings: string[];
+}
+
 export interface QuotientComplex {
   schemaVersion: 1;
   name: string;
@@ -162,6 +188,7 @@ export interface QuotientComplex {
   schreierCertificate?: SchreierCertificate;
   torsionFreeCertificate?: TorsionFreeCertificate;
   plDiagnostics?: QuotientPLDiagnostics;
+  coverProjection?: QuotientCoverProjection;
   warnings?: string[];
 }
 

@@ -1,14 +1,19 @@
-import type {
-  JnwLegalOrbitSummary,
-  JnwMoveSystem,
-  JnwOrbitEdge,
-  JnwRankTwoDiagnostic,
-  JnwState,
+import {
+  deriveJnwStateLinks,
+  type JnwFiniteSimplicialLink,
+  type JnwLegalOrbitSummary,
+  type JnwMoveSystem,
+  type JnwOrbitEdge,
+  type JnwState,
 } from "../game";
 import type { SceneEdge, SceneNode } from "../render/SceneView";
 import type { CoxeterMatrixEntry, CoxeterSystemInput } from "../types";
 import type { YGammaCellAtlas } from "./yGammaAtlas";
 import type { YGamma2SkeletonScene } from "./yGammaScene";
+import {
+  buildJnwFourStateCoverModel,
+  type JnwFourStateCoverModel,
+} from "./jnwCoverModel";
 
 export interface JnwStateSceneDecoration {
   nodes: SceneNode[];
@@ -22,6 +27,8 @@ export interface JnwStateQuotientYGammaScene extends YGamma2SkeletonScene {
   readerLens: JnwReaderLens;
   railGrouping: JnwRailGrouping;
   bundledRailCount: number;
+  coverModel?: JnwFourStateCoverModel;
+  sourceCellIdByRenderedId?: Map<string, string>;
 }
 
 export type JnwQuotientSheetMode = "outlines" | "glass" | "filled";
@@ -34,12 +41,28 @@ export type JnwReaderLens =
   | "relation"
   | "ascending-link"
   | "descending-link"
-  | "level-link";
+  | "level-link"
+  | "full-link";
 export type JnwRailGrouping = "individual" | "move-class-overview";
 
 export interface JnwSelectedRail {
   edgeId?: string;
   generator?: number;
+}
+
+export interface JnwStateQuotientSceneInput {
+  system: CoxeterSystemInput;
+  atlas: YGammaCellAtlas;
+  summary: JnwLegalOrbitSummary;
+  moveSystem?: JnwMoveSystem;
+  selectedStateId?: string;
+  selectedRail?: JnwSelectedRail;
+  selectedRelationId?: string;
+  sheetMode?: JnwQuotientSheetMode;
+  constructionStage?: JnwQuotientConstructionStage;
+  readerMode?: JnwReaderMode;
+  readerLens?: JnwReaderLens;
+  railGrouping?: JnwRailGrouping;
 }
 
 export interface JnwGammaStateDiagramVertex {
@@ -66,7 +89,7 @@ export interface JnwGammaStateDiagram {
 /**
  * Adds drawing-only Gamma glyphs around JNW state vertices.
  *
- * A JNW state is a subset of the defining graph vertices. The state quotient
+ * A JNW state is a subset of the defining graph vertices. The move-kernel cover
  * can otherwise look like an unrelated finite graph, so each state vertex gets
  * a small copy of Gamma with the subset highlighted. The returned nodes/edges
  * are visual annotations; they are not quotient vertices, relation cells, or
@@ -177,6 +200,171 @@ export function decorateJnwStateQuotientScene(input: {
 }
 
 /**
+ * Draw the actual simplicial JNW link around a selected state.
+ *
+ * Generator directions are the link vertices and commuting cliques are its
+ * simplices. The state node and radial spokes orient the reader in the quotient
+ * but are not part of the link incidence.
+ */
+export function buildJnwStateLinkScene(input: {
+  system: CoxeterSystemInput;
+  summary: JnwLegalOrbitSummary;
+  selectedStateId?: string;
+  readerLens: Extract<
+    JnwReaderLens,
+    "ascending-link" | "descending-link" | "level-link" | "full-link"
+  >;
+}): JnwStateQuotientYGammaScene {
+  const selectedStateId = selectedStateIdInSummary(
+    input.summary,
+    input.selectedStateId,
+  );
+  const selectedState =
+    input.summary.states.find((state) => state.id === selectedStateId) ??
+    input.summary.states[0];
+  if (!selectedState) {
+    throw new Error("A JNW link scene requires at least one orbit state.");
+  }
+
+  const links = deriveJnwStateLinks(input.system, selectedState);
+  const link = linkForReaderLens(links, input.readerLens);
+  const activeGenerators = new Set(
+    link.vertices.map((vertex) => vertex.generator),
+  );
+  const stateGenerators = new Set(selectedState.generators);
+  const generatorLayout = gammaGeneratorLayout(input.system);
+  const stateName = formatStateName(input.summary, selectedStateId);
+  const linkColor =
+    input.readerLens === "ascending-link"
+      ? "#16a34a"
+      : input.readerLens === "descending-link"
+        ? "#dc2626"
+        : "#64748b";
+  const nodes: SceneNode[] = [
+    {
+      id: selectedStateId,
+      label: stateName,
+      compactLabel: stateName,
+      length: 0,
+      position: [0, 0, 0],
+      colorHint: jnwStateChartColor(input.summary, selectedStateId),
+      nodeScale: 1.45,
+      alwaysLabel: true,
+      labelPriority: 200_000,
+    },
+    ...links.full.vertices.map((vertex) => {
+      const direction = normalizeVec(
+        generatorLayout.get(vertex.generator) ?? [0, 0, 1],
+      );
+      const active = activeGenerators.has(vertex.generator);
+      return {
+        id: linkVertexNodeId(selectedStateId, vertex.generator),
+        label: vertex.displayLabel,
+        compactLabel: vertex.displayLabel,
+        length: 0,
+        position: scaleVec(direction, 9.5),
+        colorHint: active ? linkColor : "#94a3b8",
+        nodeScale: active ? 1.05 : 0.62,
+        stateRole: stateGenerators.has(vertex.generator)
+          ? ("in-state" as const)
+          : ("out-of-state" as const),
+        alwaysLabel: active,
+        labelPriority: active ? 175_000 - vertex.generator : -1_000,
+        ghost: !active,
+      };
+    }),
+  ];
+  const edges: SceneEdge[] = links.full.vertices.map((vertex) => {
+    const active = activeGenerators.has(vertex.generator);
+    return {
+      id: `jnw:link-guide:${selectedStateId}:${vertex.generator}`,
+      source: selectedStateId,
+      target: linkVertexNodeId(selectedStateId, vertex.generator),
+      generator: vertex.generator,
+      compactLabel: "",
+      colorHint: active ? linkColor : "#94a3b8",
+      suppressSemanticLabel: true,
+      drawingOnly: true,
+      ghost: !active,
+    };
+  });
+  for (const simplex of link.simplices.filter(
+    (entry) => entry.dimension === 1,
+  )) {
+    const [left, right] = simplex.generators;
+    edges.push({
+      id: `jnw:link-edge:${selectedStateId}:${left}-${right}`,
+      source: linkVertexNodeId(selectedStateId, left),
+      target: linkVertexNodeId(selectedStateId, right),
+      generator: left,
+      compactLabel: "",
+      colorHint: linkColor,
+      suppressSemanticLabel: true,
+      emphasis: "readable-boundary",
+    });
+  }
+  const cells = link.simplices
+    .filter((simplex) => simplex.dimension === 2)
+    .map((simplex) => ({
+      id: `jnw:link-face:${selectedStateId}:${simplex.generators.join("-")}`,
+      generatorPair: [simplex.generators[0], simplex.generators[1]] as [
+        number,
+        number,
+      ],
+      boundaryNodeIds: simplex.generators.map((generator) =>
+        linkVertexNodeId(selectedStateId, generator),
+      ),
+      sourceCellId: simplex.id,
+      dimension: 2,
+      colorHint: linkColor,
+      readabilityRole: "focus" as const,
+    }));
+
+  return {
+    nodes,
+    edges,
+    cells,
+    selectedNodeId: selectedStateId,
+    stateVertexCount: input.summary.states.length,
+    stateCopyCount: input.summary.states.length,
+    readerMode: "exact-skeleton",
+    readerLens: input.readerLens,
+    railGrouping: "individual",
+    bundledRailCount: 0,
+    warnings: [
+      `${link.displayLabel}: generator directions are vertices and commuting cliques supply the exact simplices.`,
+      "The central state and radial spokes locate the link in the quotient; they are drawing guides, not link simplices.",
+      input.readerLens === "level-link"
+        ? "The faithful JNW diagonal map has no level directions, so this link is empty."
+        : "The 3D placement is a drawing of exact link incidence.",
+    ],
+  };
+}
+
+function linkForReaderLens(
+  links: ReturnType<typeof deriveJnwStateLinks>,
+  lens: Extract<
+    JnwReaderLens,
+    "ascending-link" | "descending-link" | "level-link" | "full-link"
+  >,
+): JnwFiniteSimplicialLink {
+  if (lens === "ascending-link") {
+    return links.ascending;
+  }
+  if (lens === "descending-link") {
+    return links.descending;
+  }
+  if (lens === "full-link") {
+    return links.full;
+  }
+  return links.level;
+}
+
+function linkVertexNodeId(stateId: string, generator: number): string {
+  return `jnw:link-vertex:${stateId}:${generator}`;
+}
+
+/**
  * Draws the JNW quotient as one cohesive state-labeled cell complex.
  *
  * The quotient vertices are exactly the states in the legal orbit. A generator
@@ -184,38 +372,33 @@ export function decorateJnwStateQuotientScene(input: {
  * Thus the endpoint of the lifted g-arrow is another state vertex. Relation
  * cells are the alternating state-edge cycles supplied by the JNW diagnostics.
  */
-export function buildJnwStateQuotientYGammaScene(input: {
-  system: CoxeterSystemInput;
-  atlas: YGammaCellAtlas;
-  summary: JnwLegalOrbitSummary;
-  moveSystem?: JnwMoveSystem;
-  selectedStateId?: string;
-  selectedRail?: JnwSelectedRail;
-  selectedRelationId?: string;
-  sheetMode?: JnwQuotientSheetMode;
-  constructionStage?: JnwQuotientConstructionStage;
-  readerMode?: JnwReaderMode;
-  readerLens?: JnwReaderLens;
-  railGrouping?: JnwRailGrouping;
-}): JnwStateQuotientYGammaScene {
+export function buildJnwStateQuotientYGammaScene(
+  input: JnwStateQuotientSceneInput,
+): JnwStateQuotientYGammaScene {
   const selectedStateId = selectedStateIdInSummary(
     input.summary,
     input.selectedStateId,
   );
   const readerMode = input.readerMode ?? "readable-chart";
   const readerLens =
-    input.readerLens ?? (input.selectedRelationId ? "relation" : "state");
+    input.readerLens ?? (input.selectedRelationId ? "relation" : "none");
   const railGrouping = input.railGrouping ?? "individual";
-  const positions = stateQuotientPositions(
+  const statePositions = stateQuotientPositions(
     input.summary.states,
     input.summary.edges,
   );
   const constructionStage = input.constructionStage ?? 4;
+  if (!supportsFourStateCoverSubdivision(input.summary)) {
+    return buildGenericJnwStateQuotientScene(input);
+  }
+  const coverModel = buildJnwFourStateCoverModel(input.atlas, input.summary);
   const selectedRelation =
-    input.summary.rankTwoDiagnostics.find(
-      (diagnostic) => diagnostic.id === input.selectedRelationId,
+    coverModel.relationCells.find(
+      (relation) => relation.id === input.selectedRelationId,
     ) ?? undefined;
-  const selectedRelationEdgeIds = new Set(selectedRelation?.boundaryEdgeIds);
+  const selectedRelationEdgeIds = new Set(
+    selectedRelation?.boundaryRailIds ?? [],
+  );
   const relationFocusActive = selectedRelationEdgeIds.size > 0;
   const stateColorById = new Map(
     input.summary.states.map((state) => [
@@ -225,7 +408,6 @@ export function buildJnwStateQuotientYGammaScene(input: {
   );
   const sheetMode =
     constructionStage <= 3 ? "outlines" : (input.sheetMode ?? "glass");
-  const transitions = transitionByStateAndGenerator(input.summary.edges);
   const selectedRailId = resolveSelectedRailId({
     summary: input.summary,
     selectedStateId,
@@ -239,89 +421,37 @@ export function buildJnwStateQuotientYGammaScene(input: {
       ? [selectedRail.undirectedSource, selectedRail.undirectedTarget]
       : [],
   );
-  const laneOffsets = laneOffsetsByEdge(input.summary.edges);
-  const portPositions =
-    readerMode === "readable-chart" && constructionStage >= 2
-      ? chartPortPositions({
-          system: input.system,
-          summary: input.summary,
-          statePositions: positions,
-          transitions,
-          laneOffsets,
-        })
-      : new Map<string, [number, number, number]>();
   const moveClassBundles =
     railGrouping === "move-class-overview" && input.moveSystem
       ? buildMoveClassBundles(input.summary.edges, input.moveSystem)
       : [];
-  const nodes: SceneNode[] = input.summary.states.map((state, stateIndex) => {
-    const stateName = formatStateName(input.summary, state.id);
-    const selected = state.id === selectedStateId;
-    const activeForGlue =
-      readerLens === "glue" && selectedRailStateIds.has(state.id);
-    const ghostForStateLens =
-      readerLens === "state" && state.id !== selectedStateId;
-    const ghostForGlueLens =
-      readerLens === "glue" && selectedRail !== undefined && !activeForGlue;
-    const stateColor = stateColorById.get(state.id) ?? "#475569";
-    return {
-      id: state.id,
-      label: stateName,
-      compactLabel: stateName,
-      length: 0,
-      localDistance: selected ? 0 : 1,
-      position: positions.get(state.id) ?? [0, 0, 0],
-      colorHint: stateColor,
-      nodeScale: selected || activeForGlue ? 1.5 : 1.08,
-      alwaysLabel: true,
-      labelPriority: 180_000 - stateIndex,
-      ghost: ghostForStateLens || ghostForGlueLens,
-    };
-  });
-  if (readerMode === "readable-chart" && constructionStage >= 2) {
-    for (const state of input.summary.states) {
-      for (let generator = 0; generator < input.system.rank; generator += 1) {
-        const portId = chartPortId(state.id, generator);
-        const portPosition = portPositions.get(portId);
-        if (!portPosition) {
-          continue;
-        }
-        const generatorLabel =
-          input.system.generators[generator]?.label ?? `s${generator}`;
-        const selected = state.id === selectedStateId;
-        const inSelectedGlue =
-          readerLens === "glue" &&
-          selectedRail !== undefined &&
-          selectedRailStateIds.has(state.id) &&
-          selectedRail.generator === generator;
-        const ghostForStateLens =
-          readerLens === "state" && state.id !== selectedStateId;
-        const ghostForGlueLens =
-          readerLens === "glue" &&
-          selectedRail !== undefined &&
-          !inSelectedGlue;
-        nodes.push({
-          id: portId,
-          label: generatorLabel,
-          compactLabel: generatorLabel,
-          length: 0,
-          position: portPosition,
-          isRelationBoundary: true,
-          drawingOnly: true,
-          colorHint: stateColorById.get(state.id) ?? "#64748b",
-          nodeScale: selected || inSelectedGlue ? 0.46 : 0.27,
-          alwaysLabel: false,
-          labelPriority: selected ? 145_000 - generator : 80_000 - generator,
-          ghost:
-            ghostForStateLens ||
-            ghostForGlueLens ||
-            (relationFocusActive &&
-              !selectedRelationUsesPort(selectedRelation, state.id, generator)),
-        });
-      }
-    }
-  }
-
+  const nodes: SceneNode[] = coverModel.stateVertices.map(
+    (state, stateIndex) => {
+      const stateName = formatStateName(input.summary, state.id);
+      const selected = state.id === selectedStateId;
+      const activeForGlue =
+        readerLens === "glue" && selectedRailStateIds.has(state.id);
+      const ghostForStateLens =
+        readerLens === "state" && state.id !== selectedStateId;
+      const ghostForGlueLens =
+        readerLens === "glue" && selectedRail !== undefined && !activeForGlue;
+      const stateColor = stateColorById.get(state.id) ?? "#475569";
+      return {
+        id: state.id,
+        label: stateName,
+        compactLabel: stateName,
+        length: 0,
+        localDistance: selected ? 0 : 1,
+        position: statePositions.get(state.id) ?? [0, 0, 0],
+        colorHint: stateColor,
+        nodeScale: selected || activeForGlue ? 3.2 : 2.5,
+        alwaysLabel: true,
+        labelPriority: 180_000 - stateIndex,
+        labelScale: 5,
+        ghost: ghostForStateLens || ghostForGlueLens,
+      };
+    },
+  );
   const edges: SceneEdge[] = [];
   if (readerMode === "exact-skeleton") {
     if (constructionStage >= 2) {
@@ -336,50 +466,6 @@ export function buildJnwStateQuotientYGammaScene(input: {
       );
     }
   } else if (constructionStage >= 2) {
-    for (const state of input.summary.states) {
-      for (let generator = 0; generator < input.system.rank; generator += 1) {
-        const portId = chartPortId(state.id, generator);
-        if (!portPositions.has(portId)) {
-          continue;
-        }
-        const portInFocusedRelation = selectedRelationUsesPort(
-          selectedRelation,
-          state.id,
-          generator,
-        );
-        const selectedChart = state.id === selectedStateId;
-        const inSelectedGlue =
-          readerLens === "glue" &&
-          selectedRail !== undefined &&
-          selectedRailStateIds.has(state.id) &&
-          selectedRail.generator === generator;
-        const ghostForStateLens =
-          readerLens === "state" && state.id !== selectedStateId;
-        const ghostForGlueLens =
-          readerLens === "glue" &&
-          selectedRail !== undefined &&
-          !inSelectedGlue;
-        edges.push({
-          id: chartSpokeId(state.id, generator),
-          source: state.id,
-          target: portId,
-          generator,
-          compactLabel: "",
-          colorHint: stateColorById.get(state.id),
-          suppressSemanticLabel: true,
-          drawingOnly: true,
-          isRelationBoundary: false,
-          emphasis:
-            selectedChart || inSelectedGlue ? "readable-boundary" : undefined,
-          ghost:
-            ghostForStateLens ||
-            ghostForGlueLens ||
-            (relationFocusActive && !portInFocusedRelation),
-          labelPriority: -5000,
-        });
-      }
-    }
-
     if (railGrouping === "move-class-overview" && moveClassBundles.length > 0) {
       edges.push(
         ...moveClassBundles.map((bundle, index) =>
@@ -393,58 +479,82 @@ export function buildJnwStateQuotientYGammaScene(input: {
         ),
       );
     } else {
-      for (const edge of input.summary.edges) {
-        const touchesSelected =
-          edge.undirectedSource === selectedStateId ||
-          edge.undirectedTarget === selectedStateId;
-        const relationBoundarySegment = selectedRelationEdgeIds.has(edge.id);
-        const ghostForRelationFocus =
-          relationFocusActive && !relationBoundarySegment;
+      const layout = buildJnwCoverSubdivisionLayout({
+        system: input.system,
+        coverModel,
+        statePositions,
+      });
+      for (const midpoint of coverModel.railMidpoints) {
+        const rail = coverModel.rails.find(
+          (entry) => entry.id === midpoint.exactRailId,
+        );
+        const position = layout.midpointPositions.get(midpoint.id);
+        if (!rail || !position) {
+          continue;
+        }
+        const touchesSelected = rail.endpointStateIds.includes(selectedStateId);
         const selectedGlueEdge =
-          readerLens === "glue" && edge.id === selectedRailId;
-        const ghostForGlueLens =
-          readerLens === "glue" &&
-          selectedRailId !== undefined &&
-          !selectedGlueEdge;
-        const ghostForStateLens = readerLens === "state" && !touchesSelected;
-        const generatorLabel =
-          input.system.generators[edge.generator]?.label ??
-          `s${edge.generator}`;
-        const sourcePort = chartPortId(edge.source, edge.generator);
-        const targetPort = chartPortId(edge.target, edge.generator);
-
-        edges.push({
-          id: edge.id,
-          source: sourcePort,
-          target: targetPort,
-          generator: edge.generator,
-          compactLabel: generatorLabel,
+          readerLens === "glue" && rail.id === selectedRailId;
+        const relationBoundarySegment = selectedRelationEdgeIds.has(rail.id);
+        nodes.push({
+          id: midpoint.id,
+          length: 0,
+          position,
+          isRelationBoundary: relationBoundarySegment,
+          drawingOnly: true,
           colorHint: selectedGlueEdge
             ? "#38bdf8"
             : relationBoundarySegment
               ? "#facc15"
-              : touchesSelected
-                ? "#60a5fa"
-                : undefined,
-          alwaysLabel: true,
-          labelLeader: true,
-          labelPriority: selectedGlueEdge
-            ? 185_000 - edge.generator
-            : relationBoundarySegment || touchesSelected
-              ? 170_000 - edge.generator
-              : ghostForRelationFocus || ghostForGlueLens || ghostForStateLens
-                ? -1000
-                : 125_000 - edge.generator,
-          selectedHighlight:
-            selectedGlueEdge || relationBoundarySegment || touchesSelected
-              ? "outline"
-              : undefined,
-          ghost: ghostForRelationFocus || ghostForGlueLens || ghostForStateLens,
-          isRelationBoundary: true,
-          emphasis: "readable-boundary",
-          directed: true,
+              : "#94a3b8",
+          nodeScale: selectedGlueEdge || relationBoundarySegment ? 0.42 : 0.25,
+          ghost:
+            (relationFocusActive && !relationBoundarySegment) ||
+            (readerLens === "glue" &&
+              selectedRailId !== undefined &&
+              !selectedGlueEdge) ||
+            (readerLens === "state" && !touchesSelected),
         });
       }
+      if (constructionStage >= 3) {
+        for (const center of coverModel.relationCenters) {
+          const focused = center.exactRelationCellId === selectedRelation?.id;
+          const relation = coverModel.relationCells.find(
+            (entry) => entry.id === center.exactRelationCellId,
+          );
+          nodes.push({
+            id: center.id,
+            length: 0,
+            position: layout.centerPositions.get(center.id) ?? [0, 0, 0],
+            isRelationBoundary: true,
+            drawingOnly: true,
+            colorHint: focused ? "#facc15" : "#cbd5e1",
+            nodeScale: focused ? 0.45 : 0.24,
+            ghost:
+              (relationFocusActive && !focused) ||
+              (readerLens === "state" &&
+                relation !== undefined &&
+                !relation.boundaryStateIds.includes(selectedStateId)) ||
+              (readerLens === "glue" &&
+                selectedRailId !== undefined &&
+                relation !== undefined &&
+                !relation.boundaryRailIds.includes(selectedRailId)),
+          });
+        }
+      }
+      edges.push(
+        ...buildReadableCoverRails({
+          system: input.system,
+          coverModel,
+          selectedStateId,
+          selectedRailId,
+          selectedRelationEdgeIds,
+          relationFocusActive,
+          readerLens,
+          midpointPositions: layout.midpointPositions,
+          stateColorById,
+        }),
+      );
     }
   }
 
@@ -453,41 +563,45 @@ export function buildJnwStateQuotientYGammaScene(input: {
     railGrouping === "move-class-overview" ||
     constructionStage < 3
       ? []
-      : input.summary.rankTwoDiagnostics
-          .filter((diagnostic) => diagnostic.ok)
-          .map((diagnostic) => {
-            const focused = selectedRelation?.id === diagnostic.id;
-            const visualBoundary = visualBoundaryForDiagnostic(diagnostic);
-            const incidentToSelectedState =
-              diagnostic.boundaryStateIds.includes(selectedStateId);
-            const selectedGlueCell =
-              readerLens === "glue" &&
-              selectedRailId !== undefined &&
-              diagnostic.boundaryEdgeIds.includes(selectedRailId);
-            const ghostForStateLens =
-              readerLens === "state" && !incidentToSelectedState;
-            const ghostForGlueLens =
-              readerLens === "glue" &&
-              selectedRailId !== undefined &&
-              !selectedGlueCell;
-            return {
-              id: diagnostic.id,
-              generatorPair: diagnostic.generatorPair,
-              boundaryNodeIds: visualBoundary,
-              localDistance: incidentToSelectedState || focused ? 0 : 1,
-              sourceCellId: diagnostic.id,
-              drawingOnly: true,
-              readabilityRole:
-                relationFocusActive || readerLens === "relation"
-                  ? focused
+      : coverModel.sectors.map((sector) => {
+          const relation = coverModel.relationCells.find(
+            (entry) => entry.id === sector.exactRelationCellId,
+          );
+          const focused = selectedRelation?.id === sector.exactRelationCellId;
+          const incidentToSelectedState =
+            sector.ownerStateId === selectedStateId;
+          const selectedGlueCell =
+            selectedRailId !== undefined &&
+            (sector.incomingRailId === selectedRailId ||
+              sector.outgoingRailId === selectedRailId);
+          return {
+            id: sector.id,
+            generatorPair: relation?.generatorPair ?? [0, 0],
+            boundaryNodeIds: [...sector.subdivisionBoundaryIds],
+            localDistance: incidentToSelectedState || focused ? 0 : 1,
+            sourceCellId: sector.exactRelationCellId,
+            readabilityRole:
+              relationFocusActive || readerLens === "relation"
+                ? focused
+                  ? "focus"
+                  : "context"
+                : readerLens === "state"
+                  ? incidentToSelectedState
                     ? "focus"
                     : "context"
-                  : ghostForStateLens || ghostForGlueLens
-                    ? "context"
-                    : "incident",
-              colorHint: focused ? "#facc15" : undefined,
-            };
-          });
+                  : readerLens === "glue"
+                    ? selectedGlueCell
+                      ? "focus"
+                      : "context"
+                    : undefined,
+            colorHint: focused
+              ? "#facc15"
+              : (stateColorById.get(sector.ownerStateId) ?? "#94a3b8"),
+          };
+        });
+  const sourceCellIdByRenderedId = new Map(
+    coverModel.sectors.map((sector) => [sector.id, sector.exactRelationCellId]),
+  );
 
   return {
     nodes,
@@ -500,21 +614,363 @@ export function buildJnwStateQuotientYGammaScene(input: {
     readerLens,
     railGrouping,
     bundledRailCount: moveClassBundles.length,
+    coverModel,
+    sourceCellIdByRenderedId,
     warnings: [
       readerMode === "exact-skeleton"
         ? "JNW exact skeleton: only state vertices S_i and exact generator transition rails are shown."
-        : "JNW readable chart drawing: quotient vertices are the state vertices S_i; small generator handles are drawing aids for local Y_Gamma charts.",
-      "Each labeled rail represents the exact generator edge S_i -> S_i xor m_g; drawing handles and offsets do not change the state/move data.",
+        : "Four-chart cover drawing: colored sectors are the four lifts of the Y_Gamma chamber sectors, glued along shared rail midpoints and relation centers.",
+      "Each labeled rail represents one exact generator edge S_i -> S_i xor m_g. It is split at one shared subdivision midpoint only to expose the gluing.",
       railGrouping === "move-class-overview"
         ? "Bundled drawing: move-class overview groups identical move subsets. Expand to individual rails to see the full generator 1-skeleton."
         : "Individual rail drawing: every generator transition is shown with its own semantic label.",
       constructionStageWarning(constructionStage),
       sheetModeWarning(sheetMode),
-      "Rank-two relation diagnostics are rendered on separated rails so the commuting-square attaching cycles remain legible.",
-      "The coordinates are a drawing convention, not an affine or hyperbolic embedding.",
+      `Cover incidence check: ${coverModel.invariants.ok ? "passed" : "failed"}; ${coverModel.invariants.counts.states} states, ${coverModel.invariants.counts.rails} rails, ${coverModel.invariants.counts.relationCells} relation squares, and ${coverModel.invariants.counts.sectors} state-owned sectors.`,
+      "The cover incidence and projection to Y_Gamma are exact in-repo data. The 3D coordinates, cell spreading, and colors are drawing conventions.",
       ...input.atlas.warnings,
     ],
   };
+}
+
+function supportsFourStateCoverSubdivision(
+  summary: JnwLegalOrbitSummary,
+): boolean {
+  return (
+    summary.rightAngled &&
+    summary.orbitComplete &&
+    summary.states.length === 4 &&
+    summary.rankTwoDiagnostics.length > 0 &&
+    summary.rankTwoDiagnostics.every(
+      (diagnostic) =>
+        diagnostic.ok &&
+        diagnostic.m === 2 &&
+        diagnostic.boundaryStateIds.length === 4 &&
+        new Set(diagnostic.boundaryStateIds).size === 4,
+    )
+  );
+}
+
+/**
+ * Experimental JNW inputs need a renderer even when they do not admit the
+ * cube-specific four-sector subdivision. This view uses only the supplied
+ * state orbit, exact transition edges, and closed diagnostic boundaries.
+ */
+function buildGenericJnwStateQuotientScene(
+  input: JnwStateQuotientSceneInput,
+): JnwStateQuotientYGammaScene {
+  const selectedStateId = selectedStateIdInSummary(
+    input.summary,
+    input.selectedStateId,
+  );
+  const readerMode = input.readerMode ?? "exact-skeleton";
+  const readerLens =
+    input.readerLens ?? (input.selectedRelationId ? "relation" : "state");
+  const railGrouping = input.railGrouping ?? "individual";
+  const constructionStage = input.constructionStage ?? 4;
+  const selectedRailId = resolveSelectedRailId({
+    summary: input.summary,
+    selectedStateId,
+    selectedRail: input.selectedRail,
+  });
+  const positions = stateQuotientPositions(
+    input.summary.states,
+    input.summary.edges,
+  );
+  const selectedRelation = input.summary.rankTwoDiagnostics.find(
+    (diagnostic) => diagnostic.id === input.selectedRelationId,
+  );
+  const selectedRelationEdgeIds = new Set(
+    selectedRelation?.boundaryEdgeIds ?? [],
+  );
+  const relationFocusActive = selectedRelationEdgeIds.size > 0;
+  const nodes = input.summary.states.map((state, index) => {
+    const selected = state.id === selectedStateId;
+    return {
+      id: state.id,
+      label: formatStateName(input.summary, state.id),
+      compactLabel: formatStateName(input.summary, state.id),
+      length: 0,
+      localDistance: selected ? 0 : 1,
+      position: positions.get(state.id) ?? ([0, 0, 0] as Vec3),
+      colorHint: jnwStateChartColor(input.summary, state.id),
+      nodeScale: selected ? 1.45 : 1.05,
+      alwaysLabel: true,
+      labelPriority: 180_000 - index,
+      ghost: readerLens === "state" && !selected,
+    };
+  });
+  const moveClassBundles =
+    railGrouping === "move-class-overview" && input.moveSystem
+      ? buildMoveClassBundles(input.summary.edges, input.moveSystem)
+      : [];
+  const edges: SceneEdge[] = [];
+  if (constructionStage >= 2) {
+    if (railGrouping === "move-class-overview" && moveClassBundles.length > 0) {
+      const stateColorById = new Map(
+        input.summary.states.map((state) => [
+          state.id,
+          jnwStateChartColor(input.summary, state.id),
+        ]),
+      );
+      edges.push(
+        ...moveClassBundles.map((bundle, index) =>
+          buildMoveClassBundleEdge({
+            bundle,
+            index,
+            selectedStateId,
+            selectedRailId,
+            stateColorById,
+          }),
+        ),
+      );
+    } else {
+      edges.push(
+        ...buildExactSkeletonRails({
+          system: input.system,
+          summary: input.summary,
+          selectedStateId,
+          selectedRailId,
+          readerLens,
+        }).map((edge) => ({
+          ...edge,
+          ghost:
+            edge.ghost ||
+            (relationFocusActive && !selectedRelationEdgeIds.has(edge.id)),
+          selectedHighlight: selectedRelationEdgeIds.has(edge.id)
+            ? "outline"
+            : edge.selectedHighlight,
+        })),
+      );
+    }
+  }
+  const cells =
+    readerMode === "exact-skeleton" ||
+    railGrouping === "move-class-overview" ||
+    constructionStage < 3
+      ? []
+      : input.summary.rankTwoDiagnostics
+          .filter((diagnostic) => diagnostic.ok)
+          .map((diagnostic) => ({
+            id: diagnostic.id,
+            generatorPair: diagnostic.generatorPair,
+            boundaryNodeIds: [...diagnostic.boundaryStateIds],
+            sourceCellId: diagnostic.id,
+            drawingOnly: true,
+            readabilityRole:
+              selectedRelation?.id === diagnostic.id
+                ? ("focus" as const)
+                : relationFocusActive
+                  ? ("context" as const)
+                  : ("incident" as const),
+          }));
+
+  return {
+    nodes,
+    edges,
+    cells,
+    selectedNodeId: selectedStateId,
+    stateVertexCount: input.summary.states.length,
+    stateCopyCount: input.summary.states.length,
+    readerMode,
+    readerLens,
+    railGrouping,
+    bundledRailCount: moveClassBundles.length,
+    sourceCellIdByRenderedId: new Map(
+      cells.map((cell) => [cell.id, cell.sourceCellId ?? cell.id]),
+    ),
+    warnings: [
+      "Experimental state-orbit drawing: this input does not satisfy the four-state RACG hypotheses used by the faithful cube-cover subdivision.",
+      "State vertices, transition rails, and supplied closed relation boundaries are retained; polygon placement is a drawing convention.",
+      constructionStageWarning(constructionStage),
+      ...input.atlas.warnings,
+    ],
+  };
+}
+
+interface JnwCoverSubdivisionLayout {
+  midpointPositions: Map<string, Vec3>;
+  centerPositions: Map<string, Vec3>;
+}
+
+/**
+ * Places exact subdivision vertices without changing cover incidence. Rail
+ * midpoints separate parallel generator edges; relation centers fan the twelve
+ * lifted squares around the four state vertices.
+ */
+function buildJnwCoverSubdivisionLayout(input: {
+  system: CoxeterSystemInput;
+  coverModel: JnwFourStateCoverModel;
+  statePositions: Map<string, Vec3>;
+}): JnwCoverSubdivisionLayout {
+  const midpointPositions = new Map<string, Vec3>();
+  const centerPositions = new Map<string, Vec3>();
+  const generatorDirections = gammaGeneratorLayout(input.system);
+  const railsByStatePair = new Map<string, typeof input.coverModel.rails>();
+  for (const rail of input.coverModel.rails) {
+    const key = [...rail.endpointStateIds].sort().join("|");
+    railsByStatePair.set(key, [...(railsByStatePair.get(key) ?? []), rail]);
+  }
+
+  for (const rails of railsByStatePair.values()) {
+    const ordered = [...rails].sort(
+      (left, right) =>
+        left.generator - right.generator || left.id.localeCompare(right.id),
+    );
+    const laneCenter = (ordered.length - 1) / 2;
+    ordered.forEach((rail, index) => {
+      const source = input.statePositions.get(rail.endpointStateIds[0]) ?? [
+        0, 0, 0,
+      ];
+      const target = input.statePositions.get(rail.endpointStateIds[1]) ?? [
+        0, 0, 0,
+      ];
+      const direction = normalizeVec(subVec(target, source));
+      const side = stableSideVector(direction, rail.generator);
+      const generatorDirection = normalizeVec(
+        generatorDirections.get(rail.generator) ?? [0, 0, 1],
+      );
+      const midpoint = averageVec([source, target]);
+      const lane = (index - laneCenter) * 3.3;
+      const opened = addVec(
+        midpoint,
+        addVec(scaleVec(side, lane), scaleVec(generatorDirection, 4.2)),
+      );
+      midpointPositions.set(rail.midpointId, opened);
+    });
+  }
+
+  input.coverModel.relationCells.forEach((relation, relationIndex) => {
+    const boundaryMidpoints = relation.boundaryRailIds
+      .map((railId) =>
+        input.coverModel.rails.find((rail) => rail.id === railId),
+      )
+      .map((rail) =>
+        rail ? midpointPositions.get(rail.midpointId) : undefined,
+      )
+      .filter((position): position is Vec3 => position !== undefined);
+    const boundaryCenter = averageVec(boundaryMidpoints);
+    const [left, right] = relation.generatorPair;
+    const leftDirection = generatorDirections.get(left) ?? [1, 0, 0];
+    const rightDirection = generatorDirections.get(right) ?? [0, 1, 0];
+    const pairDirection = normalizeVec(addVec(leftDirection, rightDirection));
+    const normal = relationNormal(boundaryMidpoints, pairDirection);
+    const layer = ((relationIndex % 3) - 1) * 1.8;
+    centerPositions.set(
+      relation.centerId,
+      addVec(
+        boundaryCenter,
+        addVec(scaleVec(pairDirection, 8.5), scaleVec(normal, layer)),
+      ),
+    );
+  });
+
+  return { midpointPositions, centerPositions };
+}
+
+function buildReadableCoverRails(input: {
+  system: CoxeterSystemInput;
+  coverModel: JnwFourStateCoverModel;
+  selectedStateId: string;
+  selectedRailId: string | undefined;
+  selectedRelationEdgeIds: Set<string>;
+  relationFocusActive: boolean;
+  readerLens: JnwReaderLens;
+  midpointPositions: Map<string, Vec3>;
+  stateColorById: Map<string, string>;
+}): SceneEdge[] {
+  return input.coverModel.rails.flatMap((rail) => {
+    const midpointPosition = input.midpointPositions.get(rail.midpointId);
+    const touchesSelected = rail.endpointStateIds.includes(
+      input.selectedStateId,
+    );
+    const relationBoundary = input.selectedRelationEdgeIds.has(rail.id);
+    const selectedGlue =
+      input.readerLens === "glue" && rail.id === input.selectedRailId;
+    const ghost =
+      (input.relationFocusActive && !relationBoundary) ||
+      (input.readerLens === "glue" &&
+        input.selectedRailId !== undefined &&
+        !selectedGlue) ||
+      (input.readerLens === "state" && !touchesSelected);
+    const focusColor = selectedGlue
+      ? "#38bdf8"
+      : relationBoundary
+        ? "#facc15"
+        : input.readerLens === "state" && touchesSelected
+          ? "#60a5fa"
+          : undefined;
+    const label =
+      input.system.generators[rail.generator]?.label ?? `s${rail.generator}`;
+    const priority = selectedGlue
+      ? 185_000 - rail.generator
+      : relationBoundary || touchesSelected
+        ? 170_000 - rail.generator
+        : ghost
+          ? -1_000
+          : 125_000 - rail.generator;
+    const common = {
+      generator: rail.generator,
+      ghost,
+      isRelationBoundary: true,
+      emphasis: "readable-boundary" as const,
+      selectedHighlight:
+        selectedGlue || relationBoundary || touchesSelected
+          ? ("outline" as const)
+          : undefined,
+      drawingOnly: true,
+    };
+    return [
+      {
+        ...common,
+        id: `${rail.id}:from:${rail.sourceStateId}`,
+        source: rail.sourceStateId,
+        target: rail.midpointId,
+        colorHint: focusColor ?? input.stateColorById.get(rail.sourceStateId),
+        compactLabel: label,
+        alwaysLabel: true,
+        labelLeader: true,
+        labelAnchor: midpointPosition,
+        labelPriority: priority,
+        labelScale: 4,
+      },
+      {
+        ...common,
+        id: `${rail.id}:continuation`,
+        source: rail.midpointId,
+        target: rail.targetStateId,
+        colorHint: focusColor ?? input.stateColorById.get(rail.targetStateId),
+        compactLabel: "",
+        suppressSemanticLabel: true,
+        labelPriority: -10_000,
+        directed: true,
+      },
+    ];
+  });
+}
+
+function averageVec(vectors: readonly Vec3[]): Vec3 {
+  if (vectors.length === 0) {
+    return [0, 0, 0];
+  }
+  const sum = vectors.reduce<Vec3>(
+    (accumulator, vector) => addVec(accumulator, vector),
+    [0, 0, 0],
+  );
+  return scaleVec(sum, 1 / vectors.length);
+}
+
+function relationNormal(points: readonly Vec3[], fallback: Vec3): Vec3 {
+  if (points.length >= 3) {
+    const normal = crossVec(
+      subVec(points[1], points[0]),
+      subVec(points[2], points[0]),
+    );
+    if (Math.hypot(...normal) > 0.000001) {
+      return normalizeVec(normal);
+    }
+  }
+  return stableSideVector(fallback, 0);
 }
 
 export function buildJnwGammaStateDiagram(
@@ -604,6 +1060,7 @@ function buildExactSkeletonRails(input: {
       compactLabel:
         input.system.generators[edge.generator]?.label ?? `s${edge.generator}`,
       alwaysLabel: !ghostForStateLens && !ghostForGlueLens,
+      labelScale: 3.4,
       labelLeader: true,
       labelPriority:
         selectedGlueEdge || touchesSelected
@@ -766,29 +1223,6 @@ function statePairKey(edge: JnwOrbitEdge): string {
   return `${edge.undirectedSource}|${edge.undirectedTarget}`;
 }
 
-function chartPortId(stateId: string, generator: number): string {
-  return `jnw:chart-port:${stateId}:${generator}`;
-}
-
-function chartSpokeId(stateId: string, generator: number): string {
-  return `jnw:chart-spoke:${stateId}:${generator}`;
-}
-
-function transitionKey(stateId: string, generator: number): string {
-  return `${stateId}:${generator}`;
-}
-
-function transitionByStateAndGenerator(
-  edges: readonly JnwOrbitEdge[],
-): Map<string, JnwOrbitEdge> {
-  const transitions = new Map<string, JnwOrbitEdge>();
-  for (const edge of edges) {
-    transitions.set(transitionKey(edge.undirectedSource, edge.generator), edge);
-    transitions.set(transitionKey(edge.undirectedTarget, edge.generator), edge);
-  }
-  return transitions;
-}
-
 function laneOffsetsByEdge(
   edges: readonly JnwOrbitEdge[],
 ): Map<string, number> {
@@ -800,108 +1234,6 @@ function laneOffsetsByEdge(
     });
   }
   return offsets;
-}
-
-function chartPortPositions(input: {
-  system: CoxeterSystemInput;
-  summary: JnwLegalOrbitSummary;
-  statePositions: Map<string, [number, number, number]>;
-  transitions: Map<string, JnwOrbitEdge>;
-  laneOffsets: Map<string, number>;
-}): Map<string, [number, number, number]> {
-  const ports = new Map<string, [number, number, number]>();
-  const gammaLayout = gammaGeneratorLayout(input.system);
-  for (const state of input.summary.states) {
-    const statePosition = input.statePositions.get(state.id);
-    if (!statePosition) {
-      continue;
-    }
-    const chartFrame = chartFrameForState(statePosition);
-    for (let generator = 0; generator < input.system.rank; generator += 1) {
-      const transition = input.transitions.get(
-        transitionKey(state.id, generator),
-      );
-      if (!transition) {
-        continue;
-      }
-      const otherState =
-        transition.undirectedSource === state.id
-          ? transition.undirectedTarget
-          : transition.undirectedSource;
-      const targetPosition = input.statePositions.get(otherState);
-      if (!targetPosition) {
-        continue;
-      }
-      const towardTarget = normalizeVec(subVec(targetPosition, statePosition));
-      const localGamma = normalizeVec(gammaLayout.get(generator) ?? [0, 0, 1]);
-      const openedGamma = normalizeVec(
-        addVec(
-          addVec(
-            scaleVec(chartFrame.tangentA, localGamma[0]),
-            scaleVec(chartFrame.tangentB, localGamma[1]),
-          ),
-          scaleVec(chartFrame.normal, localGamma[2] * 0.82),
-        ),
-      );
-      const side = stableSideVector(towardTarget, generator);
-      const lane = input.laneOffsets.get(transition.id) ?? 0;
-      const lift = ((generator % 3) - 1) * 0.42 + lane * 0.2;
-      const portPosition = addVec(
-        statePosition,
-        addVec(
-          addVec(scaleVec(chartFrame.normal, 3.2), scaleVec(openedGamma, 4.9)),
-          addVec(
-            addVec(scaleVec(towardTarget, 1.4), scaleVec(side, lane * 1.35)),
-            [0, 0, lift],
-          ),
-        ),
-      );
-      ports.set(chartPortId(state.id, generator), portPosition);
-    }
-  }
-  return ports;
-}
-
-function selectedRelationUsesPort(
-  relation: JnwRankTwoDiagnostic | undefined,
-  stateId: string,
-  generator: number,
-): boolean {
-  if (!relation) {
-    return false;
-  }
-  return relation.boundaryStateIds.some((boundaryStateId, step) => {
-    const boundaryGenerator =
-      step % 2 === 0 ? relation.generatorPair[0] : relation.generatorPair[1];
-    const nextStateId =
-      relation.boundaryStateIds[(step + 1) % relation.boundaryStateIds.length];
-    return (
-      boundaryGenerator === generator &&
-      (boundaryStateId === stateId || nextStateId === stateId)
-    );
-  });
-}
-
-function visualBoundaryForDiagnostic(
-  diagnostic: JnwRankTwoDiagnostic,
-): string[] {
-  const boundary: string[] = [];
-  for (let step = 0; step < diagnostic.boundaryStateIds.length; step += 1) {
-    const currentStateId = diagnostic.boundaryStateIds[step];
-    const nextStateId =
-      diagnostic.boundaryStateIds[
-        (step + 1) % diagnostic.boundaryStateIds.length
-      ];
-    const generator =
-      step % 2 === 0
-        ? diagnostic.generatorPair[0]
-        : diagnostic.generatorPair[1];
-    boundary.push(
-      chartPortId(currentStateId, generator),
-      chartPortId(nextStateId, generator),
-    );
-  }
-  return boundary;
 }
 
 function selectedStateIdInSummary(
@@ -976,23 +1308,6 @@ function stateQuotientPositions(
     ]);
   });
   return positions;
-}
-
-interface ChartFrame {
-  normal: Vec3;
-  tangentA: Vec3;
-  tangentB: Vec3;
-}
-
-function chartFrameForState(position: Vec3): ChartFrame {
-  // The exact quotient has only state vertices. This frame is purely a drawing
-  // convention: it opens the local generator chart around each state so the
-  // four charts do not collapse into one almost-planar sheet.
-  const normal = normalizeVec(addVec(position, [0, 0, 7]));
-  const seed: Vec3 = Math.abs(normal[2]) > 0.82 ? [0, 1, 0] : [0, 0, 1];
-  const tangentA = normalizeVec(crossVec(seed, normal));
-  const tangentB = normalizeVec(crossVec(normal, tangentA));
-  return { normal, tangentA, tangentB };
 }
 
 function fourStateCycleOrder(

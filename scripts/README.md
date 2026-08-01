@@ -67,9 +67,10 @@ Current status:
 - `tumarkin_8facet_eps.py` parses Tumarkin's arXiv EPS artwork for Table 4.10
   into `scripts/data/tumarkin_8facet_transcription.json`. `tumarkin_8facet_solve.py`
   solves the hidden dotted-edge weights from the determinant/rank equations.
-  `certify_tumarkin_8facet.py` writes and validates the 15 bundled
-  `tumarkin_5d_8facet_g11411_*.json` examples, checking the transcription,
-  algebraic dotted weights, and normal-Gram rank/signature diagnostics. Install
+  `certify_tumarkin_8facet.py` writes and validates all 16 bundled
+  `tumarkin_5d_8facet_*.json` examples, including the unique `G12221` case,
+  checking the transcription, algebraic dotted weights, and normal-Gram
+  rank/signature diagnostics. Install
   `requirements-ci.txt` first if the local Python does not already provide
   SymPy.
 - `coxiter_check_compact.py` prepares deterministic CoxIter graph input for the

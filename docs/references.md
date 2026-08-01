@@ -17,8 +17,9 @@ This file records sources that support the viewer's mathematical and engineering
   - Exact bibliographic details should be filled in before this source is used for an implementation claim.
 
 - Kasia Jankiewicz, Sergey Norin, and Daniel T. Wise, "Virtually Fibering Right-Angled Coxeter Groups," arXiv:1711.11505.
-  - Supports `jnw_cube_graph.json`: Section 2 defines systems of moves, legal states, legal orbits, and strongly legal states; Section 4 explains the state-dependent edge directions used for ascending/descending links; Section 5.a.1 uses the 1-skeleton of the 3-cube and the bipartition move system as a legal-system example.
-  - The bundled example stores the cube graph as a right-angled Coxeter system, with `m=2` exactly along cube edges. The app's JNW workflow checks the move property and legal orbit in-browser; it does not attach an external subgroup/coset certificate.
+  - Supports `jnw_cube_graph.json`: Section 2 defines systems of moves, legal states, legal orbits, and strongly legal states; Section 4 defines the commutator cover, the diagonal map, state-dependent edge directions, and ascending/descending links; the cube example uses the 1-skeleton of the 3-cube and its bipartition moves.
+  - The paper's finite complex is the commutator cover `W' \ Sigma`, with 256 vertices in the eight-generator cube case. The app's four-state reader is the further quotient `ker(mu o alpha) \ Sigma`; this move-kernel factor is a project construction derived from the paper's move map and is labeled separately.
+  - The bundled example stores the cube graph as a right-angled Coxeter system, with `m=2` exactly along cube edges. The app checks the move property, legal orbit, cover incidence, and induced flag links in-repo; it does not attach an external subgroup/coset or fibering certificate.
   - arXiv page: https://arxiv.org/abs/1711.11505
 
 - Matthieu Jacquemet and Steven T. Tschantz, "All hyperbolic Coxeter n-cubes," arXiv:1803.10462; Journal of Combinatorial Theory, Series A 158 (2018), 387-406.
@@ -43,12 +44,17 @@ This file records sources that support the viewer's mathematical and engineering
   - PDF: https://msp.org/agt/2013/13-2/agt-v13-n2-p05-s.pdf
 
 - Pavel Tumarkin, "Compact Hyperbolic Coxeter n-Polytopes with n+3 Facets," Electronic Journal of Combinatorics 14 (2007), R69.
-  - Supports the eight-facet 5D catalogue in `src/catalogue/tumarkin_5d_8facet_catalogue.json`: Lemma 4.7 states that there are 15 compact hyperbolic Coxeter 5-polytopes with 8 facets and Gale diagram `G11411`; Table 4.10 draws their Coxeter diagrams.
-  - The repository transcribes the Table 4.10 diagrams from the arXiv EPS artwork `pic/5/5_n.eps` into `scripts/data/tumarkin_8facet_transcription.json`; the bundled `tumarkin_5d_8facet_g11411_*.json` examples are generated from that transcription.
-  - `scripts/certify_tumarkin_8facet.py` solves the hidden dotted-edge weights from the determinant/rank equations described by Lemma 4.7, stores them as algebraic real records with decimal caches, and checks normal-Gram rank/signature diagnostics before marking these examples `certified`.
+  - Supports the complete compact eight-facet 5D catalogue in `src/catalogue/tumarkin_5d_8facet_catalogue.json`: the dimension-five section gives one `G12221` case and 15 `G11411` cases, and Table 4.10 draws all 16 Coxeter diagrams.
+  - The repository transcribes the Table 4.10 diagrams from the arXiv EPS artwork `pic/5/5_n.eps` into `scripts/data/tumarkin_8facet_transcription.json`; the bundled `tumarkin_5d_8facet_*.json` examples are generated from that transcription.
+  - `scripts/certify_tumarkin_8facet.py` solves the hidden dotted-edge weights from the determinant/rank equations, checks the `G12221` weight against Tumarkin's printed exact formula, stores algebraic-real records with decimal caches, and checks normal-Gram rank/signature diagnostics before marking these examples `certified`.
   - CoxIter artifacts, when present in `scripts/certificates/coxiter/`, are treated as an independent diagram-checker scope. They are separate from the exact in-repo dotted-weight and Gram diagnostics.
   - Journal page: https://www.combinatorics.org/ojs/index.php/eljc/article/view/v14i1r69
   - arXiv page: https://arxiv.org/abs/math/0406226
+
+- Lizi Guo, Jiming Ma, Yourong Zang, and Fangting Zheng, "Several families of incommensurable noncompact hyperbolic Coxeter polytopes" (2026).
+  - Independently enumerates all finite-volume hyperbolic Coxeter 5-polytopes with eight facets and reports exactly 16 compact cases. Its census separates these as one compact case over combinatorial type `P37` and 15 over `P39`, agreeing with Tumarkin's total.
+  - This paper is a catalogue cross-check. The bundled Coxeter matrices and exact dotted weights are still transcribed and certified against Tumarkin's source.
+  - arXiv page: https://arxiv.org/abs/2607.14715
 
 ## Optional Exact Backends
 

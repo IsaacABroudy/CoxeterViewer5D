@@ -3,6 +3,7 @@ import {
   computeRankTwoDavisCells,
   deriveVisibleHigherDavisCells,
   enumerateSphericalSubsets,
+  type SphericalSubsetEnumerationResult,
 } from "../davis";
 import type {
   CayleyGenerationOptions,
@@ -12,6 +13,7 @@ import type {
 
 export interface GenerationPipelineResult {
   ball: GeneratedCayleyBall;
+  sphericalSubsets: SphericalSubsetEnumerationResult;
   warnings: string[];
 }
 
@@ -49,5 +51,9 @@ export function generateViewerBall(
     },
   };
 
-  return { ball, warnings: [...warnings, ...higher.warnings] };
+  return {
+    ball,
+    sphericalSubsets,
+    warnings: [...warnings, ...higher.warnings],
+  };
 }

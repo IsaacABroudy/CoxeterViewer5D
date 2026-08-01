@@ -18,6 +18,50 @@ export interface DefiningGraphLegendEntry {
   count: number;
 }
 
+export interface DefiningGraphNeighborRecord {
+  generator: number;
+  nodeId: string;
+  label: string;
+  entry: Exclude<CoxeterMatrixEntry, 1>;
+  edgeId?: string;
+}
+
+export interface DefiningGraphIncidenceClass {
+  entry: Exclude<CoxeterMatrixEntry, 1>;
+  label: string;
+  color: string;
+  drawnInGamma: boolean;
+  neighbors: DefiningGraphNeighborRecord[];
+}
+
+export interface DefiningGraphVertexIncidence {
+  generator: number;
+  nodeId: string;
+  label: string;
+  finiteDegree: number;
+  totalOtherGenerators: number;
+  accountedNeighborCount: number;
+  isCompletePartition: boolean;
+  classes: DefiningGraphIncidenceClass[];
+}
+
+export interface DefiningGraphRelationComponent {
+  id: string;
+  generators: number[];
+  generatorLabels: string[];
+  edgeIds: string[];
+}
+
+export interface DefiningGraphRelationOrderComponents {
+  relationOrder: number;
+  label: string;
+  color: string;
+  edgeCount: number;
+  components: DefiningGraphRelationComponent[];
+  isolatedGenerators: number[];
+  isolatedGeneratorLabels: string[];
+}
+
 export type DefiningGraphLayoutMode = "3d" | "planar";
 
 export interface DefiningGraphPlanaritySummary {
@@ -33,12 +77,24 @@ export interface DefiningGraphScene {
   nodes: SceneNode[];
   edges: SceneEdge[];
   records: DefiningGraphEdgeRecord[];
+  incidencePartitions: DefiningGraphVertexIncidence[];
+  relationOrderComponents: DefiningGraphRelationOrderComponents[];
   legend: DefiningGraphLegendEntry[];
   charneyDavisCurvature: number;
   selectedNodeId: string | undefined;
   warnings: string[];
   rightAnglePairCount: number;
   layoutMode: DefiningGraphLayoutMode;
+  planarity: DefiningGraphPlanaritySummary;
+}
+
+interface DefiningGraphTopology {
+  records: DefiningGraphEdgeRecord[];
+  incidencePartitions: DefiningGraphVertexIncidence[];
+  relationOrderComponents: DefiningGraphRelationOrderComponents[];
+  legend: DefiningGraphLegendEntry[];
+  charneyDavisCurvature: number;
+  rightAnglePairCount: number;
   planarity: DefiningGraphPlanaritySummary;
 }
 
@@ -50,6 +106,17 @@ const PLANAR_LABEL_FRACTIONS = [
   0.8, 0.84, 0.88,
 ];
 const PLANAR_LABEL_OFFSETS = [0.5, -0.5, 0.72, -0.72, 0.94, -0.94];
+
+// Parsed Coxeter systems are immutable app data. Caching by object identity
+// keeps planarity and incidence analysis out of layout/theme-only updates.
+const definingGraphTopologyCache = new WeakMap<
+  CoxeterSystemInput,
+  DefiningGraphTopology
+>();
+const planarLabelPlacementCache = new WeakMap<
+  DefiningGraphTopology,
+  Map<string, PlanarLabelPlacement>
+>();
 
 /**
  * Builds the Coxeter defining graph Gamma as a renderer scene.
@@ -69,6 +136,7 @@ export function buildDefiningGraphScene(
   } = {},
 ): DefiningGraphScene {
   const layoutMode = options.layoutMode ?? "3d";
+  const topology = buildDefiningGraphTopology(system);
   const highlightedGenerators =
     options.highlightedGenerators === undefined
       ? undefined
@@ -106,42 +174,14 @@ export function buildDefiningGraphScene(
         ? planarGeneratorDirection(index, system.rank)
         : generatorDirection(index, system.rank),
   }));
-  const records: DefiningGraphEdgeRecord[] = [];
-  let rightAnglePairCount = 0;
-
-  for (let left = 0; left < system.rank; left += 1) {
-    for (let right = left + 1; right < system.rank; right += 1) {
-      const entry = system.coxeterMatrix[left]?.[right];
-      if (entry === 1 || entry === undefined) {
-        continue;
-      }
-      if (entry === "inf") {
-        continue;
-      }
-      if (entry === 2) {
-        rightAnglePairCount += 1;
-      }
-      records.push({
-        id: definingGraphEdgeId(left, right),
-        sourceGenerator: left,
-        targetGenerator: right,
-        entry,
-        label: relationLabel(entry),
-        color: relationColor(entry),
-      });
-    }
-  }
-  const planarity = summarizePlanarity(system, records);
-  const charneyDavisCurvature =
-    1 - system.generators.length / 2 + records.length / 4;
   const planarLabelPlacements =
     layoutMode === "planar"
-      ? buildPlanarLabelPlacements(records, system.rank)
+      ? planarLabelPlacementsFor(topology, system.rank)
       : new Map<string, PlanarLabelPlacement>();
 
   return {
     nodes,
-    edges: records.map((record, index) => ({
+    edges: topology.records.map((record, index) => ({
       id: record.id,
       source: definingGraphNodeId(record.sourceGenerator),
       target: definingGraphNodeId(record.targetGenerator),
@@ -165,9 +205,11 @@ export function buildDefiningGraphScene(
       emphasis: "readable-boundary",
       selectedHighlight: "outline",
     })),
-    records,
-    legend: relationLegend(records),
-    charneyDavisCurvature,
+    records: topology.records,
+    incidencePartitions: topology.incidencePartitions,
+    relationOrderComponents: topology.relationOrderComponents,
+    legend: topology.legend,
+    charneyDavisCurvature: topology.charneyDavisCurvature,
     selectedNodeId: highlightedGenerators ? undefined : nodes[0]?.id,
     warnings: [
       "Gamma is the Coxeter defining graph: vertices are generators and edges record finite rank-two Coxeter relations.",
@@ -176,19 +218,266 @@ export function buildDefiningGraphScene(
             `${options.highlightLabel} is highlighted on Gamma: colored generator vertices are in the selected JNW state; gray vertices are outside that state.`,
           ]
         : []),
-      `${rightAnglePairCount} m=2 commuting pair${
-        rightAnglePairCount === 1 ? " is" : "s are"
+      `${topology.rightAnglePairCount} m=2 commuting pair${
+        topology.rightAnglePairCount === 1 ? " is" : "s are"
       } drawn intentionally, even though standard Coxeter diagrams usually omit them.`,
       "Pairs with m=inf are omitted because they do not contribute a finite Coxeter relation edge.",
       layoutMode === "planar"
         ? "Gamma planar mode is a 2D drawing of the defining graph. If an obstruction is present, crossings are unavoidable in any plane drawing."
         : "The 3D placement of Gamma is a drawing convention; it is not the Davis complex or Y_Gamma.",
-      planarity.reason,
+      topology.planarity.reason,
     ],
-    rightAnglePairCount,
+    rightAnglePairCount: topology.rightAnglePairCount,
     layoutMode,
-    planarity,
+    planarity: topology.planarity,
   };
+}
+
+/**
+ * Computes the finite relation graph and the relation-order partition at each
+ * generator. For a fixed generator i, every j != i belongs to exactly one
+ * class N_m(i), including the omitted m=inf class.
+ */
+export function buildDefiningGraphTopology(
+  system: CoxeterSystemInput,
+): DefiningGraphTopology {
+  const cached = definingGraphTopologyCache.get(system);
+  if (cached) {
+    return cached;
+  }
+
+  const records: DefiningGraphEdgeRecord[] = [];
+  const neighborsByGenerator = Array.from(
+    { length: system.rank },
+    () =>
+      new Map<Exclude<CoxeterMatrixEntry, 1>, DefiningGraphNeighborRecord[]>(),
+  );
+  const finiteEntries = new Set<number>();
+  let rightAnglePairCount = 0;
+
+  for (let left = 0; left < system.rank; left += 1) {
+    for (let right = left + 1; right < system.rank; right += 1) {
+      const entry = system.coxeterMatrix[left]?.[right];
+      if (entry === 1 || entry === undefined) {
+        continue;
+      }
+      const edgeId =
+        entry === "inf" ? undefined : definingGraphEdgeId(left, right);
+      addIncidenceNeighbor(
+        neighborsByGenerator[left],
+        entry,
+        neighborRecord(system, right, entry, edgeId),
+      );
+      addIncidenceNeighbor(
+        neighborsByGenerator[right],
+        entry,
+        neighborRecord(system, left, entry, edgeId),
+      );
+
+      if (entry === "inf") {
+        continue;
+      }
+      finiteEntries.add(entry);
+      if (entry === 2) {
+        rightAnglePairCount += 1;
+      }
+      records.push({
+        id: edgeId!,
+        sourceGenerator: left,
+        targetGenerator: right,
+        entry,
+        label: relationLabel(entry),
+        color: relationColor(entry),
+      });
+    }
+  }
+
+  const orderedEntries: Array<Exclude<CoxeterMatrixEntry, 1>> = [
+    ...[...finiteEntries].sort((left, right) => left - right),
+    "inf",
+  ];
+  const incidencePartitions = system.generators.map((generator, index) => {
+    const buckets = neighborsByGenerator[index];
+    const classes = orderedEntries.map((entry) => ({
+      entry,
+      label: relationLabel(entry),
+      color: relationColor(entry),
+      drawnInGamma: entry !== "inf",
+      neighbors: [...(buckets.get(entry) ?? [])].sort(
+        (left, right) => left.generator - right.generator,
+      ),
+    }));
+    const accountedNeighborCount = classes.reduce(
+      (count, relationClass) => count + relationClass.neighbors.length,
+      0,
+    );
+    return {
+      generator: index,
+      nodeId: definingGraphNodeId(index),
+      label: generator.label,
+      finiteDegree: classes
+        .filter((relationClass) => relationClass.drawnInGamma)
+        .reduce(
+          (count, relationClass) => count + relationClass.neighbors.length,
+          0,
+        ),
+      totalOtherGenerators: Math.max(0, system.rank - 1),
+      accountedNeighborCount,
+      isCompletePartition:
+        accountedNeighborCount === Math.max(0, system.rank - 1),
+      classes,
+    } satisfies DefiningGraphVertexIncidence;
+  });
+
+  const topology: DefiningGraphTopology = {
+    records,
+    incidencePartitions,
+    relationOrderComponents: buildRelationOrderComponents(system, records),
+    legend: relationLegend(records),
+    charneyDavisCurvature:
+      1 - system.generators.length / 2 + records.length / 4,
+    rightAnglePairCount,
+    planarity: summarizePlanarity(system, records),
+  };
+  definingGraphTopologyCache.set(system, topology);
+  return topology;
+}
+
+/**
+ * Splits Gamma into its monochromatic relation subgraphs Gamma_m.
+ *
+ * An equality imposed across every m-edge is constant on each edge-bearing
+ * component below. Generators with no incident m-edge are retained separately;
+ * they are the singleton components of the spanning graph Gamma_m.
+ */
+function buildRelationOrderComponents(
+  system: CoxeterSystemInput,
+  records: DefiningGraphEdgeRecord[],
+): DefiningGraphRelationOrderComponents[] {
+  const relationOrders = [
+    ...new Set(
+      records
+        .map((record) => record.entry)
+        .filter((entry): entry is number => typeof entry === "number"),
+    ),
+  ].sort((left, right) => left - right);
+
+  return relationOrders.map((relationOrder) => {
+    const orderRecords = records.filter(
+      (record) => record.entry === relationOrder,
+    );
+    const adjacency = Array.from(
+      { length: system.rank },
+      () => new Set<number>(),
+    );
+    const incidentGenerators = new Set<number>();
+
+    for (const record of orderRecords) {
+      adjacency[record.sourceGenerator].add(record.targetGenerator);
+      adjacency[record.targetGenerator].add(record.sourceGenerator);
+      incidentGenerators.add(record.sourceGenerator);
+      incidentGenerators.add(record.targetGenerator);
+    }
+
+    const visited = new Set<number>();
+    const components: DefiningGraphRelationComponent[] = [];
+    for (const seed of [...incidentGenerators].sort(
+      (left, right) => left - right,
+    )) {
+      if (visited.has(seed)) {
+        continue;
+      }
+      const pending = [seed];
+      const generators: number[] = [];
+      visited.add(seed);
+
+      while (pending.length > 0) {
+        const generator = pending.pop()!;
+        generators.push(generator);
+        for (const neighbor of adjacency[generator]) {
+          if (!visited.has(neighbor)) {
+            visited.add(neighbor);
+            pending.push(neighbor);
+          }
+        }
+      }
+
+      generators.sort((left, right) => left - right);
+      const componentGenerators = new Set(generators);
+      components.push({
+        id: `Gamma:m:${relationOrder}:component:${generators[0]}`,
+        generators,
+        generatorLabels: generators.map(
+          (generator) => system.generators[generator]?.label ?? `s${generator}`,
+        ),
+        edgeIds: orderRecords
+          .filter(
+            (record) =>
+              componentGenerators.has(record.sourceGenerator) &&
+              componentGenerators.has(record.targetGenerator),
+          )
+          .map((record) => record.id),
+      });
+    }
+
+    const isolatedGenerators = Array.from(
+      { length: system.rank },
+      (_, generator) => generator,
+    ).filter((generator) => !incidentGenerators.has(generator));
+
+    return {
+      relationOrder,
+      label: relationLabel(relationOrder),
+      color: relationColor(relationOrder),
+      edgeCount: orderRecords.length,
+      components,
+      isolatedGenerators,
+      isolatedGeneratorLabels: isolatedGenerators.map(
+        (generator) => system.generators[generator]?.label ?? `s${generator}`,
+      ),
+    };
+  });
+}
+
+function addIncidenceNeighbor(
+  buckets: Map<Exclude<CoxeterMatrixEntry, 1>, DefiningGraphNeighborRecord[]>,
+  entry: Exclude<CoxeterMatrixEntry, 1>,
+  neighbor: DefiningGraphNeighborRecord,
+): void {
+  const entries = buckets.get(entry) ?? [];
+  entries.push(neighbor);
+  buckets.set(entry, entries);
+}
+
+function neighborRecord(
+  system: CoxeterSystemInput,
+  generator: number,
+  entry: Exclude<CoxeterMatrixEntry, 1>,
+  edgeId: string | undefined,
+): DefiningGraphNeighborRecord {
+  return {
+    generator,
+    nodeId: definingGraphNodeId(generator),
+    label: system.generators[generator]?.label ?? `s${generator}`,
+    entry,
+    edgeId,
+  };
+}
+
+function planarLabelPlacementsFor(
+  topology: DefiningGraphTopology,
+  generatorCount: number,
+): Map<string, PlanarLabelPlacement> {
+  const cached = planarLabelPlacementCache.get(topology);
+  if (cached) {
+    return cached;
+  }
+  const placements = buildPlanarLabelPlacements(
+    topology.records,
+    generatorCount,
+  );
+  planarLabelPlacementCache.set(topology, placements);
+  return placements;
 }
 
 export function definingGraphNodeId(generator: number): string {
@@ -204,6 +493,9 @@ function relationLabel(entry: CoxeterMatrixEntry): string {
 }
 
 function relationColor(entry: CoxeterMatrixEntry): string {
+  if (entry === "inf") {
+    return "#94a3b8";
+  }
   if (entry === 2) {
     return "#06b6d4";
   }

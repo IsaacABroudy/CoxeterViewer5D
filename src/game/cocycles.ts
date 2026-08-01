@@ -282,8 +282,9 @@ export function summarizeCocycle(
 ): GameCocycleSummary {
   const resolved = resolveEditableAssignment(assignment, edges, options.rank);
   const validation = validateRankTwoCocycle(cells, edges, resolved.edgeStates);
+  const edgeById = new Map(edges.map((edge) => [edge.id, edge]));
   const boundaryEquations = validation.checks.map((check) =>
-    formatBoundaryEquation(check, options.generators ?? [], edges),
+    formatBoundaryEquation(check, options.generators ?? [], edges, edgeById),
   );
   const failedCellIds = validation.checks
     .filter((check) => !check.ok)
@@ -323,8 +324,9 @@ export function formatBoundaryEquation(
   check: RankTwoBoundaryCheck,
   generators: Array<{ label?: string }>,
   edges: GraphEdge[] = [],
+  edgeIndex?: ReadonlyMap<string, GraphEdge>,
 ): BoundaryEquation {
-  const edgeById = new Map(edges.map((edge) => [edge.id, edge]));
+  const edgeById = edgeIndex ?? new Map(edges.map((edge) => [edge.id, edge]));
   const generatorWord = check.terms
     .map((term) => {
       const generator = edgeById.get(term.edgeId)?.generator;

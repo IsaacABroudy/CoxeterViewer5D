@@ -12,12 +12,14 @@ import {
 import type { QuotientComplex, QuotientTwoCell } from "../quotient";
 import type { TopologyLensId } from "./researchWorkflow";
 import type { YGammaCellRecord } from "./yGammaAtlas";
+import type { DefiningGraphVertexIncidence } from "./definingGraphScene";
 
 export type TopologyInspectorLayer =
   | "Davis"
   | "Y_Gamma"
+  | "Gamma"
   | "quotient"
-  | "JNW state quotient"
+  | "JNW move-kernel cover"
   | "geometric projection";
 
 export type TopologyInspectorStatus =
@@ -34,6 +36,7 @@ export type TopologyInspectorSubject =
   | { kind: "higher-cell"; cell: DavisHigherCell }
   | { kind: "higher-proxy"; proxy: DavisCellProxy }
   | { kind: "ygamma-cell"; cell: YGammaCellRecord }
+  | { kind: "gamma-vertex"; incidence: DefiningGraphVertexIncidence }
   | { kind: "quotient-cell"; quotient: QuotientComplex; cell: QuotientTwoCell }
   | { kind: "local-link"; nodeId: string; sphericalSubsetCount: number }
   | {
@@ -154,6 +157,37 @@ export function buildTopologyExplanation(input: {
       ],
       boundaryWord: cell.attachingWord,
       badges: ["Y_Gamma", "fundamental-domain cell"],
+    };
+  }
+
+  if (subject.kind === "gamma-vertex") {
+    const { incidence } = subject;
+    const classRows = incidence.classes.map((relationClass) => ({
+      label: `${relationClass.label} neighbors`,
+      value:
+        relationClass.neighbors.length > 0
+          ? relationClass.neighbors.map((neighbor) => neighbor.label).join(", ")
+          : "none",
+    }));
+    return {
+      title: `Generator ${incidence.label}`,
+      layer: "Gamma",
+      status: statusForSystem(system),
+      summary: `This vertex represents the Coxeter generator ${incidence.label}. Its ${incidence.totalOtherGenerators} other generators split into disjoint classes according to the exponent m_${incidence.generator},j.`,
+      actionHint:
+        "Click a neighboring generator in the partition list or select another vertex in Gamma.",
+      rows: [
+        { label: "Generator index", value: String(incidence.generator) },
+        { label: "Finite degree", value: String(incidence.finiteDegree) },
+        ...classRows,
+        {
+          label: "Partition check",
+          value: incidence.isCompletePartition
+            ? `all ${incidence.totalOtherGenerators} other generators accounted for once`
+            : `${incidence.accountedNeighborCount} of ${incidence.totalOtherGenerators} accounted for`,
+        },
+      ],
+      badges: ["defining graph", "relation-order partition"],
     };
   }
 
@@ -328,27 +362,14 @@ export function buildTopologyExplanation(input: {
     const orbitView = subject.lensId === "state-quotient-orbit";
     return {
       title: `${lensLabel} at ${stateName}`,
-      layer: "JNW state quotient",
-      status: "browser diagnostic",
+      layer: "JNW move-kernel cover",
+      status: "exact incidence",
       summary: orbitView
-        ? "This is the finite orbit of JNW states under the selected move system. The selected state controls the Gamma subset and link diagnostics."
-        : "This link is inspected at a selected state vertex in the derived JNW state quotient, not inside the ambient Davis view.",
+        ? "This is the finite move-kernel cover assembled from lifts of the Y_Gamma fundamental domain. The selected state controls the Gamma subset and link diagnostics."
+        : "This link is inspected at a selected state vertex in the derived move-kernel cover, not inside the ambient Davis view.",
       actionHint:
         "Use the JNW panel to choose a state, show it on Gamma, or switch to ascending, descending, level, and full state-link views.",
       rows: [
-        {
-          label: "What is selected?",
-          value: "State vertex in the JNW orbit quotient.",
-        },
-        {
-          label: "Why is it here?",
-          value: "It is reached from the initial state by applying JNW moves.",
-        },
-        {
-          label: "Exact or drawing?",
-          value:
-            "The state orbit and link classification are exact browser diagnostics for the supplied move system; the 3D placement is a drawing.",
-        },
         {
           label: "Selected state",
           value:
@@ -359,11 +380,7 @@ export function buildTopologyExplanation(input: {
         { label: "Active link", value: lensLabel },
         { label: "Claim status", value: subject.summary.claimStatus },
       ],
-      badges: [
-        "JNW state quotient",
-        "browser diagnostic",
-        orbitView ? "state orbit" : "selected state link",
-      ],
+      badges: [orbitView ? "four-state cover" : "selected state link"],
     };
   }
 
@@ -399,9 +416,9 @@ function jnwLinkLensLabel(lensId: TopologyLensId): string {
     case "full-local-link":
       return "Full local link at selected state";
     case "state-quotient-orbit":
-      return "JNW state quotient";
+      return "JNW move-kernel cover";
     default:
-      return "State-quotient link at selected state";
+      return "Cover link at selected state";
   }
 }
 

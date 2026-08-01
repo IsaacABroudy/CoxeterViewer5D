@@ -131,7 +131,8 @@ export interface ProjectSessionGameState {
         | "relation"
         | "ascending-link"
         | "descending-link"
-        | "level-link";
+        | "level-link"
+        | "full-link";
       railGrouping?: "individual" | "move-class-overview";
       selectedStateId?: string;
       selectedGenerator?: number;
@@ -1161,6 +1162,7 @@ function validateJnwReaderState(
               "ascending-link",
               "descending-link",
               "level-link",
+              "full-link",
             ] as const,
             errors,
           ),

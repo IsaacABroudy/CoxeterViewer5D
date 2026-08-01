@@ -32,6 +32,14 @@ const machineClasses = {
   },
 };
 const interactionFeatureFloorOverrides = new Map([
+  [
+    "gamma-incidence-selection",
+    {
+      renderedNodes: 10,
+      renderedEdgeSegments: 40,
+      renderedEdgeLabels: 40,
+    },
+  ],
   ["rank-two-pair-focus", { renderedCells: 1, renderedEdgeLabels: 1 }],
   ["ygamma-preset-switch", { renderedCells: 1, renderedEdgeLabels: 1 }],
   [

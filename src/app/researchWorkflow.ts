@@ -203,12 +203,12 @@ const topologyLenses: TopologyLensDefinition[] = [
   },
   {
     id: "state-quotient-orbit",
-    label: "JNW State Quotient",
+    label: "JNW Move-Kernel Cover",
     summary:
-      "Show the state orbit quotient with state vertices, generator-labeled edges, and relation cycles.",
+      "Show the four-state cover with state vertices, generator-labeled rails, and relation-square subdivisions.",
     scope: "quotient-link",
     statusText:
-      "JNW state quotient: vertices are states S_i, generator edges apply moves m_g, and relation cycles are inspected through the link lenses.",
+      "JNW move-kernel cover: vertices are states S_i, generator rails apply moves m_g, and colored sectors show four Y_Gamma lifts glued inside one cover.",
   },
 ];
 

@@ -12,7 +12,7 @@ export interface EightFacetCatalogueEntry {
   label: string;
   dimension: 5;
   facets: 8;
-  galeDiagram: "G11411";
+  galeDiagram: "G11411" | "G12221";
   table: "4.10";
   tableIndex: number;
   dataStatus: DataStatus;
@@ -44,9 +44,9 @@ export const tumarkinEightFacetSourceRef = catalogue.sourceRef;
 
 /**
  * Tumarkin Table 4.10 is kept as a searchable catalogue so the main example
- * picker does not become a wall of 15 similar compact cases. Each entry points
- * at a bundled CoxeterSystemInput generated from the source-vector EPS
- * transcription and checked by the Tumarkin eight-facet certifier.
+ * picker does not become a wall of 16 compact cases. Each entry points at a
+ * bundled CoxeterSystemInput generated from the source-vector EPS transcription
+ * and checked by the Tumarkin eight-facet certifier.
  */
 export const tumarkinEightFacetCatalogue = catalogue.entries;
 

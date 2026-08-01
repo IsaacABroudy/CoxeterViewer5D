@@ -774,6 +774,66 @@ textarea {
   height: 100%;
 }
 
+.ygamma-comparison-grid.is-shared-canvas {
+  display: block;
+  position: relative;
+  overflow: hidden;
+}
+
+.ygamma-comparison-grid.is-shared-canvas .scene-shell {
+  height: 100%;
+  min-height: min(70vh, 620px);
+}
+
+.ygamma-comparison-pane-label {
+  position: absolute;
+  top: 10px;
+  z-index: 4;
+  display: grid;
+  gap: 2px;
+  width: min(42%, 320px);
+  padding: 7px 9px;
+  border: 1px solid rgba(148, 163, 184, 0.58);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.1);
+  pointer-events: none;
+}
+
+.ygamma-comparison-pane-label.is-left {
+  left: 10px;
+}
+
+.ygamma-comparison-pane-label.is-right {
+  right: 10px;
+  text-align: right;
+}
+
+.ygamma-comparison-pane-label strong {
+  color: #172033;
+  font-size: 0.8rem;
+}
+
+.ygamma-comparison-pane-label span {
+  color: #5d6878;
+  font-size: 0.7rem;
+  line-height: 1.25;
+}
+
+:root[data-theme="dark"] .ygamma-comparison-pane-label {
+  border-color: rgba(100, 116, 139, 0.72);
+  background: rgba(17, 24, 39, 0.88);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+}
+
+:root[data-theme="dark"] .ygamma-comparison-pane-label strong {
+  color: #f1f5f9;
+}
+
+:root[data-theme="dark"] .ygamma-comparison-pane-label span {
+  color: #b9c5d3;
+}
+
 .ygamma-comparison-pane {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -797,6 +857,15 @@ textarea {
   .ygamma-comparison-pane,
   .ygamma-comparison-pane .scene-shell {
     min-height: 300px;
+  }
+
+  .ygamma-comparison-grid.is-shared-canvas {
+    min-height: 520px;
+    overflow: hidden;
+  }
+
+  .ygamma-comparison-grid.is-shared-canvas .scene-shell {
+    min-height: 520px;
   }
 }
 
@@ -1551,6 +1620,206 @@ textarea {
 
 .gamma-layout-toggle {
   margin: 8px 0;
+}
+
+.gamma-generator-picker {
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) minmax(90px, 0.8fr);
+  margin: 10px 0 8px;
+}
+
+.gamma-incidence-partition {
+  border-block: 1px solid #dce3ec;
+  margin: 12px 0;
+  padding: 12px 0;
+}
+
+.gamma-relation-components {
+  border-bottom: 1px solid #dce3ec;
+  margin: 0 0 12px;
+  padding: 0 0 12px;
+}
+
+.gamma-relation-components-heading,
+.gamma-relation-order-heading {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+}
+
+.gamma-relation-components-heading {
+  justify-content: space-between;
+}
+
+.gamma-relation-components-heading h4 {
+  font-size: 0.92rem;
+  margin: 2px 0 0;
+}
+
+.gamma-relation-order-list {
+  display: grid;
+  gap: 10px;
+}
+
+.gamma-relation-order {
+  border-left: 3px solid #cbd5e1;
+  padding-left: 8px;
+}
+
+.gamma-relation-order-heading > span:last-child {
+  color: #5d6878;
+  font-size: 0.75rem;
+}
+
+.gamma-component-list {
+  display: grid;
+  gap: 5px;
+  margin: 7px 0 4px;
+}
+
+.gamma-component-list > li {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.gamma-component-label {
+  color: #475569;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.gamma-component-generators {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.gamma-isolated-generators {
+  color: #5d6878;
+  font-size: 0.75rem;
+  margin: 5px 0 0;
+}
+
+.gamma-incidence-heading,
+.gamma-incidence-class-heading {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+}
+
+.gamma-incidence-heading {
+  justify-content: space-between;
+}
+
+.gamma-incidence-heading h4 {
+  font-size: 0.92rem;
+  margin: 2px 0 0;
+}
+
+.gamma-partition-note {
+  margin: 8px 0 10px;
+}
+
+.gamma-incidence-classes {
+  display: grid;
+  gap: 7px;
+}
+
+.gamma-incidence-class {
+  border-left: 3px solid #cbd5e1;
+  padding: 3px 0 3px 8px;
+}
+
+.gamma-incidence-class.is-omitted {
+  border-left-style: dashed;
+  opacity: 0.82;
+}
+
+.gamma-incidence-class-heading > span:last-child {
+  color: #5d6878;
+  font-size: 0.75rem;
+}
+
+.gamma-neighbor-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 5px;
+}
+
+.gamma-neighbor-chip {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #172033;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 3px 7px;
+}
+
+.gamma-neighbor-chip:hover,
+.gamma-neighbor-chip:focus-visible {
+  border-color: #0f766e;
+  color: #0f766e;
+}
+
+.gamma-partition-check {
+  color: #166534;
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin: 9px 0 0;
+}
+
+.gamma-partition-check[data-partition-complete="false"] {
+  color: #9a3412;
+}
+
+.gamma-edge-record-list {
+  max-height: 220px;
+  overflow: auto;
+}
+
+.app-shell[data-theme="dark"] .gamma-incidence-partition {
+  border-color: #334155;
+}
+
+.app-shell[data-theme="dark"] .gamma-relation-components {
+  border-color: #334155;
+}
+
+.app-shell[data-theme="dark"] .gamma-relation-order-heading > span:last-child,
+.app-shell[data-theme="dark"] .gamma-component-label,
+.app-shell[data-theme="dark"] .gamma-isolated-generators {
+  color: #cbd5e1;
+}
+
+.app-shell[data-theme="dark"] .gamma-incidence-class-heading > span:last-child {
+  color: #cbd5e1;
+}
+
+.app-shell[data-theme="dark"] .gamma-neighbor-chip {
+  border-color: #475569;
+  background: #172033;
+  color: #f8fafc;
+}
+
+.app-shell[data-theme="dark"] .gamma-neighbor-chip:hover,
+.app-shell[data-theme="dark"] .gamma-neighbor-chip:focus-visible {
+  border-color: #5eead4;
+  color: #99f6e4;
+}
+
+.app-shell[data-theme="dark"] .gamma-partition-check {
+  color: #86efac;
+}
+
+.app-shell[data-theme="dark"]
+  .gamma-partition-check[data-partition-complete="false"] {
+  color: #fdba74;
 }
 
 .gamma-planarity-note {
@@ -2480,4 +2749,43 @@ textarea {
   .stats-row {
     justify-content: flex-start;
   }
+}
+.quotient-import-progress {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.78rem;
+}
+
+.quotient-import-progress-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #172033;
+}
+
+.quotient-import-progress progress {
+  width: 100%;
+  height: 7px;
+  accent-color: #2563eb;
+}
+
+.quotient-import-progress .button {
+  justify-self: start;
+}
+
+.app-shell[data-theme="dark"] .quotient-import-progress {
+  border-color: #334155;
+  background: #111827;
+  color: #cbd5e1;
+}
+
+.app-shell[data-theme="dark"] .quotient-import-progress-heading {
+  color: #f1f5f9;
 }

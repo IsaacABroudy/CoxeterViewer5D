@@ -170,7 +170,7 @@ export function defaultGalleryEntries(): ExampleGalleryEntry[] {
     },
     {
       id: "catalogue:8facet:all",
-      label: "15 eight-facet 5D cases",
+      label: "16 eight-facet 5D cases",
       family: "catalogue",
       summary:
         "Browse the certified Tumarkin Table 4.10 G11411 examples without crowding the main gallery.",

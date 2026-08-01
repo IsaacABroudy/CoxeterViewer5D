@@ -6,6 +6,7 @@ import type {
   GeneratedCayleyBall,
 } from "../types";
 import { LruCache } from "./lruCache";
+import { estimatePersistentCacheValueBytes } from "./persistentCache";
 import {
   cellNeighborhoodNodeIds,
   computeLocalChamber3DLayout,
@@ -24,6 +25,7 @@ export interface LocalViewCacheOptions {
   neighborhoodEntries?: number;
   stepEntries?: number;
   breadcrumbEntries?: number;
+  memoryBytes?: number;
 }
 
 /**
@@ -42,13 +44,26 @@ export class LocalViewCache {
   private readonly breadcrumbs: LruCache<string, BreadcrumbEntry[]>;
 
   constructor(options: LocalViewCacheOptions = {}) {
-    this.layouts = new LruCache({ maxEntries: options.layoutEntries ?? 48 });
-    this.neighborhoods = new LruCache({
-      maxEntries: options.neighborhoodEntries ?? 80,
+    const totalBytes = options.memoryBytes ?? 32 * 1024 * 1024;
+    this.layouts = new LruCache<string, LocalChamber3DLayoutResult>({
+      maxEntries: options.layoutEntries ?? 48,
+      maxBytes: Math.floor(totalBytes * 0.6),
+      sizeOf: estimatePersistentCacheValueBytes,
     });
-    this.steps = new LruCache({ maxEntries: options.stepEntries ?? 80 });
-    this.breadcrumbs = new LruCache({
+    this.neighborhoods = new LruCache<string, Set<string> | undefined>({
+      maxEntries: options.neighborhoodEntries ?? 80,
+      maxBytes: Math.floor(totalBytes * 0.2),
+      sizeOf: estimatePersistentCacheValueBytes,
+    });
+    this.steps = new LruCache<string, GeneratorStepOption[]>({
+      maxEntries: options.stepEntries ?? 80,
+      maxBytes: Math.floor(totalBytes * 0.1),
+      sizeOf: estimatePersistentCacheValueBytes,
+    });
+    this.breadcrumbs = new LruCache<string, BreadcrumbEntry[]>({
       maxEntries: options.breadcrumbEntries ?? 80,
+      maxBytes: Math.floor(totalBytes * 0.1),
+      sizeOf: estimatePersistentCacheValueBytes,
     });
   }
 

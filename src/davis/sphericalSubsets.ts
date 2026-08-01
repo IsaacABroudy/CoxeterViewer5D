@@ -80,6 +80,14 @@ const defaultOptions = {
   subgroupOrderPrecision: 10,
 };
 
+// Parsed Coxeter inputs are treated as immutable throughout the app. Spherical
+// subset enumeration is consequently a pure function of the system object and
+// normalized limits, so repeated Davis/Y_Gamma consumers can share the result.
+const sphericalEnumerationCache = new WeakMap<
+  CoxeterSystemInput,
+  Map<string, SphericalSubsetEnumerationResult>
+>();
+
 function normalizeOptions(
   options: SphericalSubsetEnumerationOptions = {},
 ): Required<SphericalSubsetEnumerationOptions> {
@@ -97,6 +105,19 @@ function normalizeOptions(
     subgroupOrderPrecision:
       options.subgroupOrderPrecision ?? defaultOptions.subgroupOrderPrecision,
   };
+}
+
+function normalizedOptionsKey(
+  options: Required<SphericalSubsetEnumerationOptions>,
+): string {
+  return [
+    options.tolerance,
+    options.maxRankForExhaustiveEnumeration,
+    options.maxSubsetsToCheck,
+    options.maxSubgroupOrder,
+    options.maxRankForSubgroupOrder,
+    options.subgroupOrderPrecision,
+  ].join(":");
 }
 
 function subsetId(generators: number[]): string {
@@ -441,6 +462,12 @@ export function enumerateSphericalSubsets(
 ): SphericalSubsetEnumerationResult {
   const system = parseCoxeterSystemInput(input);
   const normalizedOptions = normalizeOptions(options);
+  const optionKey = normalizedOptionsKey(normalizedOptions);
+  const systemCache = sphericalEnumerationCache.get(system);
+  const cached = systemCache?.get(optionKey);
+  if (cached) {
+    return cached;
+  }
   const exhaustive =
     system.rank <= normalizedOptions.maxRankForExhaustiveEnumeration;
   const maxSubsetSize = exhaustive ? system.rank : 2;
@@ -478,7 +505,7 @@ export function enumerateSphericalSubsets(
     }
   }
 
-  return {
+  const result = {
     subsets: sphericalSubsets.sort((left, right) =>
       compareGeneratorSubsets(left.generators, right.generators),
     ),
@@ -486,6 +513,12 @@ export function enumerateSphericalSubsets(
     checkedSubsets: candidates.length,
     exhaustive: exhaustive && !capped,
   };
+  const nextSystemCache = systemCache ?? new Map();
+  nextSystemCache.set(optionKey, result);
+  if (!systemCache) {
+    sphericalEnumerationCache.set(system, nextSystemCache);
+  }
+  return result;
 }
 
 export function computeLocalLink(

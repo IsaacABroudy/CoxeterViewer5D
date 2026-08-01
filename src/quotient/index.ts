@@ -1,8 +1,16 @@
 export {
+  QuotientValidationCancelledError,
   QuotientValidationError,
   parseQuotientComplex,
+  parseQuotientComplexProgressive,
   quotientManifoldStatus,
   validateQuotientComplex,
+  validateQuotientComplexProgressive,
+} from "./validation";
+export type {
+  ProgressiveQuotientValidationOptions,
+  QuotientValidationPhase,
+  QuotientValidationProgress,
 } from "./validation";
 export {
   certifyQuotientAction,
@@ -15,6 +23,7 @@ export {
 } from "./builder";
 export type {
   QuotientComplex,
+  QuotientCoverProjection,
   QuotientBuildInput,
   QuotientEdge,
   QuotientExportInput,

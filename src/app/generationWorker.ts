@@ -48,13 +48,17 @@ self.onmessage = (event: MessageEvent<GenerationWorkerRequest>) => {
       );
     }
     const startedAt = performance.now();
-    const { ball } = generateViewerBall(system, request.options);
+    const { ball, sphericalSubsets } = generateViewerBall(
+      system,
+      request.options,
+    );
     const response: GenerationWorkerResponse = {
       type: "generate-ball-success",
       requestId: request.requestId,
       cacheKey: request.cacheKey,
       inputHash: request.inputHash,
       ball,
+      sphericalSubsets,
       generationMs: performance.now() - startedAt,
     };
     self.postMessage(response);

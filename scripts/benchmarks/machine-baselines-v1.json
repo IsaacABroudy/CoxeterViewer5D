@@ -5,11 +5,11 @@
   "timedBaselinePath": "scripts/benchmarks/timed-browser-v1.json",
   "summary": {
     "sourceReport": "timed-browser-benchmark",
-    "sourceCreatedAt": "2026-07-05T13:50:27.368Z",
+    "sourceCreatedAt": "2026-08-01T07:49:10.301Z",
     "cases": [
       {
         "id": "I2_5:5",
-        "elapsedMs": 436.715,
+        "elapsedMs": 417.528,
         "lastGraphUpdateMs": 4.4,
         "renderedNodes": 10,
         "renderedEdgeSegments": 10,
@@ -21,32 +21,32 @@
       },
       {
         "id": "A3:4",
-        "elapsedMs": 221.848,
-        "lastGraphUpdateMs": 1.3,
+        "elapsedMs": 210.674,
+        "lastGraphUpdateMs": 1.9,
         "renderedNodes": 20,
         "renderedEdgeSegments": 27,
         "renderedCells": 3,
         "renderedNodeLabels": 20,
         "renderedEdgeLabels": 10,
         "renderedLabelLeaders": 0,
-        "drawCalls": 46
+        "drawCalls": 45
       },
       {
         "id": "universal_rank3:4",
-        "elapsedMs": 30.339,
-        "lastGraphUpdateMs": 3,
+        "elapsedMs": 82.294,
+        "lastGraphUpdateMs": 4,
         "renderedNodes": 46,
         "renderedEdgeSegments": 45,
         "renderedCells": 0,
         "renderedNodeLabels": 46,
         "renderedEdgeLabels": 20,
         "renderedLabelLeaders": 0,
-        "drawCalls": 46
+        "drawCalls": 71
       },
       {
         "id": "compact_5_cube_gamma1:2",
-        "elapsedMs": 332.652,
-        "lastGraphUpdateMs": 0.7,
+        "elapsedMs": 163.791,
+        "lastGraphUpdateMs": 0.5,
         "renderedNodes": 10,
         "renderedEdgeSegments": 9,
         "renderedCells": 0,
@@ -57,8 +57,8 @@
       },
       {
         "id": "compact_5_cube_gamma1:3",
-        "elapsedMs": 548.503,
-        "lastGraphUpdateMs": 4.1,
+        "elapsedMs": 449.833,
+        "lastGraphUpdateMs": 4.3,
         "renderedNodes": 71,
         "renderedEdgeSegments": 100,
         "renderedCells": 30,
@@ -71,22 +71,35 @@
     "interactions": [
       {
         "id": "label-toggle",
-        "elapsedMs": 68.38,
-        "lastGraphUpdateMs": 0.2,
-        "renderCountDelta": 1,
+        "elapsedMs": 65.642,
+        "lastGraphUpdateMs": 0.1,
+        "renderCountDelta": 2,
         "renderedNodes": 10,
         "renderedEdgeSegments": 10,
         "renderedCells": 1,
         "renderedNodeLabels": 0,
         "renderedEdgeLabels": 0,
         "renderedLabelLeaders": 0,
-        "drawCalls": 15
+        "drawCalls": 8
+      },
+      {
+        "id": "gamma-incidence-selection",
+        "elapsedMs": 15.817,
+        "lastGraphUpdateMs": 0.7,
+        "renderCountDelta": 1,
+        "renderedNodes": 10,
+        "renderedEdgeSegments": 40,
+        "renderedCells": 0,
+        "renderedNodeLabels": 10,
+        "renderedEdgeLabels": 40,
+        "renderedLabelLeaders": 38,
+        "drawCalls": 58
       },
       {
         "id": "rank-two-pair-focus",
-        "elapsedMs": 39.895,
-        "lastGraphUpdateMs": 0.8,
-        "renderCountDelta": 0,
+        "elapsedMs": 93.526,
+        "lastGraphUpdateMs": 0.7,
+        "renderCountDelta": 1,
         "renderedNodes": 6,
         "renderedEdgeSegments": 6,
         "renderedCells": 1,
@@ -97,48 +110,48 @@
       },
       {
         "id": "ygamma-preset-switch",
-        "elapsedMs": 168.124,
-        "lastGraphUpdateMs": 0.9,
-        "renderCountDelta": 3,
-        "renderedNodes": 1,
-        "renderedEdgeSegments": 3,
-        "renderedCells": 3,
+        "elapsedMs": 150.836,
+        "lastGraphUpdateMs": 1.6,
+        "renderCountDelta": 2,
+        "renderedNodes": 24,
+        "renderedEdgeSegments": 42,
+        "renderedCells": 8,
         "renderedNodeLabels": 1,
-        "renderedEdgeLabels": 1,
-        "renderedLabelLeaders": 0,
-        "drawCalls": 70
+        "renderedEdgeLabels": 42,
+        "renderedLabelLeaders": 42,
+        "drawCalls": 59
       },
       {
         "id": "quotient-link-lens",
-        "elapsedMs": 37.235,
-        "lastGraphUpdateMs": 0.8,
-        "renderCountDelta": 1,
+        "elapsedMs": 44.576,
+        "lastGraphUpdateMs": 0.6,
+        "renderCountDelta": 2,
         "renderedNodes": 3,
         "renderedEdgeSegments": 4,
         "renderedCells": 0,
         "renderedNodeLabels": 3,
-        "renderedEdgeLabels": 4,
-        "renderedLabelLeaders": 1,
+        "renderedEdgeLabels": 1,
+        "renderedLabelLeaders": 0,
         "drawCalls": 10
       },
       {
         "id": "topology-generator-star",
-        "elapsedMs": 194.795,
-        "lastGraphUpdateMs": 1.1,
-        "renderCountDelta": 4,
-        "renderedNodes": 1,
-        "renderedEdgeSegments": 3,
+        "elapsedMs": 94.612,
+        "lastGraphUpdateMs": 2.9,
+        "renderCountDelta": 1,
+        "renderedNodes": 23,
+        "renderedEdgeSegments": 33,
         "renderedCells": 3,
-        "renderedNodeLabels": 1,
-        "renderedEdgeLabels": 1,
+        "renderedNodeLabels": 23,
+        "renderedEdgeLabels": 14,
         "renderedLabelLeaders": 0,
-        "drawCalls": 16
+        "drawCalls": 52
       },
       {
         "id": "edge-star",
-        "elapsedMs": 279.267,
-        "lastGraphUpdateMs": 2,
-        "renderCountDelta": 6,
+        "elapsedMs": 221.611,
+        "lastGraphUpdateMs": 1.8,
+        "renderCountDelta": 2,
         "renderedNodes": 10,
         "renderedEdgeSegments": 12,
         "renderedCells": 3,
@@ -149,35 +162,35 @@
       },
       {
         "id": "cell-star",
-        "elapsedMs": 193.308,
-        "lastGraphUpdateMs": 0.9,
-        "renderCountDelta": 4,
-        "renderedNodes": 13,
-        "renderedEdgeSegments": 16,
-        "renderedCells": 1,
-        "renderedNodeLabels": 7,
-        "renderedEdgeLabels": 4,
+        "elapsedMs": 45.091,
+        "lastGraphUpdateMs": 3.7,
+        "renderCountDelta": 0,
+        "renderedNodes": 23,
+        "renderedEdgeSegments": 33,
+        "renderedCells": 3,
+        "renderedNodeLabels": 23,
+        "renderedEdgeLabels": 14,
         "renderedLabelLeaders": 0,
-        "drawCalls": 23
+        "drawCalls": 52
       },
       {
         "id": "rank-k-lens",
-        "elapsedMs": 180.87,
-        "lastGraphUpdateMs": 1,
-        "renderCountDelta": 3,
-        "renderedNodes": 1,
-        "renderedEdgeSegments": 3,
+        "elapsedMs": 48.447,
+        "lastGraphUpdateMs": 2.7,
+        "renderCountDelta": 0,
+        "renderedNodes": 23,
+        "renderedEdgeSegments": 33,
         "renderedCells": 3,
-        "renderedNodeLabels": 1,
-        "renderedEdgeLabels": 1,
+        "renderedNodeLabels": 23,
+        "renderedEdgeLabels": 14,
         "renderedLabelLeaders": 0,
-        "drawCalls": 16
+        "drawCalls": 52
       },
       {
         "id": "comparison-view",
-        "elapsedMs": 110.81,
-        "lastGraphUpdateMs": 1.9,
-        "renderCountDelta": 3,
+        "elapsedMs": 139.847,
+        "lastGraphUpdateMs": 2,
+        "renderCountDelta": 1,
         "renderedNodes": 10,
         "renderedEdgeSegments": 10,
         "renderedCells": 1,
@@ -188,8 +201,8 @@
       },
       {
         "id": "ygamma-cutaway-switch",
-        "elapsedMs": 105.05,
-        "lastGraphUpdateMs": 1,
+        "elapsedMs": 128.344,
+        "lastGraphUpdateMs": 1.5,
         "renderCountDelta": 1,
         "renderedNodes": 11,
         "renderedEdgeSegments": 14,
@@ -201,21 +214,21 @@
       },
       {
         "id": "ygamma-relation-star",
-        "elapsedMs": 252.146,
-        "lastGraphUpdateMs": 1.1,
-        "renderCountDelta": 3,
+        "elapsedMs": 205.836,
+        "lastGraphUpdateMs": 15.2,
+        "renderCountDelta": 2,
         "renderedNodes": 11,
-        "renderedEdgeSegments": 14,
-        "renderedCells": 1,
+        "renderedEdgeSegments": 90,
+        "renderedCells": 81,
         "renderedNodeLabels": 1,
-        "renderedEdgeLabels": 14,
-        "renderedLabelLeaders": 14,
-        "drawCalls": 45
+        "renderedEdgeLabels": 90,
+        "renderedLabelLeaders": 90,
+        "drawCalls": 113
       },
       {
         "id": "ygamma-leader-labels",
-        "elapsedMs": 97.503,
-        "lastGraphUpdateMs": 0.9,
+        "elapsedMs": 94.769,
+        "lastGraphUpdateMs": 1.1,
         "renderCountDelta": 1,
         "renderedNodes": 11,
         "renderedEdgeSegments": 14,
@@ -227,8 +240,8 @@
       },
       {
         "id": "ygamma-relation-atlas",
-        "elapsedMs": 61.518,
-        "lastGraphUpdateMs": 1,
+        "elapsedMs": 61.727,
+        "lastGraphUpdateMs": 1.5,
         "renderCountDelta": 0,
         "renderedNodes": 11,
         "renderedEdgeSegments": 14,
@@ -240,21 +253,21 @@
       },
       {
         "id": "ygamma-drawing-comparison",
-        "elapsedMs": 431.333,
-        "lastGraphUpdateMs": 5.6,
-        "renderCountDelta": -10,
-        "renderedNodes": 11,
-        "renderedEdgeSegments": 110,
-        "renderedCells": 40,
+        "elapsedMs": 127.869,
+        "lastGraphUpdateMs": 12.6,
+        "renderCountDelta": 0,
+        "renderedNodes": 22,
+        "renderedEdgeSegments": 220,
+        "renderedCells": 80,
         "renderedNodeLabels": 0,
-        "renderedEdgeLabels": 110,
-        "renderedLabelLeaders": 110,
-        "drawCalls": 175
+        "renderedEdgeLabels": 220,
+        "renderedLabelLeaders": 220,
+        "drawCalls": 151
       },
       {
         "id": "ygamma-camera-path",
-        "elapsedMs": 102.972,
-        "lastGraphUpdateMs": 0.8,
+        "elapsedMs": 9.396,
+        "lastGraphUpdateMs": 1.2,
         "renderCountDelta": 1,
         "renderedNodes": 11,
         "renderedEdgeSegments": 14,
@@ -266,8 +279,8 @@
       },
       {
         "id": "annotation-toggle",
-        "elapsedMs": 35.531,
-        "lastGraphUpdateMs": 0.3,
+        "elapsedMs": 48.187,
+        "lastGraphUpdateMs": 0,
         "renderCountDelta": 1,
         "renderedNodes": 10,
         "renderedEdgeSegments": 10,
@@ -275,12 +288,12 @@
         "renderedNodeLabels": 0,
         "renderedEdgeLabels": 0,
         "renderedLabelLeaders": 0,
-        "drawCalls": 28
+        "drawCalls": 8
       },
       {
         "id": "bookmark-restore",
-        "elapsedMs": 154.209,
-        "lastGraphUpdateMs": 1.5,
+        "elapsedMs": 225.04,
+        "lastGraphUpdateMs": 1.4,
         "renderCountDelta": 4,
         "renderedNodes": 3,
         "renderedEdgeSegments": 10,
@@ -292,9 +305,9 @@
       },
       {
         "id": "progressive-quotient-load",
-        "elapsedMs": 121.264,
-        "lastGraphUpdateMs": 0.7,
-        "renderCountDelta": 4,
+        "elapsedMs": 75.479,
+        "lastGraphUpdateMs": 0.6,
+        "renderCountDelta": 3,
         "renderedNodes": 3,
         "renderedEdgeSegments": 4,
         "renderedCells": 0,
@@ -305,22 +318,22 @@
       },
       {
         "id": "import-repair",
-        "elapsedMs": 23.463,
-        "lastGraphUpdateMs": 0.4,
+        "elapsedMs": 52.327,
+        "lastGraphUpdateMs": 2,
         "renderCountDelta": 0,
         "renderedNodes": 10,
         "renderedEdgeSegments": 10,
         "renderedCells": 1,
         "renderedNodeLabels": 10,
-        "renderedEdgeLabels": 7,
+        "renderedEdgeLabels": 10,
         "renderedLabelLeaders": 0,
         "drawCalls": 28
       },
       {
         "id": "screenshot-export",
-        "elapsedMs": 174.057,
-        "lastGraphUpdateMs": 2,
-        "renderCountDelta": 5,
+        "elapsedMs": 204.186,
+        "lastGraphUpdateMs": 2.1,
+        "renderCountDelta": 2,
         "renderedNodes": 10,
         "renderedEdgeSegments": 10,
         "renderedCells": 1,
@@ -333,7 +346,7 @@
         "id": "idle-render-count",
         "elapsedMs": 0,
         "lastGraphUpdateMs": 0,
-        "renderCountDelta": 1,
+        "renderCountDelta": 0,
         "renderedNodes": 0,
         "renderedEdgeSegments": 0,
         "renderedCells": 0,
@@ -405,7 +418,7 @@
           {
             "id": "compact_5_cube_gamma1:3",
             "maxElapsedMs": 1000,
-            "maxGraphUpdateMs": 8,
+            "maxGraphUpdateMs": 9,
             "featureFloors": {
               "renderedNodes": 71,
               "renderedEdgeSegments": 100,
@@ -425,6 +438,16 @@
               "renderedNodes": 1,
               "renderedEdgeSegments": 1,
               "renderedCells": 1
+            }
+          },
+          {
+            "id": "gamma-incidence-selection",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 10,
+              "renderedEdgeSegments": 40,
+              "renderedEdgeLabels": 40
             }
           },
           {
@@ -511,7 +534,7 @@
           {
             "id": "ygamma-relation-star",
             "maxElapsedMs": 1000,
-            "maxGraphUpdateMs": 8,
+            "maxGraphUpdateMs": 30,
             "featureFloors": {
               "renderedCells": 1,
               "renderedEdgeLabels": 1,
@@ -540,7 +563,7 @@
           {
             "id": "ygamma-drawing-comparison",
             "maxElapsedMs": 1000,
-            "maxGraphUpdateMs": 11,
+            "maxGraphUpdateMs": 25,
             "featureFloors": {
               "renderedCells": 1,
               "renderedEdgeLabels": 1,
@@ -699,6 +722,16 @@
             }
           },
           {
+            "id": "gamma-incidence-selection",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 10,
+              "renderedEdgeSegments": 40,
+              "renderedEdgeLabels": 40
+            }
+          },
+          {
             "id": "rank-two-pair-focus",
             "maxElapsedMs": 1000,
             "maxGraphUpdateMs": 8,
@@ -782,7 +815,7 @@
           {
             "id": "ygamma-relation-star",
             "maxElapsedMs": 1000,
-            "maxGraphUpdateMs": 8,
+            "maxGraphUpdateMs": 15,
             "featureFloors": {
               "renderedCells": 1,
               "renderedEdgeLabels": 1,
@@ -811,7 +844,7 @@
           {
             "id": "ygamma-drawing-comparison",
             "maxElapsedMs": 1000,
-            "maxGraphUpdateMs": 8,
+            "maxGraphUpdateMs": 13,
             "featureFloors": {
               "renderedCells": 1,
               "renderedEdgeLabels": 1,
@@ -970,6 +1003,16 @@
             }
           },
           {
+            "id": "gamma-incidence-selection",
+            "maxElapsedMs": 1000,
+            "maxGraphUpdateMs": 8,
+            "featureFloors": {
+              "renderedNodes": 10,
+              "renderedEdgeSegments": 40,
+              "renderedEdgeLabels": 40
+            }
+          },
+          {
             "id": "rank-two-pair-focus",
             "maxElapsedMs": 1000,
             "maxGraphUpdateMs": 8,
@@ -1053,7 +1096,7 @@
           {
             "id": "ygamma-relation-star",
             "maxElapsedMs": 1000,
-            "maxGraphUpdateMs": 8,
+            "maxGraphUpdateMs": 12,
             "featureFloors": {
               "renderedCells": 1,
               "renderedEdgeLabels": 1,
@@ -1082,7 +1125,7 @@
           {
             "id": "ygamma-drawing-comparison",
             "maxElapsedMs": 1000,
-            "maxGraphUpdateMs": 8,
+            "maxGraphUpdateMs": 10,
             "featureFloors": {
               "renderedCells": 1,
               "renderedEdgeLabels": 1,

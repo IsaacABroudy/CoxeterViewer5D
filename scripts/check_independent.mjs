@@ -91,6 +91,14 @@ for (let index = 1; index <= 15; index += 1) {
   );
 }
 
+checks.push(
+  run("python", [
+    "scripts/coxiter_check_compact.py",
+    "public/examples/tumarkin_5d_8facet_g12221_01.json",
+    "--require-external",
+  ]),
+);
+
 const coxiterAvailability =
   process.platform === "win32"
     ? run("wsl", ["which", "coxiter"])

@@ -117,7 +117,7 @@ export function quotientToGeneratedBall(
       compactLabel: vertex.label,
       word: vertex.representativeWord ?? [],
       length: vertex.representativeWord?.length ?? 0,
-      // JNW state quotients are not Cayley word shells: their vertices are
+      // JNW move-kernel covers are not Cayley word shells: their vertices are
       // states in a finite orbit. A non-coplanar orbit layout keeps those
       // state labels visible and avoids implying this is the Davis complex.
       position: jnwStateOrbit
@@ -346,6 +346,7 @@ function stateOrbitPosition(
 function isJnwStateQuotient(quotient: QuotientComplex): boolean {
   return (
     quotient.name.toLowerCase().includes("jnw state quotient") ||
+    quotient.name.toLowerCase().includes("jnw move-kernel cover") ||
     quotient.game?.assignments.some(
       (assignment) => assignment.id === "jnw-state-directions",
     ) === true

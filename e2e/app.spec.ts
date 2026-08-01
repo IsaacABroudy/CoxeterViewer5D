@@ -87,12 +87,16 @@ async function visibleNodeCount(page: Page): Promise<Locator | null> {
 
 async function sceneStats(page: Page): Promise<{
   mode?: string;
+  graphNodes?: number;
   renderedNodes?: number;
   renderedEdgeSegments?: number;
   renderedCells?: number;
   renderedNodeLabels?: number;
   renderedEdgeLabels?: number;
   renderedLabelLeaders?: number;
+  labelRenderer?: "sprite" | "sdf-batch";
+  labelRendererFallbackReason?: string;
+  pickingStrategy?: "linear" | "sphere-prefilter" | "bvh" | "gpu";
   drawCalls?: number;
   frame?: number;
   renderCount?: number;
@@ -107,12 +111,18 @@ async function sceneStats(page: Page): Promise<{
       window as Window & {
         __coxeterSceneStats?: {
           mode: string;
+          graphNodes: number;
           renderedNodes: number;
           renderedEdgeSegments: number;
           renderedCells: number;
           renderedNodeLabels: number;
           renderedEdgeLabels: number;
           renderedLabelLeaders: number;
+          labelRenderer: "sprite" | "sdf-batch";
+          labelRendererFallbackReason?: string;
+          picking: {
+            strategy?: "linear" | "sphere-prefilter" | "bvh" | "gpu";
+          };
           drawCalls: number;
           frame: number;
           renderCount: number;
@@ -128,12 +138,16 @@ async function sceneStats(page: Page): Promise<{
     return stats
       ? {
           mode: stats.mode,
+          graphNodes: stats.graphNodes,
           renderedNodes: stats.renderedNodes,
           renderedEdgeSegments: stats.renderedEdgeSegments,
           renderedCells: stats.renderedCells,
           renderedNodeLabels: stats.renderedNodeLabels,
           renderedEdgeLabels: stats.renderedEdgeLabels,
           renderedLabelLeaders: stats.renderedLabelLeaders,
+          labelRenderer: stats.labelRenderer,
+          labelRendererFallbackReason: stats.labelRendererFallbackReason,
+          pickingStrategy: stats.picking?.strategy,
           drawCalls: stats.drawCalls,
           frame: stats.frame,
           renderCount: stats.renderCount,
@@ -142,6 +156,49 @@ async function sceneStats(page: Page): Promise<{
         }
       : {};
   });
+}
+
+function largeRankOneQuotient(vertexCount = 3_000) {
+  const evenVertexCount = vertexCount - (vertexCount % 2);
+  const vertices = Array.from(
+    { length: evenVertexCount },
+    (_unused, index) => ({
+      id: `q${index}`,
+      label: `Q_${index + 1}`,
+    }),
+  );
+  const edges = [];
+  for (let index = 0; index < evenVertexCount; index += 2) {
+    const forwardId = `e${index}`;
+    const reverseId = `e${index + 1}`;
+    edges.push(
+      {
+        id: forwardId,
+        source: `q${index}`,
+        target: `q${index + 1}`,
+        generator: 0,
+        inverseEdgeId: reverseId,
+        label: "s0",
+      },
+      {
+        id: reverseId,
+        source: `q${index + 1}`,
+        target: `q${index}`,
+        generator: 0,
+        inverseEdgeId: forwardId,
+        label: "s0",
+      },
+    );
+  }
+  return {
+    schemaVersion: 1,
+    name: "Large progressive quotient fixture",
+    generatorRank: 1,
+    vertices,
+    edges,
+    twoCells: [],
+    warnings: ["Synthetic performance fixture."],
+  };
 }
 
 test("loads the app shell", async ({ page }) => {
@@ -310,11 +367,11 @@ test("opens the Tumarkin eight-facet catalogue without adding fake examples", as
   await page.goto("/");
   await switchToResearchMode(page);
 
-  await page.getByRole("button", { name: /15 eight-facet 5D cases/i }).click();
+  await page.getByRole("button", { name: /16 eight-facet 5D cases/i }).click();
   await expect(
     page.getByLabel(/Tumarkin eight-facet catalogue/i),
   ).toBeVisible();
-  await expect(page.getByText(/Showing 15\/15/i)).toBeVisible();
+  await expect(page.getByText(/Showing 16\/16/i)).toBeVisible();
   await expect(
     page
       .getByText(/Certified bundled Coxeter-system JSON is available/i)
@@ -324,6 +381,13 @@ test("opens the Tumarkin eight-facet catalogue without adding fake examples", as
   await page.getByLabel(/Search catalogue/i).fill("08");
   await expect(page.getByText(/Tumarkin G11411 #8/i)).toBeVisible();
   await expect(page.getByText(/Tumarkin G11411 #1/i)).toHaveCount(0);
+
+  await page.getByLabel(/Search catalogue/i).fill("G12221");
+  await expect(page.getByText(/Tumarkin G12221 \(unique\)/i)).toBeVisible();
+  await page.getByRole("button", { name: "Load example" }).click();
+  await expect(page.getByLabel("Example")).toHaveValue(
+    "tumarkin-5d-8facet-g12221-01",
+  );
 });
 
 test("changing radius updates the node count when controls are available", async ({
@@ -722,7 +786,6 @@ test("compact 5-cube Y_Gamma labels every visible semantic edge", async ({
   await expect
     .poll(async () => (await sceneStats(page)).renderedLabelLeaders ?? 0)
     .toBeGreaterThan(0);
-
   const yGammaReaderControls = page.getByTestId("ygamma-reader");
   await yGammaReaderControls
     .getByTestId("ygamma-advanced-readability")
@@ -754,14 +817,14 @@ test("compact 5-cube Y_Gamma labels every visible semantic edge", async ({
   const comparisonRight = page.getByTestId("ygamma-comparison-right");
   await expect(comparisonLeft).toBeVisible();
   await expect(comparisonRight).toBeVisible();
-  for (const pane of [comparisonLeft, comparisonRight]) {
-    await expect
-      .poll(async () => {
-        const box = await pane.locator(".scene-shell").boundingBox();
-        return box?.height ?? 0;
-      })
-      .toBeGreaterThan(360);
-  }
+  const comparisonScene = page.getByTestId("ygamma-comparison-scene");
+  await expect(comparisonScene.locator("canvas")).toHaveCount(1);
+  await expect
+    .poll(async () => {
+      const box = await comparisonScene.locator(".scene-shell").boundingBox();
+      return box?.height ?? 0;
+    })
+    .toBeGreaterThan(360);
 
   const readerControls = page.locator("section.panel").filter({
     has: page.getByRole("heading", { name: /start here/i }),
@@ -833,7 +896,7 @@ test("Y_Gamma game workflows expose cochain and JNW state tools", async ({
     gamePanel.getByText(/Experimental non-JNW|Failed checks/i),
   ).toBeVisible();
   await gamePanel
-    .getByRole("button", { name: /show JNW state quotient/i })
+    .getByRole("button", { name: /show state-orbit model/i })
     .click();
   await expect
     .poll(async () => (await sceneStats(page)).renderedNodes ?? 0)
@@ -877,6 +940,18 @@ test("opens the Coxeter defining graph Gamma as a third source view", async ({
   await expect(gammaPanel.getByText(/k\(Gamma\)/i)).toBeVisible();
   await expect(gammaPanel.getByText(/0\.25 = 1 - 3\/2 \+ 3\/4/i)).toBeVisible();
   await expect(gammaPanel.getByText(/m=2 \(/i)).toBeVisible();
+  const relationComponents = gammaPanel.getByLabel(
+    /Relation-order connected components/i,
+  );
+  await expect(relationComponents).toBeVisible();
+  await expect(
+    relationComponents.getByLabel(/m=2 connected components/i),
+  ).toContainText(/s0.*s2/i);
+  await expect(
+    relationComponents
+      .locator("p.gamma-isolated-generators")
+      .filter({ hasText: "Gamma_2" }),
+  ).toContainText(/s1/i);
   await expect(
     gammaPanel.getByLabel(/Gamma relation color legend/i),
   ).toBeVisible();
@@ -907,6 +982,36 @@ test("compact 5-cube Gamma labels every defining edge", async ({ page }) => {
   const gammaPanel = page.locator("section.panel").filter({
     has: page.getByRole("heading", { name: /coxeter defining graph/i }),
   });
+  await gammaPanel.getByLabel(/Inspect Gamma generator/i).selectOption("0");
+  const g0Partition = gammaPanel.getByLabel(
+    /Incident relation partition for g0/i,
+  );
+  await expect(g0Partition).toBeVisible();
+  await expect(g0Partition.getByText(/finite degree 8/i)).toBeVisible();
+  await expect(g0Partition.getByText(/m=2/i).first()).toBeVisible();
+  await expect(g0Partition.getByText(/6 neighbors/i)).toBeVisible();
+  await expect(g0Partition.getByText(/m=3/i).first()).toBeVisible();
+  await expect(g0Partition.getByText(/2 neighbors/i)).toBeVisible();
+  await expect(g0Partition.getByText(/m=inf/i).first()).toBeVisible();
+  await expect(
+    g0Partition.getByText(
+      /all 9 other generators are accounted for exactly once/i,
+    ),
+  ).toBeVisible();
+  const orderThreeComponents = gammaPanel.getByLabel(
+    /m=3 connected components/i,
+  );
+  await expect(orderThreeComponents).toContainText(
+    /2 edge-bearing components/i,
+  );
+  await expect(orderThreeComponents).toContainText(
+    /g0.*g1.*g2.*g3.*g4.*g5.*g6.*g7/i,
+  );
+  await expect(orderThreeComponents).toContainText(/g8.*g9/i);
+  await g0Partition.getByRole("button", { name: "g8" }).click();
+  await expect(
+    gammaPanel.getByLabel(/Incident relation partition for g8/i),
+  ).toBeVisible();
   await gammaPanel.getByRole("button", { name: /2D planar/i }).click();
   await expect(gammaPanel.getByText(/K5 obstruction/i)).toBeVisible();
   await expect(gammaPanel.getByText(/not planar/i)).toBeVisible();
@@ -974,10 +1079,10 @@ test("research workflow opens the JNW cube legal-system demo", async ({
     page.getByText(/JNW faithful; 4\/4 legal/i).first(),
   ).toBeVisible();
   await expect(page.getByLabel(/current model/i)).toContainText(
-    /JNW state quotient \/ browser diagnostic/i,
+    /JNW move-kernel cover \/ in-repo diagnostic/i,
   );
   await expect(page.getByLabel(/Where am I in JNW/i)).toContainText(
-    /Coxeter system Gamma.*Y_Gamma fundamental domain.*JNW state quotient/i,
+    /Coxeter system Gamma.*Y_Gamma fundamental domain.*JNW move-kernel cover/i,
   );
   const gamePanel = page.locator("section.panel").filter({
     has: page.getByRole("heading", { name: /quotient \+ games/i }),
@@ -991,6 +1096,15 @@ test("research workflow opens the JNW cube legal-system demo", async ({
   await expect(gamePanel.getByLabel(/Current JNW setup/i)).toBeVisible();
   await expect(gamePanel.getByLabel(/Current JNW setup/i)).toContainText(
     /S_\d = \{v/i,
+  );
+  await expect(gamePanel.getByLabel(/Current JNW setup/i)).toContainText(
+    /\{v000, v010, v110, v111\}/,
+  );
+  await expect(gamePanel.getByLabel(/Current JNW setup/i)).toContainText(
+    /Four lifts over Y_Gamma; 16 geometric rails and 12 square cells/i,
+  );
+  await expect(gamePanel.getByLabel(/Current JNW setup/i)).toContainText(
+    /256 vertices; not the compact cover shown here/i,
   );
   await expect(
     gamePanel.getByText(/JNW cube bipartition\/color-class preset/i),
@@ -1051,10 +1165,12 @@ test("research workflow opens the JNW cube legal-system demo", async ({
     .getByRole("button", { name: /Descending link at selected state/i })
     .click();
   await expect(page.getByLabel(/current model/i)).toContainText(
-    /JNW state quotient/i,
+    /JNW move-kernel cover/i,
   );
   await expect(
-    page.getByText(/State vertex in the JNW orbit quotient/i),
+    page.getByText(
+      /This link is inspected at a selected state vertex.*move-kernel cover/i,
+    ),
   ).toBeVisible();
   const relationSelect = gamePanel.getByLabel(/Choose relation/i);
   await expect(relationSelect).toBeVisible();
@@ -1278,4 +1394,57 @@ test("invalid JSON import shows a validation error when import UI is exposed", a
       ),
     )
     .toBe(true);
+});
+
+test("large quotient import validates progressively and enables dense renderer paths", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await page.goto("/");
+  await switchToResearchMode(page);
+
+  const input = page.getByTestId("import-quotient-input");
+  await input.setInputFiles({
+    name: "large-progressive-quotient.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(largeRankOneQuotient())),
+  });
+
+  const progress = page.getByTestId("quotient-import-progress");
+  await expect(progress).toContainText(/parsed and validated/i, {
+    timeout: 60_000,
+  });
+  await expect(progress).toContainText(/3,000 vertices.*3,000 edges/i);
+  await expect(
+    page.getByText(/Large progressive quotient fixture/).first(),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /^Whole ball$/ }).click();
+  await page
+    .getByRole("group", { name: /^Label scope$/ })
+    .getByRole("button", { name: /^budgeted$/ })
+    .click();
+  await expect
+    .poll(async () => (await sceneStats(page)).renderedNodes ?? 0, {
+      timeout: 30_000,
+    })
+    .toBe(3_000);
+  await expect
+    .poll(async () => {
+      const stats = await sceneStats(page);
+      return {
+        renderer: stats.labelRenderer,
+        reason: stats.labelRendererFallbackReason,
+      };
+    })
+    .toEqual({ renderer: "sdf-batch", reason: undefined });
+
+  const scene = page.getByTestId("scene-canvas");
+  const box = await scene.boundingBox();
+  expect(box).not.toBeNull();
+  if (box) {
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  }
+  await expect
+    .poll(async () => (await sceneStats(page)).pickingStrategy)
+    .toBe("gpu");
 });

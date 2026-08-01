@@ -1,5 +1,5 @@
 import { RotateCcw } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import {
   AmbientLight,
   BufferAttribute,
@@ -10,6 +10,7 @@ import {
   DirectionalLight,
   DoubleSide,
   Group,
+  InstancedBufferAttribute,
   InstancedMesh,
   LineBasicMaterial,
   LineSegments,
@@ -34,10 +35,31 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 import type { SceneRevisionSet } from "../app/stableHash";
 import {
+  createGpuPickMaterial,
+  cssPointInElement,
+  GpuIdPicker,
+  gpuPickIdToColor,
+} from "./gpuPicking";
+import {
   compactLabelText,
+  type PickedLabelEntry,
   selectLabelBudget,
   selectSegmentLabelBudget,
 } from "./labels";
+import {
+  intersectPickingCandidateTriangles,
+  PickingSpatialIndex,
+  type PickingRay,
+  type PickingSpatialItem,
+} from "./pickingSpatialIndex";
+import {
+  buildSdfGlyphAtlas,
+  checkSdfTextCapability,
+  createSdfTextBatch,
+  type SdfGlyphAtlas,
+  type SdfTextBatch,
+  type SdfTextLabel,
+} from "./sdfTextBatch";
 
 export type LabelScope = "off" | "focused" | "budgeted";
 export type LocalCellRenderMode =
@@ -60,6 +82,8 @@ export interface SceneNode {
   stateRole?: "in-state" | "out-of-state";
   alwaysLabel?: boolean;
   labelPriority?: number;
+  /** Drawing-only size multiplier for labels that must remain legible at a wide camera frame. */
+  labelScale?: number;
   ghost?: boolean;
   hidden?: boolean;
   drawingOnly?: boolean;
@@ -78,6 +102,8 @@ export interface SceneEdge {
   labelPosition?: [number, number, number];
   labelLeader?: boolean;
   labelPriority?: number;
+  /** Drawing-only size multiplier; it does not change the semantic edge label. */
+  labelScale?: number;
   suppressSemanticLabel?: boolean;
   emphasis?: "readable-boundary";
   selectedHighlight?: "color" | "outline";
@@ -123,9 +149,13 @@ export interface SpatialPickPrefilterStats {
   usedPrefilter: boolean;
   minimumEntryCount: number;
   padding: number;
+  strategy?: "linear" | "sphere-prefilter" | "bvh" | "gpu";
+  buildMs?: number;
+  queryMs?: number;
 }
 
 export interface SceneRenderStats {
+  runtimeId: string;
   mode: "global" | "on-graph";
   graphNodes: number;
   graphEdges: number;
@@ -136,6 +166,8 @@ export interface SceneRenderStats {
   renderedNodeLabels: number;
   renderedEdgeLabels: number;
   renderedLabelLeaders: number;
+  labelRenderer: "sprite" | "sdf-batch";
+  labelRendererFallbackReason?: string;
   drawCalls: number;
   triangles: number;
   frame: number;
@@ -240,6 +272,10 @@ const fallbackGeneratorColors = [
 ];
 const defaultMaxNodeLabels = 80;
 const defaultMaxEdgeLabels = 120;
+const gpuPickingEntryThreshold = 2_500;
+const sdfLabelBatchThreshold = 96;
+const semanticSdfLabelBatchThreshold = 64;
+const sdfAtlasCacheByteBudget = 24 * 1024 * 1024;
 const unitY = new Vector3(0, 1, 0);
 const unitZ = new Vector3(0, 0, 1);
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
@@ -272,7 +308,7 @@ export interface CameraMovementDirectionalScale {
   vertical: number;
 }
 
-export function SceneView({
+function SceneViewComponent({
   nodes,
   edges,
   cells,
@@ -454,6 +490,12 @@ export function SceneView({
   );
 }
 
+// Most application controls do not change scene props. Memoization keeps those
+// React updates out of the renderer boundary altogether; revision tokens still
+// decide which Three.js layers need work when a scene prop does change.
+export const SceneView = memo(SceneViewComponent);
+SceneView.displayName = "SceneView";
+
 interface GraphUpdate {
   nodes: SceneNode[];
   edges: SceneEdge[];
@@ -516,8 +558,9 @@ interface NodeMeshBucket {
   nodeIds: string[];
 }
 
-interface CellPickEntry extends SpatialPickSphere {
-  object: Mesh;
+interface GpuPickRecord {
+  kind: "node" | "cell";
+  id: string;
 }
 
 interface EdgeLabelCandidate {
@@ -537,8 +580,13 @@ declare global {
   }
 }
 
+let nextSceneRuntimeId = 1;
+
 class SceneRuntime {
+  private readonly runtimeId = `scene-runtime-${nextSceneRuntimeId++}`;
   private readonly scene = new Scene();
+  private readonly gpuPickingScene = new Scene();
+  private readonly gpuNodePickingScene = new Scene();
   private readonly camera = new PerspectiveCamera(55, 1, 0.1, 10_000);
   private readonly renderer = new WebGLRenderer({
     antialias: true,
@@ -547,6 +595,7 @@ class SceneRuntime {
   });
   private readonly controls: OrbitControls;
   private readonly raycaster = new Raycaster();
+  private readonly gpuIdPicker = new GpuIdPicker();
   private readonly pointer = new Vector2();
   private pointerDownPosition: { x: number; y: number } | undefined;
   private readonly nodeGroup = new Group();
@@ -557,11 +606,17 @@ class SceneRuntime {
   private readonly labelGroup = new Group();
   private readonly referenceGroup = new Group();
   private readonly resizeObserver: ResizeObserver;
+  private resizeFrame: number | undefined;
+  private readonly resizeFallbacks = new Set<number>();
+  private viewportWidth = 0;
+  private viewportHeight = 0;
+  private viewportPixelRatio = 0;
   private animationFrame: number | undefined;
   private dampingFramesRemaining = 0;
   private framedGraphKey = "";
   private lastStructureKey = "";
   private lastAppearanceKey = "";
+  private lastRevisionSet: SceneRevisionSet | undefined;
   private lastLayoutVersion = "";
   private lastResetSignal = 0;
   private lastFocusSignal = 0;
@@ -569,11 +624,19 @@ class SceneRuntime {
   private cellBuckets: CellVisualBucket[] = [];
   private cellGeometryCache = new Map<string, BufferGeometry>();
   private cellVerticesById = new Map<string, Vector3[]>();
-  private cellPickObjects: Mesh[] = [];
-  private cellPickIndex: CellPickEntry[] = [];
-  private readonly cellPickEntryScratch: CellPickEntry[] = [];
-  private readonly cellPickObjectScratch: Mesh[] = [];
-  private readonly pickCenterScratch = new Vector3();
+  private readonly cellPickingIndex = new PickingSpatialIndex<SceneCell>({
+    leafSize: 8,
+  });
+  private cellPickingBuildMs = 0;
+  private readonly gpuPickRecords = new Map<number, GpuPickRecord>();
+  private gpuPickingActive = false;
+  private gpuPickEpoch = 0;
+  private gpuHoverRequest = 0;
+  private nodeLookupSource: SceneNode[] | undefined;
+  private nodesById = new Map<string, SceneNode>();
+  private adjacencySource: SceneEdge[] | undefined;
+  private neighborIdsByNode = new Map<string, Set<string>>();
+  private readonly emptyNeighborIds = new Set<string>();
   private onSelectNode: (nodeId: string) => void = () => undefined;
   private onSelectCell: (cellId: string) => void = () => undefined;
   private onHoverCell: ((cellId: string | undefined) => void) | undefined;
@@ -582,21 +645,34 @@ class SceneRuntime {
   private hoverFrame: number | undefined;
   private onRenderStats: ((stats: SceneRenderStats) => void) | undefined;
   private pickingEnabled = true;
-  private stats: SceneRenderStats = emptySceneStats();
+  private stats: SceneRenderStats = emptySceneStats(this.runtimeId);
+  private lastDetailedStatsPublishAt = 0;
+  private notifyStatsOnNextRender = false;
   private longTaskObserver: PerformanceObserver | undefined;
   private frame = 0;
   private previousFrameTime = performance.now();
   private lastGraphUpdate: GraphUpdate | undefined;
   private readonly movementKeys = new Set<string>();
   private fastCameraMove = false;
+  private cameraInteractionActive = false;
   private colorScheme: SceneColorScheme = "light";
+  private readonly sdfTextCapability = checkSdfTextCapability();
+  private sdfTextAvailable = this.sdfTextCapability.supported;
+  private sdfTextFallbackReason = this.sdfTextCapability.reason;
+  private activeSdfBatch: SdfTextBatch | undefined;
+  private readonly sdfAtlasCache = new Map<string, SdfGlyphAtlas>();
+  private sdfAtlasCacheBytes = 0;
 
   constructor(private readonly mount: HTMLDivElement) {
+    this.stats.labelRendererFallbackReason = this.sdfTextFallbackReason;
     this.setColorScheme("light");
     this.camera.position.set(0, -9, 6);
 
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-    this.renderer.setSize(mount.clientWidth, mount.clientHeight);
+    this.viewportPixelRatio = Math.min(window.devicePixelRatio, 1.5);
+    this.viewportWidth = Math.max(1, mount.clientWidth);
+    this.viewportHeight = Math.max(1, mount.clientHeight);
+    this.renderer.setPixelRatio(this.viewportPixelRatio);
+    this.renderer.setSize(this.viewportWidth, this.viewportHeight);
     mount.appendChild(this.renderer.domElement);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -638,7 +714,7 @@ class SceneRuntime {
     window.addEventListener("keydown", this.handleKeyDown);
     window.addEventListener("keyup", this.handleKeyUp);
     window.addEventListener("blur", this.handleWindowBlur);
-    this.resizeObserver = new ResizeObserver(() => this.resize());
+    this.resizeObserver = new ResizeObserver(() => this.resize("resize"));
     this.resizeObserver.observe(mount);
     this.requestRender("init");
   }
@@ -651,6 +727,7 @@ class SceneRuntime {
     this.onRenderStats = update.onRenderStats;
     this.pickingEnabled = update.pickingEnabled;
     this.setColorScheme(update.colorScheme);
+    this.ensureSceneLookups(update);
     if (update.layoutVersion !== this.lastLayoutVersion) {
       this.lastLayoutVersion = update.layoutVersion;
       this.scheduleResize("layout-change");
@@ -670,13 +747,31 @@ class SceneRuntime {
 
     const updateStartedAt = performance.now();
     const structureChanged = structureKey !== this.lastStructureKey;
+    const previousRevisions = this.lastRevisionSet;
     if (structureChanged) {
       this.lastStructureKey = structureKey;
       this.rebuildStructure(update);
     }
 
     this.lastAppearanceKey = appearanceKey;
-    this.updateAppearance(update);
+    const appearanceLayerChanged =
+      structureChanged ||
+      !update.revisionSet ||
+      !previousRevisions ||
+      update.revisionSet.appearanceVersion !==
+        previousRevisions.appearanceVersion;
+    const labelLayerChanged =
+      structureChanged ||
+      !update.revisionSet ||
+      !previousRevisions ||
+      update.revisionSet.labelVersion !== previousRevisions.labelVersion;
+    if (appearanceLayerChanged) {
+      this.updateVisualAppearance(update);
+    }
+    if (labelLayerChanged) {
+      this.updateLabelAppearance(update);
+    }
+    this.lastRevisionSet = update.revisionSet;
     this.frameGraph(update);
     this.handleCameraSignals(update);
     this.stats = {
@@ -691,7 +786,7 @@ class SceneRuntime {
       workerGenerationMs: update.workerGenerationMs,
       revisions: update.revisionSet,
     };
-    this.publishStats({ notifyCallback: true });
+    this.notifyStatsOnNextRender = true;
     this.requestRender("scene-update");
   }
 
@@ -759,6 +854,13 @@ class SceneRuntime {
     if (this.hoverFrame !== undefined) {
       window.cancelAnimationFrame(this.hoverFrame);
     }
+    if (this.resizeFrame !== undefined) {
+      window.cancelAnimationFrame(this.resizeFrame);
+    }
+    for (const timeoutId of this.resizeFallbacks) {
+      window.clearTimeout(timeoutId);
+    }
+    this.resizeFallbacks.clear();
     this.resizeObserver.disconnect();
     this.renderer.domElement.removeEventListener(
       "pointerdown",
@@ -781,8 +883,16 @@ class SceneRuntime {
     this.longTaskObserver?.disconnect();
     this.controls.dispose();
     this.releaseLabelSprites();
+    for (const atlas of this.sdfAtlasCache.values()) {
+      atlas.dispose();
+    }
+    this.sdfAtlasCache.clear();
+    this.sdfAtlasCacheBytes = 0;
     clearGroup(this.scene);
-    this.clearCellPickObjects();
+    clearGroup(this.gpuPickingScene);
+    clearGroup(this.gpuNodePickingScene);
+    this.gpuIdPicker.dispose();
+    this.cellPickingIndex.clear();
     for (const geometry of this.cellGeometryCache.values()) {
       geometry.dispose();
     }
@@ -835,7 +945,14 @@ class SceneRuntime {
     clearGroup(this.cellOverlayGroup);
     this.releaseLabelSprites();
     clearGroup(this.referenceGroup);
-    this.clearCellPickObjects();
+    this.cellPickingIndex.clear();
+    clearGroup(this.gpuPickingScene);
+    clearGroup(this.gpuNodePickingScene);
+    this.gpuPickRecords.clear();
+    this.gpuPickEpoch += 1;
+    this.gpuPickingActive =
+      update.nodes.length + (update.showCells ? update.cells.length : 0) >=
+      gpuPickingEntryThreshold;
     this.nodeMeshes = [];
     this.cellBuckets = [];
     this.cellVerticesById = new Map();
@@ -844,6 +961,9 @@ class SceneRuntime {
     const renderedCells = this.addCells(update);
     const renderedEdgeSegments = this.addEdges(update);
     const renderedNodes = this.addNodes(update);
+    if (this.gpuPickingActive) {
+      this.buildGpuPickingScene(update);
+    }
     this.stats = {
       ...this.stats,
       renderedNodes,
@@ -860,14 +980,97 @@ class SceneRuntime {
     };
   }
 
-  private updateAppearance(update: GraphUpdate) {
+  private buildGpuPickingScene(update: GraphUpdate): void {
+    let nextPickId = 1;
+    const visibleNodes = update.nodes.filter((node) => !node.hidden);
+    if (visibleNodes.length > 0) {
+      const geometry = new SphereGeometry(0.1, 6, 4);
+      const colors = new Float32Array(visibleNodes.length * 3);
+      const mesh = new InstancedMesh(
+        geometry,
+        createGpuPickMaterial(true),
+        visibleNodes.length,
+      );
+      const transform = new Object3D();
+      visibleNodes.forEach((node, index) => {
+        const position = update.nodePositions.get(node.id);
+        if (!position) {
+          transform.scale.setScalar(0);
+        } else {
+          transform.position.copy(position);
+          // Use the largest ordinary node scale so the adaptive picker does
+          // not become harder to hit when appearance-only selection changes.
+          transform.scale.setScalar(1.55 * (node.nodeScale ?? 1));
+        }
+        transform.updateMatrix();
+        mesh.setMatrixAt(index, transform.matrix);
+        const pickId = nextPickId++;
+        this.gpuPickRecords.set(pickId, { kind: "node", id: node.id });
+        colors.set(gpuPickIdToColor(pickId), index * 3);
+      });
+      geometry.setAttribute(
+        "pickColor",
+        new InstancedBufferAttribute(colors, 3),
+      );
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 2;
+      this.gpuNodePickingScene.add(mesh);
+    }
+
+    const positions: number[] = [];
+    const colors: number[] = [];
+    if (update.showCells) {
+      for (const cell of update.cells) {
+        const vertices = this.cellVerticesById.get(cell.id);
+        if (!vertices || vertices.length < 3) {
+          continue;
+        }
+        const pickId = nextPickId++;
+        const pickColor = gpuPickIdToColor(pickId);
+        this.gpuPickRecords.set(pickId, { kind: "cell", id: cell.id });
+        for (let index = 1; index < vertices.length - 1; index += 1) {
+          for (const vertex of [
+            vertices[0],
+            vertices[index],
+            vertices[index + 1],
+          ]) {
+            positions.push(vertex.x, vertex.y, vertex.z);
+            colors.push(...pickColor);
+          }
+        }
+      }
+    }
+    if (positions.length > 0) {
+      const geometry = new BufferGeometry();
+      geometry.setAttribute(
+        "position",
+        new BufferAttribute(new Float32Array(positions), 3),
+      );
+      geometry.setAttribute(
+        "pickColor",
+        new BufferAttribute(new Float32Array(colors), 3),
+      );
+      const mesh = new Mesh(geometry, createGpuPickMaterial(false));
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 1;
+      this.gpuPickingScene.add(mesh);
+    }
+  }
+
+  private updateVisualAppearance(update: GraphUpdate) {
     this.updateNodeAppearance(update);
     clearGroup(this.edgeOverlayGroup);
     this.addEdgeOverlays(update);
     this.updateCellAppearance(update);
     clearGroup(this.cellOverlayGroup);
     this.addCellSelectionOverlay(update);
+  }
+
+  private updateLabelAppearance(update: GraphUpdate) {
     this.releaseLabelSprites();
+    this.stats.labelRenderer = "sprite";
+    this.stats.labelRendererFallbackReason = this.sdfTextFallbackReason;
     const renderedLabels = this.addLabels(update);
     this.stats = {
       ...this.stats,
@@ -921,12 +1124,11 @@ class SceneRuntime {
     const transform = new Matrix4();
     const color = new Color();
     const temp = new Object3D();
-    const selectedNeighbors = selectedNeighborIds(update);
-    const nodeById = new Map(update.nodes.map((node) => [node.id, node]));
+    const selectedNeighbors = this.neighborsFor(update.selectedNodeId);
 
     for (const bucket of this.nodeMeshes) {
       bucket.nodeIds.forEach((nodeId, index) => {
-        const node = nodeById.get(nodeId);
+        const node = this.nodesById.get(nodeId);
         const position = node ? update.nodePositions.get(node.id) : undefined;
         if (!node || node.hidden || !position) {
           temp.scale.setScalar(0);
@@ -971,20 +1173,6 @@ class SceneRuntime {
     }
   }
 
-  private clearCellPickObjects() {
-    for (const object of this.cellPickObjects) {
-      object.geometry.dispose();
-      const material = object.material;
-      if (Array.isArray(material)) {
-        material.forEach((entry) => disposeMaterial(entry));
-      } else {
-        disposeMaterial(material);
-      }
-    }
-    this.cellPickObjects = [];
-    this.cellPickIndex = [];
-  }
-
   private clearCellVisualGroup() {
     for (const child of [...this.cellGroup.children]) {
       child.removeFromParent();
@@ -1000,6 +1188,8 @@ class SceneRuntime {
   }
 
   private releaseLabelSprites() {
+    this.activeSdfBatch?.dispose();
+    this.activeSdfBatch = undefined;
     for (const child of [...this.labelGroup.children]) {
       child.removeFromParent();
       if (child instanceof Sprite) {
@@ -1157,12 +1347,11 @@ class SceneRuntime {
         readableBoundaryCoordinates.push(...coordinates);
       }
 
-      if (
-        edge.selectedHighlight === "outline" ||
-        (update.selectedNodeId &&
-          (edge.source === update.selectedNodeId ||
-            edge.target === update.selectedNodeId))
-      ) {
+      const incidentToSelection =
+        update.selectedNodeId !== undefined &&
+        (edge.source === update.selectedNodeId ||
+          edge.target === update.selectedNodeId);
+      if (incidentToSelection) {
         if (edge.selectedHighlight === "outline") {
           outlineHighlightCoordinates.push(...coordinates);
         } else {
@@ -1252,17 +1441,38 @@ class SceneRuntime {
     edges: number;
     leaders: number;
   } {
-    const edgeLabels = this.addEdgeLabels(update);
+    const nodeEntries = this.nodeLabelEntries(update);
+    const edgeEntries = selectEdgeLabelCandidates(update);
+    const sdfThreshold = update.semanticLabelsOnly
+      ? semanticSdfLabelBatchThreshold
+      : sdfLabelBatchThreshold;
+    if (
+      this.sdfTextAvailable &&
+      nodeEntries.length + edgeEntries.length >= sdfThreshold
+    ) {
+      try {
+        return this.addSdfLabels(update, nodeEntries, edgeEntries);
+      } catch (error) {
+        // Dense labels must remain complete when canvas/SDF creation fails.
+        this.sdfTextAvailable = false;
+        this.sdfTextFallbackReason =
+          error instanceof Error ? error.message : String(error);
+        this.stats.labelRendererFallbackReason = this.sdfTextFallbackReason;
+      }
+    }
+    const edgeLabels = this.addEdgeLabels(update, edgeEntries);
     return {
-      nodes: this.addNodeLabels(update),
+      nodes: this.addNodeLabels(update, nodeEntries),
       edges: edgeLabels.edges,
       leaders: edgeLabels.leaders,
     };
   }
 
-  private addNodeLabels(update: GraphUpdate): number {
-    const selectedNeighbors = selectedNeighborIds(update);
-    const entries = selectLabelBudget(
+  private nodeLabelEntries(
+    update: GraphUpdate,
+  ): Array<PickedLabelEntry<SceneNode>> {
+    const selectedNeighbors = this.neighborsFor(update.selectedNodeId);
+    return selectLabelBudget(
       update.nodes.filter((node) => !node.hidden),
       {
         enabled: update.showNodeLabels && update.labelScope !== "off",
@@ -1296,7 +1506,12 @@ class SceneRuntime {
           node.length,
       },
     );
+  }
 
+  private addNodeLabels(
+    update: GraphUpdate,
+    entries = this.nodeLabelEntries(update),
+  ): number {
     for (const { item: node, label } of entries) {
       const position = update.nodePositions.get(node.id);
       if (!position) {
@@ -1337,10 +1552,11 @@ class SceneRuntime {
         fontSize: 28,
         paddingX: 8,
         paddingY: 5,
-        worldHeight: 0.28,
+        worldHeight: 0.28 * (node.labelScale ?? 1),
       });
       sprite.center.set(0.5, 0);
-      sprite.position.copy(position).add(new Vector3(0, 0, 0.13));
+      sprite.position.copy(position);
+      sprite.position.z += 0.13 * (node.labelScale ?? 1);
       sprite.renderOrder = 20;
       this.labelGroup.add(sprite);
     }
@@ -1348,12 +1564,13 @@ class SceneRuntime {
     return entries.length;
   }
 
-  private addEdgeLabels(update: GraphUpdate): {
+  private addEdgeLabels(
+    update: GraphUpdate,
+    entries = selectEdgeLabelCandidates(update),
+  ): {
     edges: number;
     leaders: number;
   } {
-    const entries = selectEdgeLabelCandidates(update);
-
     const labelOccupancy = new ScreenLabelOccupancy(this.camera);
     let placedLabels = 0;
     let placedLeaders = 0;
@@ -1394,7 +1611,7 @@ class SceneRuntime {
         fontSize: 22,
         paddingX: 6,
         paddingY: 3,
-        worldHeight: 0.2,
+        worldHeight: 0.2 * (edge.labelScale ?? 1),
       });
       sprite.center.set(0.5, 0.5);
       sprite.position.copy(position.labelPosition);
@@ -1429,6 +1646,151 @@ class SceneRuntime {
     }
 
     return { edges: placedLabels, leaders: placedLeaders };
+  }
+
+  private addSdfLabels(
+    update: GraphUpdate,
+    nodeEntries: Array<PickedLabelEntry<SceneNode>>,
+    edgeEntries: EdgeLabelCandidate[],
+  ): { nodes: number; edges: number; leaders: number } {
+    const labels: SdfTextLabel[] = [];
+    for (const { item: node, label } of nodeEntries) {
+      const position = update.nodePositions.get(node.id);
+      if (!position) {
+        continue;
+      }
+      const style = sdfNodeLabelStyle(node);
+      labels.push({
+        id: `node:${node.id}`,
+        text: label,
+        anchor: [
+          position.x,
+          position.y,
+          position.z + 0.13 * (node.labelScale ?? 1),
+        ],
+        worldHeight: 0.28 * (node.labelScale ?? 1),
+        foreground: style.foreground,
+        background: style.background,
+        border: style.border,
+        center: [0.5, 0],
+        padding: [0.28, 0.18],
+        borderWidth: 0.035,
+      });
+    }
+
+    const labelOccupancy = new ScreenLabelOccupancy(this.camera);
+    const leaderCoordinates: number[] = [];
+    let edgeLabelCount = 0;
+    let leaderCount = 0;
+    for (const { edge, label } of edgeEntries) {
+      const source = update.nodePositions.get(edge.source);
+      const target = update.nodePositions.get(edge.target);
+      if (!source || !target) {
+        continue;
+      }
+      const placement = this.placeEdgeLabel(
+        edge,
+        label,
+        source,
+        target,
+        labelOccupancy,
+        importantEdgeLabel(edge, update),
+      );
+      if (!placement) {
+        continue;
+      }
+      const style = sdfEdgeLabelStyle(edge, update);
+      labels.push({
+        id: `edge:${edge.id}`,
+        text: label,
+        anchor: vectorToArray(placement.labelPosition),
+        worldHeight: 0.2 * (edge.labelScale ?? 1),
+        foreground: style.foreground,
+        background: style.background,
+        border: style.border,
+        center: [0.5, 0.5],
+        padding: [0.27, 0.14],
+        borderWidth: 0.04,
+      });
+      if (
+        shouldDrawEdgeLabelLeader(edge, update) &&
+        pushLabelLeaderCoordinates(
+          leaderCoordinates,
+          placement.anchor,
+          placement.labelPosition,
+          edge.id.startsWith("Gamma:e:") ? 0.62 : 0.38,
+        )
+      ) {
+        leaderCount += 1;
+      }
+      edgeLabelCount += 1;
+    }
+
+    if (labels.length === 0) {
+      return { nodes: 0, edges: 0, leaders: 0 };
+    }
+    const atlas = this.sdfAtlasFor(labels.map((label) => label.text));
+    this.activeSdfBatch = createSdfTextBatch(atlas, labels, {
+      renderOrder: 18,
+      depthTest: false,
+    });
+    this.labelGroup.add(this.activeSdfBatch.group);
+
+    if (leaderCoordinates.length > 0) {
+      const geometry = new BufferGeometry();
+      geometry.setAttribute(
+        "position",
+        new BufferAttribute(new Float32Array(leaderCoordinates), 3),
+      );
+      const material = new LineBasicMaterial({
+        color: update.semanticLabelsOnly ? "#111827" : "#57606a",
+        transparent: true,
+        opacity: update.semanticLabelsOnly ? 0.68 : 0.46,
+      });
+      this.labelGroup.add(createStableLineSegments(geometry, material, 17));
+    }
+    this.stats.labelRenderer = "sdf-batch";
+    this.stats.labelRendererFallbackReason = undefined;
+    return {
+      nodes: labels.length - edgeLabelCount,
+      edges: edgeLabelCount,
+      leaders: leaderCount,
+    };
+  }
+
+  private sdfAtlasFor(texts: string[]): SdfGlyphAtlas {
+    const characters = [...new Set(texts.flatMap((text) => [...text]))].sort();
+    const key = characters.join("");
+    const cached = this.sdfAtlasCache.get(key);
+    if (cached) {
+      this.sdfAtlasCache.delete(key);
+      this.sdfAtlasCache.set(key, cached);
+      return cached;
+    }
+    const atlas = buildSdfGlyphAtlas(characters, {
+      fontFamily: "system-ui, sans-serif",
+      fontWeight: 600,
+      fontSize: 48,
+      spread: 8,
+    });
+    this.sdfAtlasCache.set(key, atlas);
+    this.sdfAtlasCacheBytes += atlas.data.byteLength;
+    while (
+      this.sdfAtlasCache.size > 6 ||
+      (this.sdfAtlasCacheBytes > sdfAtlasCacheByteBudget &&
+        this.sdfAtlasCache.size > 1)
+    ) {
+      const oldest = this.sdfAtlasCache.entries().next().value as
+        | [string, SdfGlyphAtlas]
+        | undefined;
+      if (!oldest) {
+        break;
+      }
+      this.sdfAtlasCache.delete(oldest[0]);
+      this.sdfAtlasCacheBytes -= oldest[1].data.byteLength;
+      oldest[1].dispose();
+    }
+    return atlas;
   }
 
   private placeEdgeLabel(
@@ -1487,6 +1849,7 @@ class SceneRuntime {
       update.cells.length > transparentFillBudget;
     let filledTransparentCells = 0;
     let omittedTransparentFills = 0;
+    const pickingItems: PickingSpatialItem<SceneCell>[] = [];
 
     for (const cell of update.cells) {
       let vertices = cell.boundaryNodeIds
@@ -1509,9 +1872,9 @@ class SceneRuntime {
             ? liftedCellVertices(cell, vertices, update, pairActive)
             : vertices.map((vertex) => vertex.clone());
       this.cellVerticesById.set(cell.id, vertices);
-      const pickMesh = createCellPickMesh(cell, vertices);
-      this.cellPickObjects.push(pickMesh);
-      this.cellPickIndex.push(createCellPickEntry(pickMesh));
+      if (!this.gpuPickingActive) {
+        pickingItems.push(createCellPickingItem(cell, vertices));
+      }
 
       const cellPairKey = pairKey(cell.generatorPair);
       const bucketStyle = cellBucketStyleKey(cell);
@@ -1551,6 +1914,11 @@ class SceneRuntime {
       renderedCells += 1;
     }
     this.stats.omittedTransparentFills = omittedTransparentFills;
+    if (!this.gpuPickingActive) {
+      const pickingStartedAt = performance.now();
+      this.cellPickingIndex.build(pickingItems);
+      this.cellPickingBuildMs = performance.now() - pickingStartedAt;
+    }
 
     for (const [bucketKey, bucket] of fillBuckets) {
       const geometryKey = `fill:${bucketKey}`;
@@ -1691,40 +2059,45 @@ class SceneRuntime {
     if (!update.selectedCellId) {
       return;
     }
-    const vertices = this.cellVerticesById.get(update.selectedCellId);
-    if (!vertices || vertices.length < 3) {
-      return;
-    }
-    if (update.localCellRenderMode !== "outline-only") {
-      const fillGeometry = createCellFillGeometry(vertices);
-      const fill = new Mesh(
-        fillGeometry,
-        new MeshBasicMaterial({
-          color: "#f85149",
-          opacity: Math.max(update.cellOpacity, 0.38),
-          transparent: true,
-          side: DoubleSide,
-          depthWrite: false,
-        }),
-      );
-      fill.renderOrder = 12;
-      this.cellOverlayGroup.add(fill);
-    }
+    for (const cell of update.cells) {
+      if (!isSelectedCell(cell, update.selectedCellId)) {
+        continue;
+      }
+      const vertices = this.cellVerticesById.get(cell.id);
+      if (!vertices || vertices.length < 3) {
+        continue;
+      }
+      if (update.localCellRenderMode !== "outline-only") {
+        const fillGeometry = createCellFillGeometry(vertices);
+        const fill = new Mesh(
+          fillGeometry,
+          new MeshBasicMaterial({
+            color: "#f85149",
+            opacity: Math.max(update.cellOpacity, 0.38),
+            transparent: true,
+            side: DoubleSide,
+            depthWrite: false,
+          }),
+        );
+        fill.renderOrder = 12;
+        this.cellOverlayGroup.add(fill);
+      }
 
-    const outlineCoordinates: number[] = [];
-    pushCellOutlineCoordinates(outlineCoordinates, vertices);
-    const outlineGeometry = new BufferGeometry();
-    outlineGeometry.setAttribute(
-      "position",
-      new BufferAttribute(new Float32Array(outlineCoordinates), 3),
-    );
-    const outline = createStableLineSegments(
-      outlineGeometry,
-      edgeOverlayMaterial("#f85149", 1, 4),
-      13,
-    );
-    outline.renderOrder = 13;
-    this.cellOverlayGroup.add(outline);
+      const outlineCoordinates: number[] = [];
+      pushCellOutlineCoordinates(outlineCoordinates, vertices);
+      const outlineGeometry = new BufferGeometry();
+      outlineGeometry.setAttribute(
+        "position",
+        new BufferAttribute(new Float32Array(outlineCoordinates), 3),
+      );
+      const outline = createStableLineSegments(
+        outlineGeometry,
+        edgeOverlayMaterial("#f85149", 1, 4),
+        13,
+      );
+      outline.renderOrder = 13;
+      this.cellOverlayGroup.add(outline);
+    }
   }
 
   private frameGraph(update: GraphUpdate) {
@@ -1733,16 +2106,22 @@ class SceneRuntime {
       return;
     }
 
-    const frameKey = [...nodePositions.entries()]
-      .map(
-        ([nodeId, position]) =>
-          `${nodeId}:${position.x.toFixed(3)},${position.y.toFixed(3)},${position.z.toFixed(3)}`,
-      )
-      .join("|");
+    // Revision-aware callers have already hashed layout coordinates. The
+    // fallback walk remains for standalone SceneView consumers.
+    const frameKey =
+      update.revisionSet?.cameraVersion ??
+      [...nodePositions.entries()]
+        .map(
+          ([nodeId, position]) =>
+            `${nodeId}:${position.x.toFixed(3)},${position.y.toFixed(3)},${position.z.toFixed(3)}`,
+        )
+        .join("|");
     const cameraFrameKey = [
       update.cameraPreset,
       `reference:${update.showReferenceBall}`,
       `radius:${update.referenceBallRadius}`,
+      `focus:${update.cameraFocusTarget?.join(",") ?? ""}`,
+      `offset:${update.cameraFocusOffset?.join(",") ?? ""}`,
       frameKey,
     ].join(":");
     if (cameraFrameKey === this.framedGraphKey) {
@@ -1769,6 +2148,16 @@ class SceneRuntime {
     }
     this.camera.near = Math.max(0.01, maxRadius / 200);
     this.camera.far = Math.max(1000, maxRadius * 20);
+
+    if (update.cameraFocusTarget && update.cameraFocusOffset) {
+      this.camera.fov = 55;
+      this.camera.updateProjectionMatrix();
+      this.focusPosition(
+        new Vector3(...update.cameraFocusTarget),
+        update.cameraFocusOffset,
+      );
+      return;
+    }
 
     if (update.cameraPreset === "on-graph") {
       const distance = Math.max(2.2, Math.min(7.5, maxRadius * 1.25 + 1.3));
@@ -1807,23 +2196,49 @@ class SceneRuntime {
     this.scheduleDampingFrames("camera-frame", 18);
   }
 
-  private resize() {
+  private resize(reason: string) {
     const width = Math.max(1, this.mount.clientWidth);
     const height = Math.max(1, this.mount.clientHeight);
+    const pixelRatio = Math.min(window.devicePixelRatio, 1.5);
+    if (
+      width === this.viewportWidth &&
+      height === this.viewportHeight &&
+      pixelRatio === this.viewportPixelRatio
+    ) {
+      return false;
+    }
+    this.viewportWidth = width;
+    this.viewportHeight = height;
+    this.viewportPixelRatio = pixelRatio;
+    this.renderer.setPixelRatio(pixelRatio);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
-    this.requestRender("resize");
+    this.requestRender(reason);
+    return true;
   }
 
   private scheduleResize(reason: string) {
-    const resize = () => {
-      this.resize();
-      this.requestRender(reason);
-    };
-    window.requestAnimationFrame(() => window.requestAnimationFrame(resize));
-    window.setTimeout(resize, 80);
-    window.setTimeout(resize, 240);
+    if (this.resizeFrame !== undefined) {
+      window.cancelAnimationFrame(this.resizeFrame);
+    }
+    this.resizeFrame = window.requestAnimationFrame(() => {
+      this.resizeFrame = window.requestAnimationFrame(() => {
+        this.resizeFrame = undefined;
+        this.resize(reason);
+      });
+    });
+
+    // Tauri and fullscreen CSS transitions can settle after ResizeObserver's
+    // first notification. The fallbacks remeasure, but resize() is a no-op
+    // when the canvas dimensions and device scale are already current.
+    for (const delay of [80, 240]) {
+      const timeoutId = window.setTimeout(() => {
+        this.resizeFallbacks.delete(timeoutId);
+        this.resize(reason);
+      }, delay);
+      this.resizeFallbacks.add(timeoutId);
+    }
   }
 
   private handleCameraSignals(update: GraphUpdate) {
@@ -1864,6 +2279,9 @@ class SceneRuntime {
   }
 
   private readonly handleControlsStart = () => {
+    this.cameraInteractionActive = true;
+    this.pendingHoverPoint = undefined;
+    this.gpuHoverRequest += 1;
     this.scheduleDampingFrames("camera-start", 36);
   };
 
@@ -1872,6 +2290,7 @@ class SceneRuntime {
   };
 
   private readonly handleControlsEnd = () => {
+    this.cameraInteractionActive = false;
     this.scheduleDampingFrames("camera-end", 18);
   };
 
@@ -1903,6 +2322,9 @@ class SceneRuntime {
     const previousSize = this.movementKeys.size;
     this.movementKeys.add(event.code);
     if (previousSize !== this.movementKeys.size) {
+      this.cameraInteractionActive = true;
+      this.pendingHoverPoint = undefined;
+      this.gpuHoverRequest += 1;
       this.requestRender("camera-key-move");
     }
   };
@@ -1916,12 +2338,16 @@ class SceneRuntime {
     if (cameraMovementKeyCodes.has(event.code)) {
       this.movementKeys.delete(event.code);
       this.fastCameraMove = event.shiftKey;
+      if (this.movementKeys.size === 0) {
+        this.cameraInteractionActive = false;
+      }
     }
   };
 
   private readonly handleWindowBlur = () => {
     this.movementKeys.clear();
     this.fastCameraMove = false;
+    this.cameraInteractionActive = false;
   };
 
   private setColorScheme(colorScheme: SceneColorScheme) {
@@ -1996,7 +2422,33 @@ class SceneRuntime {
     this.pointerDownPosition = { x: event.clientX, y: event.clientY };
   };
 
-  private readonly handlePointerUp = (event: PointerEvent) => {
+  private ensureSceneLookups(update: GraphUpdate): void {
+    if (this.nodeLookupSource !== update.nodes) {
+      this.nodeLookupSource = update.nodes;
+      this.nodesById = new Map(update.nodes.map((node) => [node.id, node]));
+    }
+    if (this.adjacencySource !== update.edges) {
+      this.adjacencySource = update.edges;
+      const adjacency = new Map<string, Set<string>>();
+      for (const edge of update.edges) {
+        const sourceNeighbors = adjacency.get(edge.source) ?? new Set<string>();
+        sourceNeighbors.add(edge.target);
+        adjacency.set(edge.source, sourceNeighbors);
+        const targetNeighbors = adjacency.get(edge.target) ?? new Set<string>();
+        targetNeighbors.add(edge.source);
+        adjacency.set(edge.target, targetNeighbors);
+      }
+      this.neighborIdsByNode = adjacency;
+    }
+  }
+
+  private neighborsFor(nodeId: string | undefined): ReadonlySet<string> {
+    return nodeId
+      ? (this.neighborIdsByNode.get(nodeId) ?? this.emptyNeighborIds)
+      : this.emptyNeighborIds;
+  }
+
+  private readonly handlePointerUp = async (event: PointerEvent) => {
     const start = this.pointerDownPosition;
     this.pointerDownPosition = undefined;
     if (!this.pickingEnabled || event.button !== 0) {
@@ -2010,8 +2462,62 @@ class SceneRuntime {
     }
 
     const rect = this.renderer.domElement.getBoundingClientRect();
-    this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    this.pointer.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
+    const pickPoint = cssPointInElement(event, rect);
+    this.pointer.copy(pickPoint.normalized);
+    if (this.gpuPickingActive) {
+      try {
+        const epoch = this.gpuPickEpoch;
+        const startedAt = performance.now();
+        let pickId = await this.gpuIdPicker.pick(
+          this.renderer,
+          this.gpuNodePickingScene,
+          this.camera,
+          rect,
+          pickPoint.pixel,
+        );
+        if (pickId === 0) {
+          pickId = await this.gpuIdPicker.pick(
+            this.renderer,
+            this.gpuPickingScene,
+            this.camera,
+            rect,
+            pickPoint.pixel,
+          );
+        }
+        if (epoch !== this.gpuPickEpoch) {
+          return;
+        }
+        const record = this.gpuPickRecords.get(pickId);
+        this.stats = {
+          ...this.stats,
+          picking: {
+            total: this.gpuPickRecords.size,
+            candidates: record ? 1 : 0,
+            rejected: Math.max(0, this.gpuPickRecords.size - (record ? 1 : 0)),
+            usedPrefilter: true,
+            minimumEntryCount: gpuPickingEntryThreshold,
+            padding: 0,
+            strategy: "gpu",
+            queryMs: performance.now() - startedAt,
+          },
+        };
+        this.publishStats();
+        if (record?.kind === "node") {
+          this.onSelectNode(record.id);
+          this.requestRender("pick-node-gpu");
+        } else if (record?.kind === "cell") {
+          this.onSelectCell(record.id);
+          this.requestRender("pick-cell-gpu");
+        }
+        return;
+      } catch {
+        // A context can lose readback support while ordinary rendering keeps
+        // working. Switch this scene to the retained CPU index without making
+        // selection unavailable for the rest of the session.
+        this.gpuPickingActive = false;
+        this.ensureCellPickingIndex();
+      }
+    }
     this.raycaster.setFromCamera(this.pointer, this.camera);
 
     let nearestNode: { distance: number; nodeId: string } | undefined;
@@ -2034,19 +2540,15 @@ class SceneRuntime {
       return;
     }
 
-    const cellHits = this.raycaster.intersectObjects(
-      this.prefilteredCellPickObjects(),
-      false,
-    );
-    const cellId = cellHits[0]?.object.userData.id;
-    if (typeof cellId === "string") {
+    const cellId = this.pickCellWithBvh();
+    if (cellId) {
       this.onSelectCell(cellId);
       this.requestRender("pick-cell");
     }
   };
 
   private readonly handlePointerMove = (event: PointerEvent) => {
-    if (!this.onHoverCell) {
+    if (!this.onHoverCell || this.cameraInteractionActive) {
       return;
     }
     this.pendingHoverPoint = { x: event.clientX, y: event.clientY };
@@ -2056,26 +2558,64 @@ class SceneRuntime {
     this.hoverFrame = window.requestAnimationFrame(this.processHover);
   };
 
-  private readonly processHover = () => {
+  private readonly processHover = async () => {
     this.hoverFrame = undefined;
     const point = this.pendingHoverPoint;
     this.pendingHoverPoint = undefined;
-    if (!this.onHoverCell || !point) {
+    if (!this.onHoverCell || !point || this.cameraInteractionActive) {
       return;
     }
     const rect = this.renderer.domElement.getBoundingClientRect();
-    this.pointer.x = ((point.x - rect.left) / rect.width) * 2 - 1;
-    this.pointer.y = -(((point.y - rect.top) / rect.height) * 2 - 1);
+    const pickPoint = cssPointInElement(
+      { clientX: point.x, clientY: point.y },
+      rect,
+    );
+    this.pointer.copy(pickPoint.normalized);
+    if (this.gpuPickingActive) {
+      try {
+        const request = ++this.gpuHoverRequest;
+        const epoch = this.gpuPickEpoch;
+        const startedAt = performance.now();
+        const pickId = await this.gpuIdPicker.pick(
+          this.renderer,
+          this.gpuPickingScene,
+          this.camera,
+          rect,
+          pickPoint.pixel,
+        );
+        if (request !== this.gpuHoverRequest || epoch !== this.gpuPickEpoch) {
+          return;
+        }
+        const record = this.gpuPickRecords.get(pickId);
+        this.stats = {
+          ...this.stats,
+          picking: {
+            total: this.gpuPickRecords.size,
+            candidates: record ? 1 : 0,
+            rejected: Math.max(0, this.gpuPickRecords.size - (record ? 1 : 0)),
+            usedPrefilter: true,
+            minimumEntryCount: gpuPickingEntryThreshold,
+            padding: 0,
+            strategy: "gpu",
+            queryMs: performance.now() - startedAt,
+          },
+        };
+        this.publishStats();
+        const nextCellId = record?.kind === "cell" ? record.id : undefined;
+        if (nextCellId !== this.hoveredCellId) {
+          this.hoveredCellId = nextCellId;
+          this.onHoverCell(nextCellId);
+          this.requestRender("hover-cell-gpu");
+        }
+        return;
+      } catch {
+        this.gpuPickingActive = false;
+        this.ensureCellPickingIndex();
+      }
+    }
     this.raycaster.setFromCamera(this.pointer, this.camera);
 
-    const cellHits = this.raycaster.intersectObjects(
-      this.prefilteredCellPickObjects(),
-      false,
-    );
-    const nextCellId =
-      typeof cellHits[0]?.object.userData.id === "string"
-        ? (cellHits[0].object.userData.id as string)
-        : undefined;
+    const nextCellId = this.pickCellWithBvh();
     if (nextCellId !== this.hoveredCellId) {
       this.hoveredCellId = nextCellId;
       this.onHoverCell(nextCellId);
@@ -2083,32 +2623,79 @@ class SceneRuntime {
     }
   };
 
-  private prefilteredCellPickObjects(): Mesh[] {
-    if (this.cellPickIndex.length !== this.cellPickObjects.length) {
-      return this.cellPickObjects;
+  private pickCellWithBvh(): string | undefined {
+    const startedAt = performance.now();
+    const ray: PickingRay = {
+      origin: [
+        this.raycaster.ray.origin.x,
+        this.raycaster.ray.origin.y,
+        this.raycaster.ray.origin.z,
+      ],
+      direction: [
+        this.raycaster.ray.direction.x,
+        this.raycaster.ray.direction.y,
+        this.raycaster.ray.direction.z,
+      ],
+    };
+    const result = this.cellPickingIndex.queryRay(ray, {
+      padding: 0.12,
+      maxCandidates: 96,
+    });
+    let selectedId: string | undefined;
+    let selectedDistance = Number.POSITIVE_INFINITY;
+    for (const candidate of result.candidates) {
+      const hit = intersectPickingCandidateTriangles(ray, candidate, {
+        cullBackfaces: false,
+      });
+      if (
+        hit &&
+        (hit.distance < selectedDistance ||
+          (hit.distance === selectedDistance &&
+            (selectedId === undefined || hit.id.localeCompare(selectedId) < 0)))
+      ) {
+        selectedId = hit.id;
+        selectedDistance = hit.distance;
+      }
     }
-
-    const { candidates, stats } = prefilterSpatialPickSpheres(
-      this.cellPickIndex,
-      (point) => {
-        this.pickCenterScratch.set(point[0], point[1], point[2]);
-        return this.raycaster.ray.distanceSqToPoint(this.pickCenterScratch);
-      },
-      {
-        minimumEntryCount: 32,
-        padding: 0.12,
-        target: this.cellPickEntryScratch,
-      },
-    );
     this.stats = {
       ...this.stats,
-      picking: stats,
+      picking: {
+        total: result.stats.totalItems,
+        candidates: result.stats.returnedCount,
+        rejected: Math.max(
+          0,
+          result.stats.totalItems - result.stats.candidateCount,
+        ),
+        usedPrefilter: result.stats.totalItems > 0,
+        minimumEntryCount: 1,
+        padding: 0.12,
+        strategy: "bvh",
+        buildMs: this.cellPickingBuildMs,
+        queryMs: performance.now() - startedAt,
+      },
     };
-    this.cellPickObjectScratch.length = 0;
-    for (const entry of candidates) {
-      this.cellPickObjectScratch.push(entry.object);
+    this.publishStats();
+    return selectedId;
+  }
+
+  private ensureCellPickingIndex(): void {
+    if (this.cellPickingIndex.getStats().itemCount > 0) {
+      return;
     }
-    return this.cellPickObjectScratch;
+    const update = this.lastGraphUpdate;
+    if (!update?.showCells) {
+      return;
+    }
+    const items: PickingSpatialItem<SceneCell>[] = [];
+    for (const cell of update.cells) {
+      const vertices = this.cellVerticesById.get(cell.id);
+      if (vertices && vertices.length >= 3) {
+        items.push(createCellPickingItem(cell, vertices));
+      }
+    }
+    const startedAt = performance.now();
+    this.cellPickingIndex.build(items);
+    this.cellPickingBuildMs = performance.now() - startedAt;
   }
 
   private requestRender(reason: string, dampingFrames = 0) {
@@ -2120,6 +2707,10 @@ class SceneRuntime {
     if (this.animationFrame !== undefined) {
       return;
     }
+    // A demand-driven renderer may sit idle for minutes. Start the timing
+    // window when work is requested so the next sample measures the active
+    // frame cadence rather than the intentional idle interval.
+    this.previousFrameTime = performance.now();
     this.animationFrame = window.requestAnimationFrame(() =>
       this.renderFrame(reason),
     );
@@ -2162,10 +2753,24 @@ class SceneRuntime {
     this.stats.renderCount += 1;
     this.stats.drawCalls = this.renderer.info.render.calls;
     this.stats.triangles = this.renderer.info.render.triangles;
-    this.publishStats();
+    const notifyCallback = this.notifyStatsOnNextRender;
+    this.notifyStatsOnNextRender = false;
+    this.publishStats({ notifyCallback, force: notifyCallback });
   };
 
-  private publishStats(options: { notifyCallback?: boolean } = {}) {
+  private publishStats(
+    options: { notifyCallback?: boolean; force?: boolean } = {},
+  ) {
+    // Keep the cheap global reference current for tests and diagnostics, but
+    // avoid DOM writes and bubbling events on every camera frame. Four updates
+    // per second are ample for visible statistics; scene changes force one
+    // publication after the corresponding WebGL render has completed.
+    window.__coxeterSceneStats = this.stats;
+    const now = performance.now();
+    if (!options.force && now - this.lastDetailedStatsPublishAt < 250) {
+      return;
+    }
+    this.lastDetailedStatsPublishAt = now;
     const stats = { ...this.stats, frameSamples: [...this.stats.frameSamples] };
     window.__coxeterSceneStats = stats;
     this.mount.dataset.sceneMode = stats.mode;
@@ -2175,6 +2780,10 @@ class SceneRuntime {
     this.mount.dataset.nodeLabels = String(stats.renderedNodeLabels);
     this.mount.dataset.edgeLabels = String(stats.renderedEdgeLabels);
     this.mount.dataset.labelLeaders = String(stats.renderedLabelLeaders);
+    this.mount.dataset.labelRenderer = stats.labelRenderer;
+    this.mount.dataset.labelRendererFallbackReason =
+      stats.labelRendererFallbackReason ?? "";
+    this.mount.dataset.pickingStrategy = stats.picking.strategy ?? "linear";
     this.mount.dataset.stateNodesIn = String(stats.stateNodeHighlights.inState);
     this.mount.dataset.stateNodesOut = String(
       stats.stateNodeHighlights.outOfState,
@@ -2202,8 +2811,9 @@ class SceneRuntime {
   }
 }
 
-function emptySceneStats(): SceneRenderStats {
+function emptySceneStats(runtimeId = "unmounted"): SceneRenderStats {
   return {
+    runtimeId,
     mode: "global",
     graphNodes: 0,
     graphEdges: 0,
@@ -2214,6 +2824,8 @@ function emptySceneStats(): SceneRenderStats {
     renderedNodeLabels: 0,
     renderedEdgeLabels: 0,
     renderedLabelLeaders: 0,
+    labelRenderer: "sprite",
+    labelRendererFallbackReason: undefined,
     drawCalls: 0,
     triangles: 0,
     frame: 0,
@@ -2259,6 +2871,9 @@ function emptySpatialPickStats(): SpatialPickPrefilterStats {
     usedPrefilter: false,
     minimumEntryCount: 32,
     padding: 0,
+    strategy: "linear",
+    buildMs: 0,
+    queryMs: 0,
   };
 }
 
@@ -2309,10 +2924,11 @@ export function cameraLocalMovementDelta(
 }
 
 function addScaledNormal(delta: Vector3, axis: Vector3, scale: number) {
-  if (scale === 0 || axis.lengthSq() === 0) {
+  const lengthSquared = axis.lengthSq();
+  if (scale === 0 || lengthSquared === 0) {
     return;
   }
-  delta.addScaledVector(axis.clone().normalize(), scale);
+  delta.addScaledVector(axis, scale / Math.sqrt(lengthSquared));
 }
 
 function isEditableKeyboardTarget(target: EventTarget | null): boolean {
@@ -2435,7 +3051,7 @@ function shouldFillTransparentCell(
     ? pairKey(update.activeGeneratorPair)
     : undefined;
   if (
-    cell.id === update.selectedCellId ||
+    isSelectedCell(cell, update.selectedCellId) ||
     cell.isRelationBoundary ||
     (activePairKey !== undefined &&
       pairKey(cell.generatorPair) === activePairKey)
@@ -2482,43 +3098,41 @@ function pushCellOutlineCoordinates(
   });
 }
 
-function createCellPickMesh(cell: SceneCell, vertices: Vector3[]) {
-  const material = new MeshBasicMaterial({
-    transparent: true,
-    opacity: 0,
-    side: DoubleSide,
-    depthWrite: false,
-  });
-  material.colorWrite = false;
-  const mesh = new Mesh(createCellFillGeometry(vertices), material);
-  mesh.userData.kind = "cell";
-  mesh.userData.id = cell.id;
-  mesh.updateMatrixWorld(true);
-  return mesh;
-}
-
-function createCellPickEntry(object: Mesh): CellPickEntry {
-  object.geometry.computeBoundingSphere();
-  object.updateMatrixWorld(true);
-  const sphere = object.geometry.boundingSphere;
-  if (!sphere) {
-    return {
-      id: String(object.userData.id ?? ""),
-      center: [0, 0, 0],
-      radius: Number.POSITIVE_INFINITY,
-      object,
-    };
+function createCellPickingItem(
+  cell: SceneCell,
+  vertices: Vector3[],
+): PickingSpatialItem<SceneCell> {
+  const minimum = vertices[0].clone();
+  const maximum = vertices[0].clone();
+  for (let index = 1; index < vertices.length; index += 1) {
+    minimum.min(vertices[index]);
+    maximum.max(vertices[index]);
   }
-
-  const center = sphere.center.clone().applyMatrix4(object.matrixWorld);
-  const scale = new Vector3();
-  object.getWorldScale(scale);
-  const maxScale = Math.max(scale.x, scale.y, scale.z);
+  const center = minimum.clone().add(maximum).multiplyScalar(0.5);
+  let radiusSquared = 0;
+  for (const vertex of vertices) {
+    radiusSquared = Math.max(radiusSquared, center.distanceToSquared(vertex));
+  }
+  const triangles = [];
+  for (let index = 1; index < vertices.length - 1; index += 1) {
+    triangles.push({
+      a: vectorToArray(vertices[0]),
+      b: vectorToArray(vertices[index]),
+      c: vectorToArray(vertices[index + 1]),
+    });
+  }
   return {
-    id: String(object.userData.id ?? ""),
-    center: vectorToArray(center),
-    radius: sphere.radius * maxScale,
-    object,
+    id: cell.id,
+    aabb: {
+      min: vectorToArray(minimum),
+      max: vectorToArray(maximum),
+    },
+    sphere: {
+      center: vectorToArray(center),
+      radius: Math.sqrt(radiusSquared),
+    },
+    triangles,
+    data: cell,
   };
 }
 
@@ -2541,15 +3155,15 @@ function cellOutlineOpacity(
     return 1;
   }
   if (cell.readabilityRole === "incident") {
-    return active || cell.id === update.selectedCellId ? 0.96 : 0.82;
+    return active || isSelectedCell(cell, update.selectedCellId) ? 0.96 : 0.82;
   }
   if (cell.readabilityRole === "context") {
     return update.topologyMode ? 0.28 : 0.38;
   }
   if (update.topologyMode) {
-    return active || cell.id === update.selectedCellId ? 1 : 0.86;
+    return active || isSelectedCell(cell, update.selectedCellId) ? 1 : 0.86;
   }
-  if (active || cell.id === update.selectedCellId) {
+  if (active || isSelectedCell(cell, update.selectedCellId)) {
     return 0.98;
   }
   return update.occlusionMode === "x-ray" && (cell.localDistance ?? 0) >= 2
@@ -2647,13 +3261,13 @@ function cellOpacity(cell: SceneCell, update: GraphUpdate, active: boolean) {
     return Math.max(0.025, Math.min(update.cellOpacity * 0.22, 0.075));
   }
   if (update.topologyMode) {
-    if (cell.id === update.selectedCellId || active) {
+    if (isSelectedCell(cell, update.selectedCellId) || active) {
       return Math.max(0.18, Math.min(update.cellOpacity, 0.26));
     }
     return Math.max(0.035, Math.min(update.cellOpacity * 0.35, 0.1));
   }
   if (cell.dimension === 3) {
-    if (cell.id === update.selectedCellId) {
+    if (isSelectedCell(cell, update.selectedCellId)) {
       return Math.max(0.38, update.cellOpacity);
     }
     if (active) {
@@ -2661,12 +3275,11 @@ function cellOpacity(cell: SceneCell, update: GraphUpdate, active: boolean) {
     }
     return Math.min(0.08, Math.max(0.035, update.cellOpacity * 0.22));
   }
-  const base =
-    cell.id === update.selectedCellId
-      ? Math.max(update.cellOpacity, 0.36)
-      : active
-        ? Math.max(update.cellOpacity, 0.3)
-        : update.cellOpacity;
+  const base = isSelectedCell(cell, update.selectedCellId)
+    ? Math.max(update.cellOpacity, 0.36)
+    : active
+      ? Math.max(update.cellOpacity, 0.3)
+      : update.cellOpacity;
   if (update.occlusionMode === "x-ray" && (cell.localDistance ?? 0) >= 2) {
     return Math.min(base, 0.12);
   }
@@ -2674,6 +3287,16 @@ function cellOpacity(cell: SceneCell, update: GraphUpdate, active: boolean) {
     return Math.min(base, 0.16);
   }
   return base;
+}
+
+function isSelectedCell(
+  cell: SceneCell,
+  selectedCellId: string | undefined,
+): boolean {
+  return (
+    selectedCellId !== undefined &&
+    (cell.id === selectedCellId || cell.sourceCellId === selectedCellId)
+  );
 }
 
 function cellNormal(vertices: Vector3[]) {
@@ -2822,10 +3445,11 @@ function appendFrameSample(
   samples: SceneFrameSample[],
   sample: SceneFrameSample,
 ): SceneFrameSample[] {
-  if (sample.frame % 15 !== 0) {
-    return samples;
+  samples.push(sample);
+  if (samples.length > 120) {
+    samples.splice(0, samples.length - 120);
   }
-  return [...samples, sample].slice(-12);
+  return samples;
 }
 
 function midpointLengthSq(source: Vector3, target: Vector3): number {
@@ -2843,7 +3467,9 @@ interface ScreenRect {
 }
 
 class ScreenLabelOccupancy {
-  private readonly rects: ScreenRect[] = [];
+  private readonly buckets = new Map<string, ScreenRect[]>();
+  private readonly cellSize = 0.12;
+  private readonly projected = new Vector3();
 
   constructor(private readonly camera: PerspectiveCamera) {
     this.camera.updateMatrixWorld();
@@ -2855,7 +3481,7 @@ class ScreenLabelOccupancy {
     label: string,
     options: { force?: boolean } = {},
   ): boolean {
-    const projected = position.clone().project(this.camera);
+    const projected = this.projected.copy(position).project(this.camera);
     if (
       !Number.isFinite(projected.x) ||
       !Number.isFinite(projected.y) ||
@@ -2873,14 +3499,38 @@ class ScreenLabelOccupancy {
       top: projected.y + halfHeight,
       bottom: projected.y - halfHeight,
     };
-    if (
-      !options.force &&
-      this.rects.some((occupied) => rectsOverlap(rect, occupied))
-    ) {
-      return false;
+    const bucketKeys = this.bucketKeys(rect);
+    if (!options.force) {
+      for (const key of bucketKeys) {
+        if (
+          this.buckets
+            .get(key)
+            ?.some((occupied) => rectsOverlap(rect, occupied))
+        ) {
+          return false;
+        }
+      }
     }
-    this.rects.push(rect);
+    for (const key of bucketKeys) {
+      const bucket = this.buckets.get(key) ?? [];
+      bucket.push(rect);
+      this.buckets.set(key, bucket);
+    }
     return true;
+  }
+
+  private bucketKeys(rect: ScreenRect): string[] {
+    const left = Math.floor(rect.left / this.cellSize);
+    const right = Math.floor(rect.right / this.cellSize);
+    const bottom = Math.floor(rect.bottom / this.cellSize);
+    const top = Math.floor(rect.top / this.cellSize);
+    const keys: string[] = [];
+    for (let x = left; x <= right; x += 1) {
+      for (let y = bottom; y <= top; y += 1) {
+        keys.push(`${x}:${y}`);
+      }
+    }
+    return keys;
   }
 }
 
@@ -3406,6 +4056,81 @@ function edgeColor(edge: SceneEdge, update: GraphUpdate) {
   return edge.colorHint ?? generatorColor(update.generators, edge.generator);
 }
 
+type SdfRgba = readonly [number, number, number, number];
+
+function sdfNodeLabelStyle(node: SceneNode): {
+  foreground: SdfRgba;
+  background: SdfRgba;
+  border: SdfRgba;
+} {
+  if (node.stateRole === "in-state") {
+    return {
+      foreground: sdfRgba("#083344"),
+      background: sdfRgba("#a5f3fc", 0.96),
+      border: sdfRgba("#0891b2"),
+    };
+  }
+  if (node.stateRole === "out-of-state") {
+    return {
+      foreground: sdfRgba("#f8fafc"),
+      background: sdfRgba("#475569", 0.86),
+      border: sdfRgba("#94a3b8"),
+    };
+  }
+  if (node.alwaysLabel) {
+    return {
+      foreground: sdfRgba("#111827"),
+      background: sdfRgba("#f0fdfa", 0.94),
+      border: sdfRgba("#0f766e"),
+    };
+  }
+  if (node.isRelationBoundary) {
+    return {
+      foreground: sdfRgba("#b42318"),
+      background: sdfRgba("#fff7ed", 0.92),
+      border: sdfRgba("#b42318"),
+    };
+  }
+  return {
+    foreground: sdfRgba("#24292f"),
+    background: sdfRgba("#ffffff", 0.86),
+    border: sdfRgba("#24292f", 0.24),
+  };
+}
+
+function sdfEdgeLabelStyle(
+  edge: SceneEdge,
+  update: GraphUpdate,
+): {
+  foreground: SdfRgba;
+  background: SdfRgba;
+  border: SdfRgba;
+} {
+  const color = edgeColor(edge, update);
+  const foreground = edge.isRelationBoundary ? "#b42318" : color;
+  const background = edge.isRelationBoundary
+    ? edge.emphasis === "readable-boundary"
+      ? sdfRgba("#ffffff", 0.95)
+      : sdfRgba("#fff7ed", 0.9)
+    : sdfRgba("#ffffff", 0.72);
+  const border =
+    edge.emphasis === "readable-boundary"
+      ? "#111827"
+      : edge.isRelationBoundary
+        ? "#b42318"
+        : color;
+  return {
+    foreground: sdfRgba(foreground),
+    background,
+    border: sdfRgba(border),
+  };
+}
+
+function sdfRgba(colorValue: string, alpha = 1): SdfRgba {
+  const color = new Color(colorValue);
+  return [color.r, color.g, color.b, alpha];
+}
+
 interface TextSpriteOptions {
   textColor: string;
   backgroundColor: string;
@@ -3426,12 +4151,18 @@ const labelCanvasCache = new Map<string, CachedLabelCanvas>();
 const maxCachedLabelCanvases = 512;
 const labelSpritePool = new Map<string, Sprite[]>();
 const maxPooledLabelSprites = 512;
+let pooledLabelSpriteCount = 0;
 
 function createTextSprite(text: string, options: TextSpriteOptions) {
   const { canvas, width, height } = cachedLabelCanvas(text, options);
   const poolKey = textSpriteKey(text, options);
-  const pooled = labelSpritePool.get(poolKey)?.pop();
+  const poolBucket = labelSpritePool.get(poolKey);
+  const pooled = poolBucket?.pop();
   if (pooled) {
+    pooledLabelSpriteCount -= 1;
+    if (poolBucket?.length === 0) {
+      labelSpritePool.delete(poolKey);
+    }
     const aspect = width / height;
     pooled.scale.set(options.worldHeight * aspect, options.worldHeight, 1);
     pooled.visible = true;
@@ -3462,17 +4193,14 @@ function releaseTextSprite(sprite: Sprite) {
   }
   sprite.visible = false;
   sprite.removeFromParent();
-  const totalPooled = [...labelSpritePool.values()].reduce(
-    (total, bucket) => total + bucket.length,
-    0,
-  );
-  if (totalPooled >= maxPooledLabelSprites) {
+  if (pooledLabelSpriteCount >= maxPooledLabelSprites) {
     disposeSprite(sprite);
     return;
   }
   const bucket = labelSpritePool.get(poolKey) ?? [];
   bucket.push(sprite);
   labelSpritePool.set(poolKey, bucket);
+  pooledLabelSpriteCount += 1;
 }
 
 function disposeSprite(sprite: Sprite) {
@@ -3591,23 +4319,6 @@ function disposeMaterial(material: Material) {
   };
   mappedMaterial.map?.dispose();
   material.dispose();
-}
-
-function selectedNeighborIds(update: GraphUpdate): Set<string> {
-  const neighbors = new Set<string>();
-  if (!update.selectedNodeId) {
-    return neighbors;
-  }
-
-  for (const edge of update.edges) {
-    if (edge.source === update.selectedNodeId) {
-      neighbors.add(edge.target);
-    } else if (edge.target === update.selectedNodeId) {
-      neighbors.add(edge.source);
-    }
-  }
-
-  return neighbors;
 }
 
 function vectorToArray(vector: Vector3): [number, number, number] {

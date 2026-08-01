@@ -31,10 +31,10 @@ export const persistentCacheRegistry = {
   generatedBall: {
     namespace: "generated-ball",
     scope: "generation",
-    schemaVersion: 1,
+    schemaVersion: 2,
     valueKind: "generated-cayley-ball",
     description:
-      "Finite-radius Cayley balls produced by the generation client.",
+      "Finite-radius Cayley balls and their spherical-subset index produced by the generation client.",
   },
   yGammaScene: {
     namespace: "ygamma-scene",
@@ -130,6 +130,7 @@ export interface PersistentCacheRecord<T> {
   inputHash: string;
   variant: string;
   writtenAt: string;
+  estimatedBytes?: number;
   value: T;
 }
 
@@ -137,6 +138,14 @@ export interface PersistentCacheOptions {
   databaseName?: string;
   storeName?: string;
   memoryEntries?: number;
+  memoryBytes?: number;
+  persistentBytes?: number;
+}
+
+export interface PersistentCacheEvictionCandidate {
+  key: string;
+  writtenAt: string;
+  estimatedBytes: number;
 }
 
 export interface PersistentCache<T> {
@@ -148,6 +157,141 @@ export interface PersistentCache<T> {
 
 const defaultDatabaseName = "coxeter-viewer-performance-cache";
 const defaultStoreName = "records";
+export const DEFAULT_PERSISTENT_CACHE_MEMORY_BYTES = 64 * 1024 * 1024;
+export const DEFAULT_PERSISTENT_CACHE_STORAGE_BYTES = 256 * 1024 * 1024;
+
+const objectOverheadBytes = 32;
+const collectionOverheadBytes = 24;
+const referenceBytes = 8;
+const stringCharacterBytes = 2;
+
+/**
+ * Estimates retained memory without serializing the value. The result is a
+ * cache budget, not a browser heap measurement; shared objects are counted
+ * once and typed-array payloads use their exact byte length.
+ */
+export function estimatePersistentCacheValueBytes(value: unknown): number {
+  const pending: unknown[] = [value];
+  const seen = new WeakSet<object>();
+  let bytes = 0;
+
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === null || current === undefined) {
+      continue;
+    }
+
+    switch (typeof current) {
+      case "boolean":
+        bytes += 4;
+        continue;
+      case "number":
+        bytes += 8;
+        continue;
+      case "bigint":
+        bytes += Math.max(8, Math.ceil(current.toString(2).length / 8));
+        continue;
+      case "string":
+        bytes += current.length * stringCharacterBytes;
+        continue;
+      case "symbol":
+        bytes += String(current).length * stringCharacterBytes;
+        continue;
+      case "function":
+        bytes += objectOverheadBytes;
+        continue;
+      case "object":
+        break;
+    }
+
+    if (seen.has(current)) {
+      continue;
+    }
+    seen.add(current);
+
+    if (ArrayBuffer.isView(current)) {
+      bytes += collectionOverheadBytes + current.byteLength;
+      continue;
+    }
+    if (current instanceof ArrayBuffer) {
+      bytes += collectionOverheadBytes + current.byteLength;
+      continue;
+    }
+    if (current instanceof Date) {
+      bytes += objectOverheadBytes;
+      continue;
+    }
+    if (Array.isArray(current)) {
+      bytes += collectionOverheadBytes + current.length * referenceBytes;
+      for (const entry of current) {
+        pending.push(entry);
+      }
+      continue;
+    }
+    if (current instanceof Map) {
+      bytes += collectionOverheadBytes + current.size * referenceBytes * 2;
+      for (const [key, entry] of current) {
+        pending.push(key, entry);
+      }
+      continue;
+    }
+    if (current instanceof Set) {
+      bytes += collectionOverheadBytes + current.size * referenceBytes;
+      for (const entry of current) {
+        pending.push(entry);
+      }
+      continue;
+    }
+
+    bytes += objectOverheadBytes;
+    for (const [key, entry] of Object.entries(current)) {
+      bytes += key.length * stringCharacterBytes + referenceBytes;
+      pending.push(entry);
+    }
+  }
+
+  return Math.ceil(bytes);
+}
+
+export function estimatePersistentCacheRecordBytes<T>(
+  record: PersistentCacheRecord<T>,
+): number {
+  return estimatePersistentCacheValueBytes(record);
+}
+
+/**
+ * Chooses the oldest records needed to bring an IndexedDB store under budget.
+ * The key tie-break makes eviction reproducible when writes share a timestamp.
+ */
+export function planPersistentCacheEvictions(
+  candidates: readonly PersistentCacheEvictionCandidate[],
+  maxBytes: number,
+): string[] {
+  assertByteBudget(maxBytes, "persistentBytes");
+  let retainedBytes = candidates.reduce(
+    (total, candidate) =>
+      total + normalizeEstimatedBytes(candidate.estimatedBytes),
+    0,
+  );
+  if (retainedBytes <= maxBytes) {
+    return [];
+  }
+
+  const oldestFirst = [...candidates].sort(
+    (left, right) =>
+      left.writtenAt.localeCompare(right.writtenAt) ||
+      left.key.localeCompare(right.key),
+  );
+  const evicted: string[] = [];
+  for (const candidate of oldestFirst) {
+    if (retainedBytes <= maxBytes) {
+      break;
+    }
+    retainedBytes -= normalizeEstimatedBytes(candidate.estimatedBytes);
+    evicted.push(candidate.key);
+  }
+  return evicted;
+}
 
 /**
  * Builds the IndexedDB key. Namespace, schema, app version, input hash, and
@@ -200,14 +344,20 @@ class IndexedDbBackedCache<T> implements PersistentCache<T> {
   private readonly memory: LruCache<string, PersistentCacheRecord<T>>;
   private readonly databaseName: string;
   private readonly storeName: string;
+  private readonly persistentBytes: number;
   private openPromise: Promise<IDBDatabase | undefined> | undefined;
 
   constructor(options: PersistentCacheOptions) {
     this.memory = new LruCache({
       maxEntries: options.memoryEntries ?? 64,
+      maxBytes: options.memoryBytes ?? DEFAULT_PERSISTENT_CACHE_MEMORY_BYTES,
+      sizeOf: cacheRecordByteSize,
     });
     this.databaseName = options.databaseName ?? defaultDatabaseName;
     this.storeName = options.storeName ?? defaultStoreName;
+    this.persistentBytes =
+      options.persistentBytes ?? DEFAULT_PERSISTENT_CACHE_STORAGE_BYTES;
+    assertByteBudget(this.persistentBytes, "persistentBytes");
   }
 
   async get(key: PersistentCacheKey): Promise<T | undefined> {
@@ -222,7 +372,12 @@ class IndexedDbBackedCache<T> implements PersistentCache<T> {
       return undefined;
     }
 
-    const record = await readRecord<T>(database, this.storeName, keyString);
+    const storedRecord = await readRecord<T>(
+      database,
+      this.storeName,
+      keyString,
+    );
+    const record = storedRecord && withEstimatedBytes(storedRecord);
     if (!record || !recordMatches(record, key)) {
       return undefined;
     }
@@ -240,8 +395,10 @@ class IndexedDbBackedCache<T> implements PersistentCache<T> {
       inputHash: key.inputHash,
       variant: key.variant,
       writtenAt: new Date().toISOString(),
+      estimatedBytes: 0,
       value,
     };
+    record.estimatedBytes = estimatePersistentCacheRecordBytes(record);
     this.memory.set(keyString, record);
 
     const database = await this.openDatabase();
@@ -249,6 +406,11 @@ class IndexedDbBackedCache<T> implements PersistentCache<T> {
       return;
     }
     await writeRecord(database, this.storeName, record);
+    await enforcePersistentByteBudget(
+      database,
+      this.storeName,
+      this.persistentBytes,
+    );
   }
 
   async delete(key: PersistentCacheKey): Promise<void> {
@@ -283,6 +445,38 @@ class IndexedDbBackedCache<T> implements PersistentCache<T> {
     this.openPromise = openIndexedDb(this.databaseName, this.storeName);
     return this.openPromise;
   }
+}
+
+function assertByteBudget(value: number, name: string): void {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new RangeError(`${name} must be a finite non-negative number`);
+  }
+}
+
+function normalizeEstimatedBytes(value: number): number {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new RangeError("estimatedBytes must be a finite non-negative number");
+  }
+  return Math.ceil(value);
+}
+
+function cacheRecordByteSize<T>(record: PersistentCacheRecord<T>): number {
+  return record.estimatedBytes === undefined
+    ? estimatePersistentCacheRecordBytes(record)
+    : normalizeEstimatedBytes(record.estimatedBytes);
+}
+
+function withEstimatedBytes<T>(
+  record: PersistentCacheRecord<T>,
+): PersistentCacheRecord<T> {
+  if (record.estimatedBytes !== undefined) {
+    normalizeEstimatedBytes(record.estimatedBytes);
+    return record;
+  }
+  const estimatedRecord = { ...record, estimatedBytes: 0 };
+  estimatedRecord.estimatedBytes =
+    estimatePersistentCacheRecordBytes(estimatedRecord);
+  return estimatedRecord;
 }
 
 function recordMatches<T>(
@@ -344,6 +538,42 @@ function writeRecord<T>(
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => resolve();
     transaction.objectStore(storeName).put(record);
+  });
+}
+
+function enforcePersistentByteBudget(
+  database: IDBDatabase,
+  storeName: string,
+  maxBytes: number,
+): Promise<void> {
+  return new Promise((resolve) => {
+    const transaction = database.transaction(storeName, "readwrite");
+    const store = transaction.objectStore(storeName);
+    const candidates: PersistentCacheEvictionCandidate[] = [];
+    const request = store.openCursor();
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => resolve();
+    transaction.onabort = () => resolve();
+    request.onerror = () => undefined;
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (cursor) {
+        const record = withEstimatedBytes(
+          cursor.value as PersistentCacheRecord<unknown>,
+        );
+        candidates.push({
+          key: record.key,
+          writtenAt: record.writtenAt,
+          estimatedBytes: record.estimatedBytes as number,
+        });
+        cursor.continue();
+        return;
+      }
+
+      for (const key of planPersistentCacheEvictions(candidates, maxBytes)) {
+        store.delete(key);
+      }
+    };
   });
 }
 

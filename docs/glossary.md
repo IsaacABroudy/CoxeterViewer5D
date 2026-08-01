@@ -164,12 +164,27 @@ The easiest example is **JNW cube graph RACG**. Its defining graph is the
 1-skeleton of a 3-cube, and the bipartition/color-class moves give the legal
 system used by the app's guided JNW workflow.
 
-The viewer inspects JNW links in a derived state quotient:
-`Gamma -> Y_Gamma -> JNW state quotient -> link at selected state`. The
-rendered quotient state vertices use short labels such as `S_1` and `S_2`;
-the inspector then expands the selected state as a subset of defining-graph
-vertices, for example `S_1 = {v000, v001, v010, v101}`. These
-ascending/descending/level links are not ambient Davis-complex links.
+The viewer's compact cube reader uses a derived four-state move-kernel cover.
+Its vertices have short labels such as `S_1` and `S_2`; the inspector expands
+the selected state as a subset of defining-graph vertices, for example
+`S_1 = {v000, v010, v110, v111}`. At a state `S`, the ascending and
+descending links are the induced subcomplexes `Flag(Gamma)[S]` and
+`Flag(Gamma)[V - S]`. They are not ambient subgraphs of a Cayley-ball drawing.
+
+## JNW Commutator Cover
+
+The finite cover `X_ab = W' \ Sigma_Gamma` used in JNW21, where `W'` is the
+kernel of the standard abelianization `W -> (Z/2)^V`. For the eight-generator
+cube example it has 256 vertices. The four legal states are orientation
+patterns on this cover, not its complete vertex set.
+
+## JNW Move-Kernel Cover
+
+The smaller cover drawn by the app's compact reader:
+`X_mu = ker(mu o alpha) \ Sigma_Gamma`, where `mu(e_v) = m_v`. For the cube
+move system its deck group has four elements, so the reader has four state
+vertices, sixteen geometric generator rails, and twelve relation squares. The
+covering hierarchy is `Sigma_Gamma -> X_ab -> X_mu -> Y_Gamma`.
 
 ## Quotient Complex
 

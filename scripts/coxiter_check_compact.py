@@ -57,7 +57,9 @@ SUPPORTED_EXAMPLES = {
         "expectedDimension": 5,
     },
 }
-TUMARKIN_EIGHT_FACET_PATTERN = re.compile(r"tumarkin_5d_8facet_g11411_([0-9]{2})\.json")
+TUMARKIN_EIGHT_FACET_PATTERN = re.compile(
+    r"tumarkin_5d_8facet_(g11411|g12221)_([0-9]{2})\.json"
+)
 
 
 def supported_example_spec(name: str) -> dict[str, Any]:
@@ -65,7 +67,10 @@ def supported_example_spec(name: str) -> dict[str, Any]:
     if spec is not None:
         return spec
     match = TUMARKIN_EIGHT_FACET_PATTERN.fullmatch(name)
-    if match and 1 <= int(match.group(1)) <= 15:
+    if match and (
+        (match.group(1) == "g11411" and 1 <= int(match.group(2)) <= 15)
+        or (match.group(1) == "g12221" and int(match.group(2)) == 1)
+    ):
         return {
             "sourceRefIds": ["tumarkin-2007-n-plus-3"],
             "expectedRank": 8,

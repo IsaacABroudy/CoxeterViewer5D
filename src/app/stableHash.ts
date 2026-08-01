@@ -29,6 +29,41 @@ export interface SceneRevisionInput {
   cameraParts?: readonly string[];
 }
 
+interface NodeRevisionComponents {
+  topology: string;
+  layout: string;
+  appearance: string;
+  labels: string;
+}
+
+interface EdgeRevisionComponents {
+  topology: string;
+  appearance: string;
+  labels: string;
+}
+
+interface CellRevisionComponents {
+  topology: string;
+  geometry: string;
+  appearance: string;
+}
+
+// Scene builders replace arrays when their contents change. These identity
+// caches make a selection-only update hash a handful of revision strings
+// instead of walking thousands of unchanged scene records again.
+const nodeRevisionComponents = new WeakMap<
+  readonly SceneNode[],
+  NodeRevisionComponents
+>();
+const edgeRevisionComponents = new WeakMap<
+  readonly SceneEdge[],
+  EdgeRevisionComponents
+>();
+const cellRevisionComponents = new WeakMap<
+  readonly SceneCell[],
+  CellRevisionComponents
+>();
+
 /**
  * Small deterministic FNV-1a hash for cache keys and renderer versions.
  *
@@ -167,57 +202,30 @@ export function generatedBallIdentity(ball: GeneratedCayleyBall): string {
 export function buildSceneRevisionSet(
   input: SceneRevisionInput,
 ): SceneRevisionSet {
-  const topologyVersion = sceneTopologyVersion(input);
-  const layoutVersion = sceneLayoutVersion(input);
+  const nodeRevisions = revisionsForNodes(input.nodes);
+  const edgeRevisions = revisionsForEdges(input.edges);
+  const cellRevisions = revisionsForCells(input.cells);
+  const topologyVersion = stableValueHash({
+    nodes: nodeRevisions.topology,
+    edges: edgeRevisions.topology,
+    cells: cellRevisions.topology,
+  });
+  const layoutVersion = nodeRevisions.layout;
   const cellGeometryVersion = stableValueHash({
     topologyVersion,
     layoutVersion,
-    cells: input.cells.map((cell) => [
-      cell.id,
-      cell.localDistance,
-      cell.readabilityRole,
-      cell.isRelationBoundary === true ? 1 : 0,
-    ]),
+    cells: cellRevisions.geometry,
     parts: input.cellGeometryParts ?? [],
   });
   const appearanceVersion = stableValueHash({
-    nodes: input.nodes.map((node) => [
-      node.id,
-      node.ghost === true ? 1 : 0,
-      node.isRelationBoundary === true ? 1 : 0,
-      node.colorHint,
-      node.stateRole,
-    ]),
-    edges: input.edges.map((edge) => [
-      edge.id,
-      edge.ghost === true ? 1 : 0,
-      edge.emphasis,
-      edge.selectedHighlight,
-      edge.colorHint,
-    ]),
-    cells: input.cells.map((cell) => [cell.id, cell.readabilityRole]),
+    nodes: nodeRevisions.appearance,
+    edges: edgeRevisions.appearance,
+    cells: cellRevisions.appearance,
     parts: input.appearanceParts ?? [],
   });
   const labelVersion = stableValueHash({
-    nodes: input.nodes.map((node) => [
-      node.id,
-      node.label,
-      node.compactLabel,
-      node.isRelationBoundary === true ? 1 : 0,
-      node.alwaysLabel === true ? 1 : 0,
-      node.labelPriority,
-      node.stateRole,
-    ]),
-    edges: input.edges.map((edge) => [
-      edge.id,
-      edge.compactLabel,
-      edge.alwaysLabel === true ? 1 : 0,
-      edge.labelAnchor,
-      edge.labelPosition,
-      edge.labelLeader === true ? 1 : 0,
-      edge.labelPriority,
-      edge.suppressSemanticLabel === true ? 1 : 0,
-    ]),
+    nodes: nodeRevisions.labels,
+    edges: edgeRevisions.labels,
     parts: input.labelParts ?? [],
   });
   const pickingVersion = stableValueHash({
@@ -329,43 +337,130 @@ export function yGammaAtlasVersion(input: {
   return stableValueLongHash(input);
 }
 
-function sceneTopologyVersion(input: SceneRevisionInput): string {
-  return stableValueHash({
-    nodes: input.nodes.map((node) => [node.id, node.length]),
-    edges: input.edges.map((edge) => [
-      edge.id,
-      edge.source,
-      edge.target,
-      edge.generator,
-      edge.directed === true ? 1 : 0,
-      edge.ghost === true ? 1 : 0,
-      edge.colorHint,
-      edge.isRelationBoundary === true ? 1 : 0,
-      edge.alwaysLabel === true ? 1 : 0,
-      edge.labelPriority,
-      edge.suppressSemanticLabel === true ? 1 : 0,
-    ]),
-    cells: input.cells.map((cell) => [
-      cell.id,
-      cell.generatorPair,
-      cell.boundaryNodeIds,
-      cell.dimension,
-      cell.sourceCellId,
-    ]),
-  });
+function revisionsForNodes(
+  nodes: readonly SceneNode[],
+): NodeRevisionComponents {
+  const cached = nodeRevisionComponents.get(nodes);
+  if (cached) {
+    return cached;
+  }
+  const revisions = {
+    topology: stableValueHash(nodes.map((node) => [node.id, node.length])),
+    layout: stableValueHash(
+      nodes.map((node) => [
+        node.id,
+        node.position,
+        node.hidden === true ? 1 : 0,
+        node.localDistance,
+        node.nodeScale,
+        node.stateRole,
+      ]),
+    ),
+    appearance: stableValueHash(
+      nodes.map((node) => [
+        node.id,
+        node.ghost === true ? 1 : 0,
+        node.isRelationBoundary === true ? 1 : 0,
+        node.colorHint,
+        node.stateRole,
+      ]),
+    ),
+    labels: stableValueHash(
+      nodes.map((node) => [
+        node.id,
+        node.label,
+        node.compactLabel,
+        node.isRelationBoundary === true ? 1 : 0,
+        node.alwaysLabel === true ? 1 : 0,
+        node.labelPriority,
+        node.stateRole,
+      ]),
+    ),
+  };
+  nodeRevisionComponents.set(nodes, revisions);
+  return revisions;
 }
 
-function sceneLayoutVersion(input: SceneRevisionInput): string {
-  return stableValueHash({
-    nodes: input.nodes.map((node) => [
-      node.id,
-      node.position,
-      node.hidden === true ? 1 : 0,
-      node.localDistance,
-      node.nodeScale,
-      node.stateRole,
-    ]),
-  });
+function revisionsForEdges(
+  edges: readonly SceneEdge[],
+): EdgeRevisionComponents {
+  const cached = edgeRevisionComponents.get(edges);
+  if (cached) {
+    return cached;
+  }
+  const revisions = {
+    topology: stableValueHash(
+      edges.map((edge) => [
+        edge.id,
+        edge.source,
+        edge.target,
+        edge.generator,
+        edge.directed === true ? 1 : 0,
+        edge.ghost === true ? 1 : 0,
+        edge.colorHint,
+        edge.isRelationBoundary === true ? 1 : 0,
+        edge.alwaysLabel === true ? 1 : 0,
+        edge.labelPriority,
+        edge.suppressSemanticLabel === true ? 1 : 0,
+      ]),
+    ),
+    appearance: stableValueHash(
+      edges.map((edge) => [
+        edge.id,
+        edge.ghost === true ? 1 : 0,
+        edge.emphasis,
+        edge.selectedHighlight,
+        edge.colorHint,
+      ]),
+    ),
+    labels: stableValueHash(
+      edges.map((edge) => [
+        edge.id,
+        edge.compactLabel,
+        edge.alwaysLabel === true ? 1 : 0,
+        edge.labelAnchor,
+        edge.labelPosition,
+        edge.labelLeader === true ? 1 : 0,
+        edge.labelPriority,
+        edge.suppressSemanticLabel === true ? 1 : 0,
+      ]),
+    ),
+  };
+  edgeRevisionComponents.set(edges, revisions);
+  return revisions;
+}
+
+function revisionsForCells(
+  cells: readonly SceneCell[],
+): CellRevisionComponents {
+  const cached = cellRevisionComponents.get(cells);
+  if (cached) {
+    return cached;
+  }
+  const revisions = {
+    topology: stableValueHash(
+      cells.map((cell) => [
+        cell.id,
+        cell.generatorPair,
+        cell.boundaryNodeIds,
+        cell.dimension,
+        cell.sourceCellId,
+      ]),
+    ),
+    geometry: stableValueHash(
+      cells.map((cell) => [
+        cell.id,
+        cell.localDistance,
+        cell.readabilityRole,
+        cell.isRelationBoundary === true ? 1 : 0,
+      ]),
+    ),
+    appearance: stableValueHash(
+      cells.map((cell) => [cell.id, cell.readabilityRole]),
+    ),
+  };
+  cellRevisionComponents.set(cells, revisions);
+  return revisions;
 }
 
 function stringifyStable(value: unknown, seen: WeakSet<object>): string {

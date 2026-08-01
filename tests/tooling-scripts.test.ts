@@ -925,7 +925,7 @@ describe("optional exact exporter tooling", () => {
     expect(stored.benchmark).toBe("catalogue-static-v1");
     expect(stored.elapsedMs).toBeUndefined();
     expect(stored.totals).toMatchObject({
-      examples: 25,
+      examples: 26,
       generated: 6,
       generatedNodes: 80,
       generatedEdges: 104,

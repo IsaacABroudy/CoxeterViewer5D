@@ -107,7 +107,7 @@ export function buildJnwLayerBreadcrumb(
     items: [
       "Coxeter system Gamma",
       "Y_Gamma fundamental domain",
-      "JNW state quotient",
+      "JNW move-kernel cover",
       `link at state ${selectedStateLabel}`,
     ],
   };
@@ -322,6 +322,36 @@ export function jnwOrbitToQuotientComplex(
   system: CoxeterSystemInput,
   summary: JnwLegalOrbitSummary,
 ): QuotientComplex {
+  // QuotientComplex stores directed edges in inverse pairs. The JNW orbit
+  // summary stores one geometric rail with a preferred Morse orientation, so
+  // each rail becomes two records without duplicating it in the reader.
+  const quotientEdges = summary.edges.flatMap((edge) => {
+    const forwardId = directedQuotientEdgeId(edge.id, "forward");
+    const reverseId = directedQuotientEdgeId(edge.id, "reverse");
+    const label =
+      system.generators[edge.generator]?.label ?? `s${edge.generator}`;
+    return [
+      {
+        id: forwardId,
+        source: edge.source,
+        target: edge.target,
+        generator: edge.generator,
+        inverseEdgeId: reverseId,
+        label,
+        sourceEdgeIds: [edge.id],
+      },
+      {
+        id: reverseId,
+        source: edge.target,
+        target: edge.source,
+        generator: edge.generator,
+        inverseEdgeId: forwardId,
+        label,
+        sourceEdgeIds: [edge.id],
+      },
+    ];
+  });
+  const railById = new Map(summary.edges.map((edge) => [edge.id, edge]));
   const twoCells = summary.rankTwoDiagnostics
     .filter((diagnostic) => diagnostic.ok)
     .map((diagnostic) => ({
@@ -329,28 +359,132 @@ export function jnwOrbitToQuotientComplex(
       generatorPair: diagnostic.generatorPair,
       m: diagnostic.m,
       boundaryVertexIds: diagnostic.boundaryStateIds,
-      boundaryEdgeIds: diagnostic.boundaryEdgeIds,
+      boundaryEdgeIds: diagnostic.boundaryEdgeIds.map((railId, index) => {
+        const rail = railById.get(railId);
+        const boundarySource = diagnostic.boundaryStateIds[index];
+        return directedQuotientEdgeId(
+          railId,
+          rail?.source === boundarySource ? "forward" : "reverse",
+        );
+      }),
+      sourceCellIds: [diagnostic.id],
     }));
+  const permutationAction = Array.from(
+    { length: system.rank },
+    (_unused, generator) => ({
+      generator,
+      images: Object.fromEntries(
+        summary.states.map((state) => {
+          const edge = summary.edges.find(
+            (candidate) =>
+              candidate.generator === generator &&
+              (candidate.undirectedSource === state.id ||
+                candidate.undirectedTarget === state.id),
+          );
+          const image = edge
+            ? edge.undirectedSource === state.id
+              ? edge.undirectedTarget
+              : edge.undirectedSource
+            : state.id;
+          return [state.id, image];
+        }),
+      ),
+    }),
+  );
+  const totalGeneratorAction = permutationAction.every(
+    (action) => Object.keys(action.images).length === summary.states.length,
+  );
+  const involutiveGeneratorAction = permutationAction.every((action) =>
+    Object.entries(action.images).every(
+      ([source, target]) => action.images[target] === source,
+    ),
+  );
+  const relationBoundariesClose = summary.rankTwoDiagnostics.every(
+    (diagnostic) => diagnostic.ok,
+  );
+  const coverStatus =
+    summary.orbitComplete &&
+    totalGeneratorAction &&
+    involutiveGeneratorAction &&
+    relationBoundariesClose
+      ? "in-repo-checked"
+      : summary.orbitComplete
+        ? "failed"
+        : "incomplete";
+  const coverWarning =
+    "This is the move-kernel cover induced by the JNW move action, not JNW's full mod-2 commutator cover.";
 
   return {
     schemaVersion: 1,
-    name: `JNW state quotient (${system.name})`,
+    name: `JNW move-kernel cover (${system.name})`,
     sourceSystem: system,
     generatorRank: system.rank,
+    permutationAction,
     vertices: summary.states.map((state) => ({
       id: state.id,
       label: formatJnwStateName(summary, state),
       representativeWord: [],
     })),
-    edges: summary.edges.map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      generator: edge.generator,
-      inverseEdgeId: edge.id,
-      label: system.generators[edge.generator]?.label ?? `s${edge.generator}`,
-    })),
+    edges: quotientEdges,
     twoCells,
+    subgroup: {
+      name: "kernel of the JNW move homomorphism",
+      index: summary.states.length,
+      source: "in-repo JNW state/move action",
+      certificate: {
+        status: coverStatus === "in-repo-checked" ? "passed" : "failed",
+        backend: "in-repo-jnw-move-action",
+        scopes: ["quotient-action"],
+        diagnostics: {
+          coverKind: "jnw-move-kernel",
+          deckGroupOrder: summary.states.length,
+          totalGeneratorAction,
+          involutiveGeneratorAction,
+          relationBoundariesClose,
+        },
+        warnings: [coverWarning],
+      },
+      notes: [
+        "The subgroup is ker(mu o alpha), where alpha is mod-2 abelianization and mu sends a generator basis vector to its JNW move.",
+        coverWarning,
+      ],
+    },
+    coverProjection: {
+      kind: "jnw-move-kernel",
+      baseComplexName: `Y_Gamma(${system.name})`,
+      deckGroupOrder: summary.states.length,
+      fundamentalDomainCopyIds: summary.states.map((state) => state.id),
+      vertexImages: Object.fromEntries(
+        summary.states.map((state) => [state.id, "*"]),
+      ),
+      edgeImages: Object.fromEntries(
+        quotientEdges.map((edge) => [edge.id, `Y:edge:${edge.generator}`]),
+      ),
+      twoCellImages: Object.fromEntries(
+        twoCells.map((cell) => [
+          cell.id,
+          `Y:cell:${cell.generatorPair[0]}-${cell.generatorPair[1]}`,
+        ]),
+      ),
+      status: coverStatus,
+      checks: {
+        totalGeneratorAction,
+        involutiveGeneratorAction,
+        relationBoundariesClose,
+        projectionPreservesLabels: true,
+      },
+      warnings: [coverWarning],
+    },
+    verifier: {
+      status: coverStatus === "in-repo-checked" ? "passed" : "failed",
+      backend: "in-repo-jnw-move-action",
+      scopes: ["quotient-action"],
+      diagnostics: {
+        coverKind: "jnw-move-kernel",
+        deckGroupOrder: summary.states.length,
+      },
+      warnings: [coverWarning],
+    },
     game: {
       activeAssignmentId: "jnw-state-directions",
       activeCocycleId: "jnw-state-direction-check",
@@ -359,9 +493,9 @@ export function jnwOrbitToQuotientComplex(
           id: "jnw-state-directions",
           label: "JNW state-dependent edge directions",
           kind: "integer-edge-labeling",
-          edgeStates: summary.edges.map((edge) => ({
+          edgeStates: quotientEdges.map((edge) => ({
             edgeId: edge.id,
-            value: 1,
+            value: edge.id.endsWith(":forward") ? 1 : -1,
           })),
           notes: [
             "Each edge value follows the state-dependent direction computed from the JNW state/move data.",
@@ -386,11 +520,19 @@ export function jnwOrbitToQuotientComplex(
       ],
     },
     warnings: [
-      `JNW state quotient claim status: ${summary.claimStatus}.`,
+      `JNW move-kernel cover claim status: ${summary.claimStatus}.`,
+      coverWarning,
       ...summary.warnings,
       ...summary.errors,
     ],
   };
+}
+
+function directedQuotientEdgeId(
+  railId: string,
+  direction: "forward" | "reverse",
+): string {
+  return `${railId}:${direction}`;
 }
 
 function normalizedMoves(

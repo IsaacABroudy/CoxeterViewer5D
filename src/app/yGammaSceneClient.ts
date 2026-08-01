@@ -11,6 +11,7 @@ import type {
 import { LruCache } from "./lruCache";
 import {
   createPersistentCache,
+  estimatePersistentCacheValueBytes,
   type PersistentCache,
   type PersistentCacheKey,
 } from "./persistentCache";
@@ -23,6 +24,7 @@ import type { YGamma2SkeletonSceneOptions } from "./yGammaScene";
 
 export interface YGammaSceneClientOptions {
   memoryEntries?: number;
+  memoryBytes?: number;
   appVersion?: string;
   persistentCache?: PersistentCache<CachedYGammaScene>;
   workerFactory?: () => Worker | undefined;
@@ -45,7 +47,7 @@ export interface YGammaSceneClientResult {
   requestId: number;
   sceneVersion: string;
   buildMs?: number;
-  cacheHit: "memory" | "persistent" | false;
+  cacheHit: "memory" | "persistent" | "inflight" | false;
 }
 
 interface PendingRequest {
@@ -76,16 +78,26 @@ export class YGammaSceneClient {
   private readonly canUseWorker: boolean;
   private readonly appVersion: string;
   private readonly pending = new Map<number, PendingRequest>();
+  private readonly inFlightBySceneVersion = new Map<
+    string,
+    Promise<YGammaSceneClientResult>
+  >();
   private readonly postedAtlasVersions = new Set<string>();
+  private readonly atlasVersions = new WeakMap<YGammaCellAtlas, string>();
   private worker: Worker | undefined;
   private nextRequestId = 1;
 
   constructor(options: YGammaSceneClientOptions = {}) {
-    this.memory = new LruCache({ maxEntries: options.memoryEntries ?? 24 });
+    this.memory = new LruCache<string, CachedYGammaScene>({
+      maxEntries: options.memoryEntries ?? 24,
+      maxBytes: options.memoryBytes ?? 48 * 1024 * 1024,
+      sizeOf: estimatePersistentCacheValueBytes,
+    });
     this.persistentCache =
       options.persistentCache ??
       createPersistentCache<CachedYGammaScene>({
         memoryEntries: options.memoryEntries ?? 24,
+        memoryBytes: options.memoryBytes ?? 48 * 1024 * 1024,
       });
     this.workerFactory = options.workerFactory;
     this.canUseWorker = options.canUseWorker ?? true;
@@ -93,7 +105,11 @@ export class YGammaSceneClient {
   }
 
   atlasVersionFor(request: YGammaSceneClientRequest): string {
-    return yGammaAtlasVersion({
+    const cached = this.atlasVersions.get(request.atlas);
+    if (cached) {
+      return cached;
+    }
+    const version = yGammaAtlasVersion({
       systemName: request.atlas.systemName,
       generatorCount: request.atlas.generatorCount,
       generatorCells: request.atlas.generatorCells.map((cell) => ({
@@ -123,6 +139,8 @@ export class YGammaSceneClient {
       })),
       warnings: request.atlas.warnings,
     });
+    this.atlasVersions.set(request.atlas, version);
+    return version;
   }
 
   sceneVersionFor(request: YGammaSceneClientRequest): string {
@@ -134,13 +152,54 @@ export class YGammaSceneClient {
     });
   }
 
-  async build(
-    request: YGammaSceneClientRequest,
-  ): Promise<YGammaSceneClientResult> {
+  build(request: YGammaSceneClientRequest): Promise<YGammaSceneClientResult> {
     const requestId = this.nextRequestId++;
     const atlasVersion = this.atlasVersionFor(request);
     const sceneVersion = this.sceneVersionFor(request);
     const persistentKey = this.persistentKey(sceneVersion);
+    const inFlight = this.inFlightBySceneVersion.get(sceneVersion);
+    if (inFlight) {
+      return inFlight.then((result) => ({
+        ...result,
+        requestId,
+        cacheHit: "inflight",
+      }));
+    }
+
+    const build = this.buildOnce(
+      request,
+      requestId,
+      atlasVersion,
+      sceneVersion,
+      persistentKey,
+    );
+    this.inFlightBySceneVersion.set(sceneVersion, build);
+    const clear = () => {
+      if (this.inFlightBySceneVersion.get(sceneVersion) === build) {
+        this.inFlightBySceneVersion.delete(sceneVersion);
+      }
+    };
+    void build.then(clear, clear);
+    return build;
+  }
+
+  async prefetch(requests: readonly YGammaSceneClientRequest[]): Promise<void> {
+    const unique = new Map<string, YGammaSceneClientRequest>();
+    for (const request of requests) {
+      unique.set(this.sceneVersionFor(request), request);
+    }
+    await Promise.allSettled(
+      [...unique.values()].map((request) => this.build(request)),
+    );
+  }
+
+  private async buildOnce(
+    request: YGammaSceneClientRequest,
+    requestId: number,
+    atlasVersion: string,
+    sceneVersion: string,
+    persistentKey: PersistentCacheKey,
+  ): Promise<YGammaSceneClientResult> {
     const memoryHit = this.memory.get(sceneVersion);
     if (memoryHit) {
       return {
@@ -200,7 +259,7 @@ export class YGammaSceneClient {
         options: request.options,
       };
       worker.postMessage(workerRequest);
-      this.postedAtlasVersions.add(atlasVersion);
+      this.rememberPostedAtlas(atlasVersion);
     });
   }
 
@@ -209,6 +268,7 @@ export class YGammaSceneClient {
       pending.reject(new Error("Y_Gamma scene worker was disposed."));
     }
     this.pending.clear();
+    this.inFlightBySceneVersion.clear();
     this.worker?.terminate();
     this.worker = undefined;
     this.postedAtlasVersions.clear();
@@ -296,6 +356,18 @@ export class YGammaSceneClient {
       pending.reject(new Error(message));
     }
     this.pending.clear();
+  }
+
+  private rememberPostedAtlas(atlasVersion: string): void {
+    this.postedAtlasVersions.delete(atlasVersion);
+    this.postedAtlasVersions.add(atlasVersion);
+    while (this.postedAtlasVersions.size > 16) {
+      const oldest = this.postedAtlasVersions.values().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      this.postedAtlasVersions.delete(oldest);
+    }
   }
 
   private persistentKey(sceneVersion: string): PersistentCacheKey {

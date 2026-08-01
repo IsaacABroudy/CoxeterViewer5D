@@ -78,6 +78,14 @@ Gamma is the Coxeter defining graph, not the Davis complex and not `Y_Gamma`.
 - **3D viewer** is useful for orbiting dense graphs.
 - **2D planar** tries to draw Gamma in the plane and explains detected
   obstructions such as `K5` or `K3,3`.
+- **Inspect generator** selects a Gamma vertex. The incident-relation section
+  groups its neighbors into `N_2`, `N_3`, and the other relation-order classes.
+  It also lists `N_inf`, even though those pairs are not drawn as Gamma edges,
+  so every other generator is accounted for exactly once.
+- **Relation-order connected components** forms `Gamma_m` from exactly the
+  edges labelled `m`. It lists each edge-bearing component and the generators
+  that are isolated in `Gamma_m`. A condition that requires equal values at
+  the ends of every `m`-edge is constant on each listed component.
 - Every drawn edge is a finite relation edge and should carry one `m` label.
 - `m = inf` pairs are omitted because they are not finite relations.
 
@@ -93,11 +101,19 @@ This area has two separate game models.
 For the JNW cube workflow, read the stack as:
 
 ```text
-Gamma -> Y_Gamma -> JNW state quotient -> link at selected state
+Sigma -> JNW commutator cover -> four-state move-kernel cover -> Y_Gamma
 ```
 
-Ascending, descending, and level links are diagnostics at the selected state in
-the JNW state quotient.
+Use **Show four-state cover** to open the compact move-kernel cover. **Exact
+cover 1-skeleton** shows its four state vertices and sixteen generator rails.
+**Four-chart cover drawing** adds a shared subdivision that exposes the four
+lifts of `Y_Gamma` without changing that incidence. **Choose state** selects a
+cover vertex; **Read relation** selects one lifted square.
+
+At state `S`, **Ascending link at selected state** shows
+`Flag(Gamma)[S]`; **Descending link at selected state** shows
+`Flag(Gamma)[V - S]`. The faithful JNW diagonal map has no level edges, so a
+level-link control is relevant only to the generalized cochain workflow.
 
 ## Research Mode
 

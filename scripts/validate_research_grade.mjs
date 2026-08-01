@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 
+// Browser timing has its own `bench:timed:hard-gate` process and CI step.
+// Running it again after every Python/external checker measures residual host
+// contention rather than the production app, and made the combined validator
+// nondeterministic without strengthening any mathematical check.
 const COMMANDS = [
   ["node", ["scripts/verify_catalogue.mjs"]],
   [
@@ -109,27 +113,6 @@ const COMMANDS = [
       "scripts/benchmark_catalogue.mjs",
       "--check",
       "scripts/benchmarks/catalogue-static-v1.json",
-    ],
-  ],
-  [
-    "node",
-    [
-      "scripts/benchmark_timed.mjs",
-      "--check",
-      "scripts/benchmarks/timed-browser-v1.json",
-      "--report",
-      ".benchmark-current/timed-browser-v1.json",
-    ],
-  ],
-  [
-    "node",
-    [
-      "scripts/benchmark_machine.mjs",
-      "--check",
-      "scripts/benchmarks/machine-baselines-v1.json",
-      "--current",
-      ".benchmark-current/timed-browser-v1.json",
-      "--hard-gates",
     ],
   ],
 ];

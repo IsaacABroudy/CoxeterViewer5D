@@ -180,10 +180,11 @@ The inspector is the safest place to start. It always answers three questions:
 - **Exact or drawing?**
 
 For the JNW workflow, keep the layers separate:
-**Coxeter system Gamma -> Y_Gamma fundamental domain -> JNW state quotient ->
-local link at the selected state**. Ascending, descending, and level links are
-state-quotient diagnostics at a selected state vertex. They are not ambient
-links inside the universal Davis complex.
+**Davis complex Sigma -> JNW commutator cover X_ab -> four-state move-kernel
+cover X_mu -> Y_Gamma**. The app's compact reader shows `X_mu`, a four-sheeted
+cover of the base fundamental-domain model `Y_Gamma`; it does not relabel the
+256-vertex commutator cover from JNW21 as a four-state complex. Ascending and
+descending links are computed at a selected cover vertex from the state subset.
 
 Use **Start Here** in Teaching mode for one-click tours. Use **Research** mode
 when you want imports, backend status, certificates, notebooks, detailed cell
@@ -221,7 +222,7 @@ regenerated with `corepack pnpm demo:screenshots`.
 | Inspect an A3 rank-three cell | ![A3 Y_Gamma rank-three focus with square and hexagon face families visible as one 3D incidence object.](docs/screenshots/a3-rank-three-square-hexagon.png)      |
 | Inspect `Y_Gamma` for P2      | ![Y_Gamma for the certified P2 compact 5-prism, focused on an m=5 relation sheet attached to the generator spine.](docs/screenshots/y-gamma-p2-m5-relation.png)  |
 | Run `I2(5)` quotient/game     | ![I2(5) quotient/game workflow with the generator-uniform cochain and decagon boundary-sum diagnostic visible.](docs/screenshots/i2-5-quotient-game-cocycle.png) |
-| Play the JNW cube game        | Use **Study a quotient/game** to open the 3-cube defining graph with bipartition moves, a derived JNW state quotient, and state-centered link diagnostics.       |
+| Play the JNW cube game        | Use **Study a quotient/game** to open the 3-cube defining graph, the four-state move-kernel cover of `Y_Gamma`, and exact state-link diagnostics.                |
 
 ## Certification Status
 
@@ -236,12 +237,13 @@ the scripts fall back to a clearly labeled in-repo finite checker. Quotient
 imports are validated for generator actions, involutions, relation closure, and
 rank-two cells when the relevant data is supplied.
 
-The example gallery also includes a searchable catalogue for Tumarkin's 15
-compact 5D eight-facet `G11411` cases from Table 4.10. Those diagrams are now
-manually transcribed from the arXiv EPS source, generated as loadable bundled
-examples, and certified for source transcription, exact algebraic dotted
-weights, and normal-Gram rank/signature diagnostics. They live in the catalogue
-instead of the main gallery so the first screen stays readable.
+The example gallery also includes a searchable catalogue of all 16 compact 5D
+eight-facet cases in Tumarkin's Table 4.10: 15 in the `G11411` family and the
+unique `G12221` case. The diagrams are transcribed from the arXiv EPS source,
+generated as loadable bundled examples, and certified for source transcription,
+exact algebraic dotted weights, and normal-Gram rank/signature diagnostics. They
+live in the catalogue instead of the main gallery so the first screen stays
+readable.
 
 ## How Do I Study `Y_Gamma`?
 
@@ -266,7 +268,10 @@ Use the top view switch to move among **Davis complex**, **Y_Gamma**, and
 finite rank-two relation edges, including `m = 2` commuting pairs that standard
 Coxeter diagrams usually omit. Pairs with `m = inf` are absent because they do
 not give finite rank-two relation cells, and every drawn edge is labeled by its
-Coxeter matrix entry.
+Coxeter matrix entry. The Gamma inspector also lists the connected components
+of each monochromatic subgraph `Gamma_m`, including isolated singleton
+generators, so relation-order partitions can be read without tracing the whole
+diagram by eye.
 
 ## How Do I Run A Quotient/Game Experiment?
 
@@ -283,19 +288,21 @@ Use the **Research Workflow** panel. It is a five-step path:
    **JNW Legal-System Game**. The I2(5) demo uses the cochain
    `s0 = +1, s1 = -1`, so the decagon boundary sum is zero while ascending and
    descending edges are both visible. The JNW cube demo preloads the JNW21 cube
-   bipartition/color-class move system and the initial state
-   `{v000, v001, v010, v101}`, so the browser diagnostics open on a
-   right-angled legal orbit. In the state quotient, vertices are named `S_1`,
-   `S_2`, ... for readability; the panel and inspector show the underlying
-   subset next to the name. The **Choose state** control changes the active
-   `S_i`; **Show JNW state quotient** draws the derived state quotient.
-   The quotient vertices are exactly the states `S_i`. A generator edge labeled
-   `g` runs from `S_i` to the state obtained by applying the move `m_g`; there
-   are no extra generator-endpoint quotient vertices. The cube demo has four state
-   vertices, sixteen generator-labeled edges, and twelve square relation cells.
-   The reader builds this view in stages: state vertices, generator edges,
-   relation-cycle boundaries, glass faces, and state-dependent directions. Use
-   **Outlines only** or **Glass faces** when the 1-skeleton should dominate.
+   bipartition/color-class move system and the paper's displayed initial state
+   `{v000, v010, v110, v111}`, so the diagnostics open on a right-angled legal
+   orbit. The paper's commutator cover `X_ab` has 256 vertices for this
+   eight-generator group. The compact reader instead shows the explicit
+   move-kernel factor `X_mu`, whose four vertices are named `S_1`, ..., `S_4`.
+   The **Choose state** control changes the active `S_i`; **Show four-state
+   cover** opens the cover reader. A generator rail labeled `g` runs from `S_i`
+   to `S_i xor m_g`. The cube demo has four state vertices, sixteen geometric
+   generator rails, and twelve square relation cells. In serialized quotient
+   data each rail has two inverse-paired directed records; the reader draws the
+   underlying geometric rail once. **Exact cover 1-skeleton** shows only the
+   state vertices and rails. **Four-chart cover drawing** subdivides each rail
+   once and each square into four colored sectors so the four lifts of
+   `Y_Gamma` can be followed through their shared gluing data. Use **Outlines
+   only** or **Glass faces** when the 1-skeleton should dominate.
    **Choose relation** selects one alternating rank-two boundary, **Next
    relation** advances through the list, and **Focus selected relation** ghosts
    unrelated quotient edges; these controls do not add a separate central
@@ -307,10 +314,11 @@ Use the **Research Workflow** panel. It is a five-step path:
 
 The topology lenses make quotient/game mode primary: generator star,
 rank-three spherical cell, cells incident to an edge, **Ascending link at
-selected state**, **Descending link at selected state**, **Level link at
-selected state**, and full local link. In the JNW cube demo those links live in
-the derived state quotient, while `Y_Gamma` remains the fundamental-domain
-source object. The workflow readout reports
+selected state**, **Descending link at selected state**, and full local link.
+For the JNW cube state `S`, these are the induced flag subcomplexes `L[S]` and
+`L[V - S]`, where `L = Flag(Gamma)`. The faithful diagonal map has no level
+directions; level links belong to the separate generalized cochain workflow.
+`Y_Gamma` remains the fundamental-domain source object. The workflow readout reports
 the visible vertices, edges, cells, local-link F2 homology, and flag-link status
 so the topology is visible before opening the full inspector. Importing
 quotient JSON still works, and the old raw builder remains available under
@@ -404,11 +412,12 @@ SageMath, GAP/KBMAG, and a stable CoxIter executable path for artifact checks.
 - [docs/math.md](docs/math.md): Coxeter, Davis, quotient, game, and projection conventions.
 - [docs/data-format.md](docs/data-format.md): JSON schemas and import/export behavior.
 - [docs/viewer-design.md](docs/viewer-design.md): rendering, interaction, performance, and UI decisions.
+- [docs/performance-audit.md](docs/performance-audit.md): measured bottlenecks, completed optimizations, and thresholds for future renderer work.
 - [docs/ui-controls.md](docs/ui-controls.md): plain-language map of the main controls and what they change.
 - [docs/tooling.md](docs/tooling.md): exact exporter contracts, scripts, runtime checks, and CI policy.
 - [docs/desktop-ux.md](docs/desktop-ux.md): native wrapper UX, workspace layout, diagnostics, signing, and updater status.
 - [docs/walkthroughs.md](docs/walkthroughs.md): guided readings for hexagon, rank-three, Gamma, `Y_Gamma`, and quotient/game views.
-- [docs/jnw-state-quotient.md](docs/jnw-state-quotient.md): the state-quotient convention used by the JNW cube workflow.
+- [docs/jnw-state-quotient.md](docs/jnw-state-quotient.md): the commutator cover, the four-state move-kernel cover, and how both sit over `Y_Gamma`.
 - [docs/ui-map.md](docs/ui-map.md): one annotated map of the main UI regions.
 - [docs/known-limits.md](docs/known-limits.md): density, projection, non-planarity, and external-tool caveats.
 - [docs/exact-vs-drawing.md](docs/exact-vs-drawing.md): how to separate exact incidence, numerical geometry, and readable drawings.

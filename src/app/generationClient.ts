@@ -3,6 +3,7 @@ import type {
   CoxeterSystemInput,
   GeneratedCayleyBall,
 } from "../types";
+import type { SphericalSubsetEnumerationResult } from "../davis";
 import { generateViewerBall } from "./generationPipeline";
 import type {
   GenerationWorkerRequest,
@@ -12,6 +13,7 @@ import { scheduleIdleTask } from "./idle";
 import { LruCache } from "./lruCache";
 import {
   createPersistentCache,
+  estimatePersistentCacheValueBytes,
   persistentCacheKeyFromMetadata,
   persistentCacheRegistry,
   type PersistentCache,
@@ -27,6 +29,7 @@ export type GenerationCacheHit = "memory" | "persistent" | false;
 
 export interface GenerationClientResult {
   ball: GeneratedCayleyBall;
+  sphericalSubsets: SphericalSubsetEnumerationResult;
   generationMs?: number;
   requestId: number;
   cacheKey: string;
@@ -43,6 +46,7 @@ export interface GenerationClientRequest {
 
 export interface GenerationClientOptions {
   memoryEntries?: number;
+  memoryBytes?: number;
   appVersion?: string;
   persistentCache?: PersistentCache<CachedGeneratedBall>;
   workerFactory?: () => Worker | undefined;
@@ -51,6 +55,7 @@ export interface GenerationClientOptions {
 
 export interface CachedGeneratedBall {
   ball: GeneratedCayleyBall;
+  sphericalSubsets: SphericalSubsetEnumerationResult;
   generationMs?: number;
   cachedAt: string;
   cacheMetadata?: CachedGeneratedBallMetadata;
@@ -100,11 +105,16 @@ export class GenerationClient {
   private readonly postedSystemHashes = new Set<string>();
 
   constructor(options: GenerationClientOptions = {}) {
-    this.memory = new LruCache({ maxEntries: options.memoryEntries ?? 24 });
+    this.memory = new LruCache<string, CachedGeneratedBall>({
+      maxEntries: options.memoryEntries ?? 24,
+      maxBytes: options.memoryBytes ?? 64 * 1024 * 1024,
+      sizeOf: estimatePersistentCacheValueBytes,
+    });
     this.persistentCache =
       options.persistentCache ??
       createPersistentCache<CachedGeneratedBall>({
         memoryEntries: options.memoryEntries ?? 24,
+        memoryBytes: options.memoryBytes ?? 64 * 1024 * 1024,
       });
     this.workerFactory = options.workerFactory;
     this.canUseWorker = options.canUseWorker ?? true;
@@ -122,6 +132,7 @@ export class GenerationClient {
     if (memoryHit) {
       return {
         ball: memoryHit.ball,
+        sphericalSubsets: memoryHit.sphericalSubsets,
         generationMs: memoryHit.generationMs,
         requestId,
         cacheKey,
@@ -136,6 +147,7 @@ export class GenerationClient {
       this.memory.set(cacheKey, persistentHit);
       return {
         ball: persistentHit.ball,
+        sphericalSubsets: persistentHit.sphericalSubsets,
         generationMs: persistentHit.generationMs,
         requestId,
         cacheKey,
@@ -147,14 +159,19 @@ export class GenerationClient {
 
     if (!this.canUseWorker || typeof Worker === "undefined") {
       const startedAt = performanceNow();
-      const { ball } = generateViewerBall(request.system, request.options);
+      const { ball, sphericalSubsets } = generateViewerBall(
+        request.system,
+        request.options,
+      );
       const generationMs = performanceNow() - startedAt;
       const cached = this.remember(cacheKey, persistentKey, {
         ball,
+        sphericalSubsets,
         generationMs,
       });
       return {
         ball,
+        sphericalSubsets,
         generationMs,
         requestId,
         cacheKey,
@@ -167,14 +184,19 @@ export class GenerationClient {
     const worker = this.ensureWorker();
     if (!worker) {
       const startedAt = performanceNow();
-      const { ball } = generateViewerBall(request.system, request.options);
+      const { ball, sphericalSubsets } = generateViewerBall(
+        request.system,
+        request.options,
+      );
       const generationMs = performanceNow() - startedAt;
       const cached = this.remember(cacheKey, persistentKey, {
         ball,
+        sphericalSubsets,
         generationMs,
       });
       return {
         ball,
+        sphericalSubsets,
         generationMs,
         requestId,
         cacheKey,
@@ -208,7 +230,7 @@ export class GenerationClient {
         options: request.options,
       };
       worker.postMessage(workerRequest);
-      this.postedSystemHashes.add(inputHash);
+      this.rememberPostedSystem(inputHash);
     });
   }
 
@@ -275,10 +297,12 @@ export class GenerationClient {
       response.generationMs || performanceNow() - pending.startedAt;
     const cached = this.remember(pending.cacheKey, pending.persistentKey, {
       ball: response.ball,
+      sphericalSubsets: response.sphericalSubsets,
       generationMs,
     });
     pending.resolve({
       ball: response.ball,
+      sphericalSubsets: response.sphericalSubsets,
       generationMs,
       requestId: response.requestId,
       cacheKey: pending.cacheKey,
@@ -291,7 +315,11 @@ export class GenerationClient {
   private remember(
     cacheKey: string,
     persistentKey: PersistentCacheKey,
-    value: { ball: GeneratedCayleyBall; generationMs?: number },
+    value: {
+      ball: GeneratedCayleyBall;
+      sphericalSubsets: SphericalSubsetEnumerationResult;
+      generationMs?: number;
+    },
   ): CachedGeneratedBall {
     const cached: CachedGeneratedBall = {
       ...value,
@@ -314,6 +342,21 @@ export class GenerationClient {
       pending.reject(new Error(message));
     }
     this.pending.clear();
+  }
+
+  private rememberPostedSystem(inputHash: string): void {
+    // Keep the client's residency model in the same LRU order as the worker.
+    // A plain Set grew forever and eventually claimed that an input was still
+    // resident after the worker had evicted it.
+    this.postedSystemHashes.delete(inputHash);
+    this.postedSystemHashes.add(inputHash);
+    while (this.postedSystemHashes.size > 16) {
+      const oldest = this.postedSystemHashes.values().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      this.postedSystemHashes.delete(oldest);
+    }
   }
 
   private persistentKey(

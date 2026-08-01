@@ -1131,6 +1131,36 @@ describe("local chamber UX helpers", () => {
     ]);
     expect(scene.charneyDavisCurvature).toBe(0.25);
     expect(scene.rightAnglePairCount).toBe(1);
+    expect(scene.incidencePartitions[0]).toMatchObject({
+      generator: 0,
+      label: "p0",
+      finiteDegree: 2,
+      totalOtherGenerators: 2,
+      accountedNeighborCount: 2,
+      isCompletePartition: true,
+    });
+    expect(
+      scene.incidencePartitions[0].classes.map((relationClass) => ({
+        label: relationClass.label,
+        neighbors: relationClass.neighbors.map((neighbor) => neighbor.label),
+      })),
+    ).toEqual([
+      { label: "m=2", neighbors: ["p2"] },
+      { label: "m=3", neighbors: ["p1"] },
+      { label: "m=inf", neighbors: [] },
+    ]);
+    expect(
+      scene.relationOrderComponents.map((summary) => ({
+        m: summary.relationOrder,
+        components: summary.components.map(
+          (component) => component.generatorLabels,
+        ),
+        isolated: summary.isolatedGeneratorLabels,
+      })),
+    ).toEqual([
+      { m: 2, components: [["p0", "p2"]], isolated: ["p1"] },
+      { m: 3, components: [["p0", "p1", "p2"]], isolated: [] },
+    ]);
     expect(scene.warnings.join(" ")).toContain("drawn intentionally");
     expect(scene.edges.every((edge) => edge.isRelationBoundary)).toBe(true);
     expect(scene.edges.every((edge) => edge.alwaysLabel)).toBe(true);
@@ -1159,6 +1189,17 @@ describe("local chamber UX helpers", () => {
     ).toBe(true);
     expect(scene.edges.every((edge) => edge.alwaysLabel)).toBe(true);
     expect(scene.edges.every((edge) => edge.labelLeader)).toBe(true);
+    const orderThree = scene.relationOrderComponents.find(
+      (summary) => summary.relationOrder === 3,
+    );
+    expect(orderThree).toBeDefined();
+    expect(
+      orderThree?.components.map((component) => component.generatorLabels),
+    ).toEqual([
+      ["g0", "g1", "g2", "g3", "g4", "g5", "g6", "g7"],
+      ["g8", "g9"],
+    ]);
+    expect(orderThree?.isolatedGeneratorLabels).toEqual([]);
     expect(
       scene.edges.every((edge) => typeof edge.labelPriority === "number"),
     ).toBe(true);
@@ -1263,6 +1304,25 @@ describe("local chamber UX helpers", () => {
     expect(planarScene.planarity.isPlanar).toBe(false);
     expect(planarScene.planarity.obstruction?.kind).toBe("K5");
     expect(planarScene.planarity.reason).toContain("K5");
+
+    const g0Partition = scene.incidencePartitions[0];
+    expect(g0Partition).toMatchObject({
+      label: "g0",
+      finiteDegree: 8,
+      totalOtherGenerators: 9,
+      accountedNeighborCount: 9,
+      isCompletePartition: true,
+    });
+    expect(
+      g0Partition.classes.map((relationClass) => [
+        relationClass.label,
+        relationClass.neighbors.map((neighbor) => neighbor.label),
+      ]),
+    ).toEqual([
+      ["m=2", ["g4", "g5", "g6", "g7", "g8", "g9"]],
+      ["m=3", ["g2", "g3"]],
+      ["m=inf", ["g1"]],
+    ]);
   });
 
   it("highlights a selected JNW state directly on Gamma", () => {

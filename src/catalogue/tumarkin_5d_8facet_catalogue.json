@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "kind": "compact-5d-eight-facet-catalogue",
   "name": "Tumarkin compact 5D Coxeter polytopes with 8 facets",
-  "description": "Catalogue for the 15 certified compact hyperbolic Coxeter 5-polytopes with 8 facets and Gale diagram G11411 listed in Tumarkin Table 4.10.",
+  "description": "Catalogue for all 16 certified compact hyperbolic Coxeter 5-polytopes with 8 facets listed in Tumarkin Table 4.10: 15 G11411 cases and the unique G12221 case.",
   "sourceRef": {
     "id": "tumarkin-2007-n-plus-3",
     "citation": "Pavel Tumarkin, Compact Hyperbolic Coxeter n-Polytopes with n+3 Facets, Electronic Journal of Combinatorics 14 (2007), R69.",
     "url": "https://www.combinatorics.org/ojs/index.php/eljc/article/view/v14i1r69",
-    "locator": "Lemma 4.7 and Table 4.10",
-    "notes": "Lemma 4.7 states that there are 15 compact hyperbolic Coxeter 5-polytopes with 8 facets and Gale diagram G11411. Table 4.10 draws the 15 Coxeter diagrams. The arXiv/source archive stores the table diagrams as EPS artwork rather than a machine-readable Coxeter matrix list."
+    "locator": "Dimension 5 classification and Table 4.10",
+    "notes": "Tumarkin lists one compact 5D eight-facet case with Gale diagram G12221 and 15 with Gale diagram G11411. Table 4.10 draws all 16 Coxeter diagrams. The arXiv/source archive stores the table diagrams as EPS artwork rather than a machine-readable Coxeter matrix list."
   },
   "entries": [
     {
@@ -355,6 +355,29 @@
       ],
       "requiredForCertification": [],
       "exampleFile": "tumarkin_5d_8facet_g11411_15.json"
+    },
+    {
+      "id": "tumarkin-5d-8facet-g12221-01",
+      "label": "Tumarkin G12221 (unique)",
+      "dimension": 5,
+      "facets": 8,
+      "galeDiagram": "G12221",
+      "table": "4.10",
+      "tableIndex": 16,
+      "dataStatus": "certified",
+      "renderStatus": "renderable-example",
+      "renderable": true,
+      "representative": false,
+      "certificationStatus": "certified",
+      "sourceRefId": "tumarkin-2007-n-plus-3",
+      "sourceLocator": "Dimension 5 unique Gale diagram D10 case and Table 4.10, G12221 diagram",
+      "notes": [
+        "The Coxeter diagram is transcribed from Tumarkin Table 4.10 arXiv EPS artwork (combined transcription entry 16).",
+        "Its single dotted weight is checked against Tumarkin's printed exact formula and the determinant/rank equations.",
+        "The bundled certificate checks source transcription, exact dotted weight, and normal Gram rank/signature diagnostics."
+      ],
+      "requiredForCertification": [],
+      "exampleFile": "tumarkin_5d_8facet_g12221_01.json"
     }
   ]
 }

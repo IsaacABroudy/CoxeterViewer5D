@@ -1,85 +1,129 @@
-# JNW State Quotient
+# JNW Covers And The Move-Kernel Reader
 
-This note fixes the convention used by the JNW cube workflow in the viewer.
-It is deliberately narrow: it explains the browser diagnostic built from a
-state/move system, not a certified subgroup quotient.
+This note fixes the convention used by the JNW cube workflow. It distinguishes
+the base fundamental domain, the finite covers built from it, and the state
+labels used to orient edges.
 
-## Source Model
+## The Four Spaces
 
-For a right-angled Coxeter group with defining graph `Gamma`, Jankiewicz,
-Norin, and Wise use states and moves:
+Let `W = W_Gamma` be the right-angled Coxeter group and let `Sigma_Gamma` be
+its Davis complex. In this project, `Y_Gamma` denotes the base
+fundamental-domain orbicomplex. Two finite covers appear in this discussion:
 
-- A **state** is a subset of the vertices of `Gamma`.
-- A **move** `m_v` is a subset of vertices containing `v` and no neighbor of
-  `v`.
-- Applying generator `v` sends a state `S` to the symmetric difference
-  `S xor m_v`.
-- A directed edge labeled `v` is oriented according to whether `v` lies in the
-  endpoint state.
+```text
+Sigma_Gamma  ->  X_ab  ->  X_mu  ->  Y_Gamma,
+```
 
-The app uses this finite state orbit as an exploratory quotient-style complex.
-The JNW theorem-level language is shown only for right-angled systems whose
-move-property and legal-orbit checks pass.
+where
 
-## What The Viewer Draws
+```text
+Y_Gamma = W \ Sigma_Gamma,
+X_ab = W' \ Sigma_Gamma,
+X_mu = H_mu \ Sigma_Gamma.
+```
 
-For a move system and initial state, the JNW state quotient has:
+Thus `Y_Gamma` is not a state orbit. A finite cover `X_mu` is assembled from
+lifted copies of this same fundamental domain, one for each coset of `H_mu` in
+`W`. The intermediate arrow `X_ab -> X_mu` records the inclusion
+`W' <= H_mu`; it is not a claim that the two finite covers are the same.
 
-- one vertex for each orbit state `S_i`;
-- one generator-labeled edge `S -> S xor m_v` for each state and generator;
-- one square relation cell for each commuting pair, with boundary
-  `S, S xor m_v, S xor m_v xor m_w, S xor m_w`.
+For a JNW move system, write
 
-For the bundled 3-cube graph preset this gives:
+```text
+alpha: W -> A = (Z/2)^V
+mu: A -> M,              e_v |-> m_v
+H_mu = ker(mu o alpha).
+```
+
+The deck group of `X_mu -> Y_Gamma` is the move group `M`. In the cube example
+`M` has four elements, so `X_mu` contains four lifted `Y_Gamma` fundamental
+domains. Their labels `S_1`, ..., `S_4` record the four states in one legal
+orbit.
+
+## Relation To The Cover In JNW
+
+Jankiewicz, Norin, and Wise use the commutator cover
+
+```text
+X_ab = W' \ Sigma_Gamma,
+W' = ker(alpha).
+```
+
+For the cube graph, `|V| = 8`, so `X_ab` has `2^8 = 256` vertices. The four
+legal states are orientation patterns on those vertices; each pattern occurs
+many times.
+
+The four-state space used by the reader is the smaller, derived move-kernel
+cover `X_mu`. For the cube move system it has:
 
 - 4 state vertices;
-- 16 generator-labeled edges;
-- 12 square relation cells.
+- 16 generator-labeled edges, including distinct parallel edges;
+- 12 square relation cells, one for each commuting pair in `Gamma`.
 
-The exact quotient vertices are the state vertices. The 3D reader also draws
-small generator beads around each state. These beads are drawing handles: they
-separate the generator rails so the four local `Y_Gamma` charts can be read
-without adding new quotient vertices or changing the move data. The charts are
-opened in different tilted local frames, so the picture is intentionally more
-expansive than the state-only quotient graph.
+It should therefore be called the **four-state move-kernel cover**, not the JNW
+commutator cover. The move and legality checks come from JNW; the passage to
+`H_mu` is the additional quotient used by this project.
 
-The reader has two modes:
+## Four Lifted Fundamental Domains
 
-- **Exact state skeleton** shows only state vertices and exact generator
-  transition rails. This is the truth-checking view.
-- **Readable quotient drawing** adds drawing handles, separated rails, relation
-  boundaries, and glass relation sheets. This is the teaching/inspection view.
+The intended reader shows one connected quotient built from four lifted copies
+of `Y_Gamma`, not four detached models. For a state `S` and generator `v`, the
+lifted generator edge joins
 
-The generator rails are primary in both modes. Each exact rail carries one
-generator label. Relation sheets are secondary and should be read through their
-boundary rails.
+```text
+S  ->  S xor m_v.
+```
 
-When the interface says that `Y_Gamma` is a local chart at a state, it means
-the visible generator star and relation faces incident to that state inside
-this one glued quotient. It does not mean a detached copy of the quotient.
-For the cube example this distinction matters: all generators in one
-bipartition share one move and all generators in the other bipartition share
-the other move, so a state-only drawing collapses many rails and square faces
-onto the same cycle.
+Every such rail is a genuine edge of `X_mu` and keeps its generator label, even
+when several generators have the same move and therefore share endpoints.
 
-## Layer Stack
+For the right-angled cube example, the readable subdivision should use shared
+objects rather than endpoint-local drawing handles:
 
-The workflow should be read in this order:
+- each lifted generator rail has one midpoint shared by its two neighboring
+  `Y_Gamma` charts;
+- each commuting-relation square has one center shared by its four chart
+  sectors;
+- the rail midpoints and relation center divide that square into four pieces,
+  one belonging to each incident lifted fundamental domain.
 
-1. `Gamma`: the source defining graph.
-2. `Y_Gamma`: the one-vertex fundamental-domain model for the source Coxeter
-   presentation.
-3. JNW state quotient: the finite orbit of states under the move system.
-4. Link at selected state: ascending, descending, or level directions in that
-   state quotient.
+The four chart colors expose the four lifts of the base fundamental domain.
+They are not four detached subcomplexes: neighboring lifts meet at shared rail
+midpoints and relation centers in this subdivision. Those points are precisely
+where the copies are glued, not four independent copies of the same data.
+Separation, glass sheets, and small visual offsets remain drawing conventions
+and must not change the quotient incidence.
 
-The Davis complex remains the universal source object in the background, but
-the JNW ascending/descending link diagnostics shown in this workflow are not
-ambient Davis-complex links.
+## States And Links
+
+A state `S` is a subset of the vertices of `Gamma`. A move `m_v` contains `v`
+and no neighbor of `v`; applying it changes the state by symmetric difference.
+The `v`-edge is directed according to whether `v` lies in the state at its
+initial endpoint.
+
+Let `L = Flag(Gamma)` be the link of a vertex in the Davis complex and its
+covers. At a quotient vertex carrying state `S`, the actual JNW links are the
+full induced subcomplexes
+
+```text
+ascending link  = L[S],
+descending link = L[V - S].
+```
+
+They are complexes of generator directions, not merely the outgoing and
+incoming edges in the quotient graph. For the cube graph, `Gamma` is
+triangle-free, so these links happen to be graphs. The original JNW diagonal
+map has no level directions; a level link belongs only to a generalized
+cochain workflow.
+
+Highlighting `S` inside the defining graph is a linked explanatory view. The
+ascending or descending link itself is based at the selected vertex of
+`X_mu` (or at a chosen lift in `Sigma_Gamma`).
 
 ## Drawing Policy
 
-The 3D placement is a drawing convention. The exact browser diagnostic is the
-state orbit, the move-labeled edges, and the rank-two square boundaries. Any
-chart-handle drawing keeps those handles separate from the quotient vertex set
-and labels them as drawing-only.
+The exact data consists of the covering map, state vertices, labeled generator
+edges, relation cells, and their attaching maps. State colors, chart spreading,
+glass fills, and camera placement are drawing aids. The reader should identify
+which layer is exact and should never replace a shared quotient object with
+unrecorded duplicate geometry.

@@ -382,7 +382,7 @@ Recommended examples:
 - `A2.json`: rank-two spherical example of order `6`.
 - `A3.json`: finite rank-three example of order `24`.
 - `universal_rank3.json`: all off-diagonal entries infinite; useful for tree-like Cayley balls and absence of rank-two cells.
-- `jnw_cube_graph.json`: verified-source right-angled Coxeter system whose defining graph is the 1-skeleton of a 3-cube. It is the guiding example for the JNW Legal-System Game: the bipartition color-class moves start from the legal state `{v000, v001, v010, v101}`.
+- `jnw_cube_graph.json`: verified-source right-angled Coxeter system whose defining graph is the 1-skeleton of a 3-cube. It is the guiding example for the JNW Legal-System Game: the bipartition color-class moves start from the paper's displayed legal state `{v000, v010, v110, v111}`.
 - `hyperbolic_toy_rank2.json`: explicit hyperboloid normals and basepoint for exercising geometric mode; toy data only.
 - `compact_5_cube_gamma1.json`: certified compact hyperbolic Coxeter 5-cube graph from Jacquemet-Tschantz Figure 3. The bundled certificate checks the Gamma_1 source transcription table, the algebraic dotted values, and exact normal Gram rank/signature. Geometric coordinates and basepoint are still numerical visualization data derived from `normalGram`, not part of the certificate.
 - `compact_5_prism_makarov.json`: certified compact hyperbolic Coxeter 5-prism `P0` graph from Bredon-Kellerhals Example 8 and Emery-Kellerhals diagram (1-2). The bundled certificate checks the source graph based on `[5,3,3,3,3]`, the algebraic dotted value, and exact normal Gram rank/signature. Geometric coordinates and basepoint are still numerical visualization data derived from `normalGram`, not part of the certificate.
@@ -390,13 +390,13 @@ Recommended examples:
 - `compact_5_prism_makarov_p2.json`: certified compact hyperbolic Coxeter 5-prism `P2` from Emery-Kellerhals diagram (1-3), with Coxeter symbol `[5,3,3,3,4]`. The bundled certificate checks the source graph, derived algebraic dotted value, and exact normal Gram rank/signature.
 
 The Tumarkin eight-facet catalogue lives at
-`src/catalogue/tumarkin_5d_8facet_catalogue.json`. The catalogue is a compact
-index over the 15 certified `G11411` examples rather than a replacement for the
-example JSON files. Each entry points at a bundled
-`tumarkin_5d_8facet_g11411_*.json` Coxeter-system file generated from
+`src/catalogue/tumarkin_5d_8facet_catalogue.json`. It indexes all 16 certified
+compact cases from Table 4.10: 15 `G11411` examples and the unique `G12221`
+example. Each entry points at a bundled `tumarkin_5d_8facet_*.json`
+Coxeter-system file generated from
 `scripts/data/tumarkin_8facet_transcription.json` and checked by
 `scripts/certify_tumarkin_8facet.py`. The catalogue keeps the UI searchable
-without placing all 15 compact examples in the main selector.
+without placing all 16 compact examples in the main selector.
 
 Do not ship further compact hyperbolic data, or stronger certification claims, unless the source is cited in [references.md](references.md) and a checker artifact is added.
 
@@ -467,6 +467,14 @@ warnings. The in-repo torsion-free certificate is explicitly scoped as
 `visible-spherical-stabilizer`; external Sage/GAP or published-reference
 certificates are required before the UI may use manifold language.
 
+A derived finite cover may carry `coverProjection`. This block records the
+base-complex name, deck-group order, the quotient vertices lying over the base
+vertex, and total maps from quotient vertex, directed-edge, and rank-two-cell
+IDs to base-cell IDs. The validator rejects missing references and generator or
+relation types that project inconsistently. Directed quotient edges remain
+inverse-paired records: in the cube move-kernel example, 32 directed records
+encode 16 geometric generator rails.
+
 Game/PL Morse preparation now has two browser workflows. The
 `generator-uniform-cochain` workflow stores integer generator labels, named
 cocycles, and experiment logs. A named cocycle points to one integer
@@ -485,25 +493,28 @@ diagnostics only.
 The bundled `jnw_cube_graph.json` file is intentionally small but source
 located: its eight generators are the binary vertices of the 3-cube, and
 commuting pairs are exactly cube edges. The app's preset preloads the cube
-bipartition/color-class moves from JNW21. The resulting state quotient is a
-browser diagnostic for the legal-system workflow, not an external
-subgroup/coset certificate.
+bipartition/color-class moves and the displayed legal state from JNW21.
 
-JNW-derived quotients should be read through the layer stack:
-`Gamma` source graph -> `Y_Gamma` fundamental domain -> JNW state quotient ->
-link at selected state. Vertex display labels in the state quotient are short
-names `S_1`, `S_2`, ... so the 3D view stays readable. The corresponding state
-subset still uses source generator labels, such as `{v000, v001, v010, v101}`
-for the cube demo, and is shown in the panel/inspector. Internally, the state
-ids remain stable normalized generator-index ids.
-The serialized quotient has no extra generator-endpoint vertices: an edge
-labeled `i` connects a state directly to the state reached by applying move
-`m_i`. The 3D reader may draw small generator beads and separated rails around
-each state to show the local `Y_Gamma` charts. Those beads are not written as
-quotient vertices and are not certificate data.
-Ascending, descending, and level links are classified at a selected state
-vertex in this quotient-style state graph; they are not serialized as Davis
-chamber links.
+Two covers must not be conflated. The paper studies the commutator cover
+`X_ab = ker(alpha) \ Sigma`, which has 256 vertices for this eight-generator
+group. The app's compact reader constructs the smaller move-kernel cover
+`X_mu = ker(mu o alpha) \ Sigma`. Its four vertices are named `S_1`, ...,
+`S_4`; the panel expands each name as a subset such as
+`{v000, v010, v110, v111}`. The exact hierarchy is
+`Sigma -> X_ab -> X_mu -> Y_Gamma`.
+
+The serialized move-kernel cover has no extra endpoint vertices: a rail labeled
+`i` joins a state directly to the state reached by applying `m_i`. The readable
+3D subdivision adds one shared midpoint to each rail and one shared center to
+each relation square. It then draws four state-owned sectors per square. Those
+subdivision points and sectors expose how four lifts of the fundamental domain
+are glued; they are drawing records, not new quotient vertices or certificate
+claims.
+
+At state `S`, the faithful JNW ascending and descending links are the induced
+flag subcomplexes `Flag(Gamma)[S]` and `Flag(Gamma)[V - S]`. The faithful
+diagonal map has no level directions. These link complexes are derived data;
+they are not serialized as ambient Davis-chamber links.
 
 Project sessions and experiment bundles record the active game block with:
 

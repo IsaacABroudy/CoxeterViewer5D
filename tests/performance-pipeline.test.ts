@@ -1,20 +1,25 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import I2_5 from "../public/examples/I2_5.json";
 import A3 from "../public/examples/A3.json";
 import { parseCoxeterSystemInput } from "../src/coxeter";
+import { enumerateSphericalSubsets } from "../src/davis";
 import { generateViewerBall } from "../src/app/generationPipeline";
 import { createGenerationClient } from "../src/app/generationClient";
 import { createLocalViewCache } from "../src/app/localLayoutCache";
 import { LruCache } from "../src/app/lruCache";
 import {
   createPersistentCache,
+  estimatePersistentCacheRecordBytes,
+  estimatePersistentCacheValueBytes,
+  planPersistentCacheEvictions,
   persistentCacheKeyFromMetadata,
   persistentCacheMetadataForNamespace,
   persistentCacheRegistry,
   persistentKeyString,
   type PersistentCache,
   type PersistentCacheKey,
+  type PersistentCacheRecord,
 } from "../src/app/persistentCache";
 import {
   buildSceneRevisionSet,
@@ -27,6 +32,7 @@ import { buildSceneTopologyIndex } from "../src/app/sceneTopologyIndex";
 import { buildYGammaCellAtlas } from "../src/app/yGammaAtlas";
 import { buildYGamma2SkeletonScene } from "../src/app/yGammaScene";
 import { createYGammaSceneClient } from "../src/app/yGammaSceneClient";
+import type { SceneCell, SceneEdge, SceneNode } from "../src/render/SceneView";
 import type { GeneratedCayleyBall } from "../src/types";
 
 class ImmediateMemoryPersistentCache<T> implements PersistentCache<T> {
@@ -62,6 +68,117 @@ describe("performance data-pipeline helpers", () => {
     cache.set("c", 3);
     expect(cache.get("b")).toBeUndefined();
     expect(cache.keys()).toEqual(["a", "c"]);
+  });
+
+  it("tracks byte size through replacement, deletion, clear, and oversized values", () => {
+    const cache = new LruCache<string, string>({
+      maxEntries: 10,
+      maxBytes: 5,
+      sizeOf: (value) => value.length,
+    });
+    cache.set("a", "aa");
+    cache.set("b", "bbb");
+    expect(cache.byteSize).toBe(5);
+
+    expect(cache.get("a")).toBe("aa");
+    cache.set("a", "aaaa");
+    expect(cache.keys()).toEqual(["a"]);
+    expect(cache.byteSize).toBe(4);
+
+    cache.set("c", "c");
+    expect(cache.delete("a")).toBe(true);
+    expect(cache.delete("missing")).toBe(false);
+    expect(cache.byteSize).toBe(1);
+    cache.clear();
+    expect(cache.byteSize).toBe(0);
+
+    cache.set("too-large", "123456");
+    expect(cache.size).toBe(0);
+    expect(cache.byteSize).toBe(0);
+  });
+
+  it("estimates persistent records without serializing cycles or typed arrays", () => {
+    const shared = { label: "shared" };
+    const value: {
+      payload: Uint8Array;
+      first: typeof shared;
+      second: typeof shared;
+      self?: unknown;
+    } = {
+      payload: new Uint8Array(128),
+      first: shared,
+      second: shared,
+    };
+    value.self = value;
+    const valueBytes = estimatePersistentCacheValueBytes(value);
+    const record: PersistentCacheRecord<typeof value> = {
+      key: "topology|v1|app|input|default",
+      namespace: "topology",
+      schemaVersion: 1,
+      appVersion: "app",
+      inputHash: "input",
+      variant: "default",
+      writtenAt: "2026-01-01T00:00:00.000Z",
+      estimatedBytes: 0,
+      value,
+    };
+    const recordBytes = estimatePersistentCacheRecordBytes(record);
+
+    expect(Number.isFinite(valueBytes)).toBe(true);
+    expect(valueBytes).toBeGreaterThan(128);
+    expect(recordBytes).toBeGreaterThan(valueBytes);
+  });
+
+  it("plans deterministic oldest-first IndexedDB eviction", () => {
+    const candidates = [
+      {
+        key: "b",
+        writtenAt: "2026-01-01T00:00:00.000Z",
+        estimatedBytes: 10,
+      },
+      {
+        key: "c",
+        writtenAt: "2026-01-02T00:00:00.000Z",
+        estimatedBytes: 10,
+      },
+      {
+        key: "a",
+        writtenAt: "2026-01-01T00:00:00.000Z",
+        estimatedBytes: 10,
+      },
+    ];
+
+    expect(planPersistentCacheEvictions(candidates, 20)).toEqual(["a"]);
+    expect(planPersistentCacheEvictions(candidates, 10)).toEqual(["a", "b"]);
+    expect(planPersistentCacheEvictions(candidates, 30)).toEqual([]);
+    expect(candidates.map((candidate) => candidate.key)).toEqual([
+      "b",
+      "c",
+      "a",
+    ]);
+  });
+
+  it("applies the persistent cache memory byte budget without IndexedDB", async () => {
+    vi.stubGlobal("indexedDB", undefined);
+    try {
+      const cache = createPersistentCache<{ payload: string }>({
+        memoryEntries: 4,
+        memoryBytes: 1,
+        persistentBytes: 1024,
+      });
+      const key: PersistentCacheKey = {
+        namespace: "test",
+        schemaVersion: 1,
+        appVersion: "test",
+        inputHash: "memory-budget",
+        variant: "default",
+      };
+
+      await cache.set(key, { payload: "larger than one byte" });
+      expect(await cache.get(key)).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("hashes values independent of object key insertion order", () => {
@@ -341,6 +458,45 @@ describe("performance data-pipeline helpers", () => {
     expect(gammaStateHighlightChanged.labelVersion).not.toBe(base.labelVersion);
   });
 
+  it("reuses scene-array fingerprints for selection-only revisions", () => {
+    let nodeIdReads = 0;
+    const nodes: SceneNode[] = [
+      {
+        get id() {
+          nodeIdReads += 1;
+          return "e";
+        },
+        length: 0,
+        position: [0, 0, 0],
+        label: "e",
+      },
+    ];
+    const edges: SceneEdge[] = [];
+    const cells: SceneCell[] = [];
+    const first = buildSceneRevisionSet({
+      nodes,
+      edges,
+      cells,
+      appearanceParts: ["selected:e"],
+      labelParts: ["selected:e"],
+    });
+    const readsAfterFirstFingerprint = nodeIdReads;
+    const second = buildSceneRevisionSet({
+      nodes,
+      edges,
+      cells,
+      appearanceParts: ["selected:other"],
+      labelParts: ["selected:other"],
+    });
+
+    expect(readsAfterFirstFingerprint).toBeGreaterThan(0);
+    expect(nodeIdReads).toBe(readsAfterFirstFingerprint);
+    expect(second.topologyVersion).toBe(first.topologyVersion);
+    expect(second.layoutVersion).toBe(first.layoutVersion);
+    expect(second.appearanceVersion).not.toBe(first.appearanceVersion);
+    expect(second.labelVersion).not.toBe(first.labelVersion);
+  });
+
   it("indexes scene topology without changing incidence", () => {
     const index = buildSceneTopologyIndex({
       nodes: [
@@ -473,6 +629,8 @@ describe("performance data-pipeline helpers", () => {
     expect(first.cacheHit).toBe(false);
     expect(second.cacheHit).toBe("memory");
     expect(second.ball.nodes.length).toBe(first.ball.nodes.length);
+    expect(second.sphericalSubsets).toBe(first.sphericalSubsets);
+    expect(second.sphericalSubsets.subsets.length).toBeGreaterThan(0);
     expect(second.ball.nodes.length).toBe(second.cacheMetadata?.nodeCount);
     expect(second.cacheMetadata).toMatchObject({
       kind: "generated-ball",
@@ -480,6 +638,19 @@ describe("performance data-pipeline helpers", () => {
       inputHash: first.inputHash,
     });
     client.dispose();
+  });
+
+  it("reuses spherical-subset enumeration for the same immutable system and options", () => {
+    const system = parseCoxeterSystemInput(A3);
+    const first = enumerateSphericalSubsets(system);
+    const second = enumerateSphericalSubsets(system);
+    const rankTwoOnly = enumerateSphericalSubsets(system, {
+      maxRankForExhaustiveEnumeration: 2,
+    });
+
+    expect(second).toBe(first);
+    expect(rankTwoOnly).not.toBe(first);
+    expect(rankTwoOnly.subsets.every((subset) => subset.rank <= 2)).toBe(true);
   });
 
   it("caches local chamber layouts without changing layout data", () => {
@@ -522,6 +693,27 @@ describe("performance data-pipeline helpers", () => {
     expect(result.scene.nodes.length).toBe(expected.nodes.length);
     expect(result.scene.edges.length).toBe(expected.edges.length);
     expect(result.scene.cells.length).toBe(expected.cells.length);
+    client.dispose();
+  });
+
+  it("coalesces concurrent Y_Gamma requests for the same scene version", async () => {
+    const system = parseCoxeterSystemInput(A3);
+    const atlas = buildYGammaCellAtlas(system);
+    const options = { faceMode: "all" as const, includeRankThreeCells: true };
+    const client = createYGammaSceneClient({
+      canUseWorker: false,
+      persistentCache: new ImmediateMemoryPersistentCache(),
+    });
+
+    const [first, second] = await Promise.all([
+      client.build({ atlas, options }),
+      client.build({ atlas, options }),
+    ]);
+
+    expect(first.cacheHit).toBe(false);
+    expect(second.cacheHit).toBe("inflight");
+    expect(second.requestId).not.toBe(first.requestId);
+    expect(second.scene).toBe(first.scene);
     client.dispose();
   });
 

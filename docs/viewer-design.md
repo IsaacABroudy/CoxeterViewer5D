@@ -344,9 +344,9 @@ benchmarks.
 The current stats include input graph counts, rendered node/edge/cell counts,
 label counts, Three.js draw calls and triangles, the active camera mode, the
 last graph rebuild time, and a small rolling sample of frame deltas. The
-callback fires after graph updates; the DOM/window hook is refreshed during the
-render loop so tests can observe frame progress without forcing React state
-updates every frame.
+callback fires after the first render for a graph update. The global hook stays
+current on every rendered frame, while detailed DOM attributes and bubbling
+events are throttled unless a scene change needs an immediate publication.
 
 The scene mount also carries compact `data-*` attributes such as
 `data-rendered-nodes`, `data-rendered-edges`, and `data-scene-mode`. These are
@@ -385,6 +385,38 @@ timed gate checks elapsed time and graph-update time, while the machine baseline
 also enforces floors for rendered cells, semantic edge labels, label leaders,
 and other objects that would be easy to drop accidentally during optimization.
 
+The revision implementation also caches the content fingerprint of each
+immutable scene array. Selecting a different object therefore hashes only the
+small selection/label revision parts; it does not walk every unchanged node,
+edge, and cell. `SceneRuntime` uses the individual appearance and label tokens,
+so a label-only change no longer rebuilds node, edge, and cell appearance.
+Camera framing uses the layout/camera revision instead of serializing every
+position after an unrelated control update.
+
+The same rule applies to Gamma. Its edge records, relation-order incidence
+partitions, Charney-Davis curvature, and planarity scan are cached per parsed
+Coxeter system. Planar label placement is computed lazily and reused. Label
+sprite pool size is tracked in constant time, and adjacency/node lookup tables
+are retained while the scene arrays stay unchanged. The timed suite includes a
+compact 5-cube Gamma selection case and requires all 10 generator vertices, 40
+finite edges, and 40 edge labels to survive the optimization.
+
+Text and picking now adapt to scene scale. Sparse labels use pooled canvas
+sprites. At 96 visible labels, or 64 semantic labels in dense `Y_Gamma` views,
+the renderer attempts a shared single-channel SDF atlas and batches
+glyphs/panels; capability or atlas failures retain every label through the
+sprite fallback. Small and medium cell sets use a retained BVH with
+exact triangle refinement. At 2,500 pickable nodes/cells the renderer uses a
+one-pixel GPU id pass, with automatic BVH fallback when readback is unavailable.
+The active strategies and their build/query times are exposed to benchmarks.
+
+The coherent-versus-expanded `Y_Gamma` comparison composes two translated
+drawing copies into one Three.js scene. One renderer and picking runtime serve
+both halves, and rendered ids map back to the same source cell ids. The
+translations are readability conventions; neither source incidence record is
+changed. The full audit, measurements, cache budgets, and remaining trigger
+points are in [performance-audit.md](performance-audit.md).
+
 Future asynchronous exact backends should cancel stale generation requests if a
 newer radius or example is selected before the external process returns.
 
@@ -420,6 +452,13 @@ upgrade the file into verified normal-coordinate data.
 ## Quotient And Game Hooks
 
 `src/quotient/` defines finite quotient-complex data and validators for edge involution pairing, cell vertex references, and torsion-free verification metadata. The code deliberately refuses manifold language unless that verification is supplied.
+
+Large quotient imports pass their source bytes to a persistent module worker.
+`JSON.parse` remains atomic, but it no longer runs on the UI thread. The graph,
+action, rank-two-cell, game, and metadata checks then yield between bounded
+chunks, publish progress, and observe cancellation. The progressive and
+synchronous validators share check order and error wording; choosing the worker
+path does not weaken import validation.
 
 The viewer can derive the base complex `Y_Gamma` from the active Coxeter system
 without an external file. This mode creates one base vertex, one oriented arrow
@@ -552,9 +591,19 @@ generator-uniform cochain helpers define integer edge/generator labels, named
 integer cocycles, boundary-sum checks around rank-two cells, and
 ascending/descending/level classifications at a selected vertex. The JNW
 legal-system helpers define state subsets, moves acting by symmetric
-difference, state-dependent edge directions, legal-orbit diagnostics, and a
-derived quotient-style state graph. The renderer treats both as quotient-style
-data, but the inspector and exports keep their claim status separate.
+difference, state-dependent edge directions, and legal-orbit diagnostics. For
+the cube preset they also build the four-state move-kernel cover
+`ker(mu o alpha) \ Sigma`. This is an explicit factor of the 256-vertex
+commutator cover in JNW21, not a replacement definition of that cover. The
+renderer treats both game models as quotient-style data, but the inspector and
+exports keep their claim status separate.
+
+The readable JNW cover scene has two layers. Exact incidence consists of state
+vertices, generator rails, relation squares, and a total projection to the
+base `Y_Gamma` cells. A shared midpoint on each rail and a shared center in
+each square subdivide the cover into four colored chart sectors. Positions,
+sector spreading, colors, and glass fills are drawing aids; the subdivision
+does not duplicate rails or relation centers.
 
 The Research Workflow panel is the primary quotient/game path. It bundles the
 source system, subgroup/coset request, quotient artifact, cochain or JNW game
@@ -562,9 +611,11 @@ choice, topology lens, notebook save, comparison, and export actions into one
 sequence. The built-in golden path is the identity-subgroup quotient of
 `I2(5)` with the generator-uniform cochain `s0=+1, s1=-1`; `A3` remains the
 rank-three topology-lens demo.
-Topology lenses are scene filters, not new mathematical data. Ascending,
-descending, level, and full-local-link lenses render the selected quotient
-vertex and the incident edges of that class as first-class 3D objects.
+Topology lenses are scene filters, not new mathematical data. For the faithful
+JNW model, the ascending and descending lenses render the induced flag
+subcomplexes `Flag(Gamma)[S]` and `Flag(Gamma)[V - S]` at the selected cover
+vertex. The faithful diagonal map has no level directions; level classifications
+remain available in the separate generalized cochain workflow.
 
 `src/topology/` contains the first local-link topology helper: finite
 simplicial homology over `F2`, reporting reduced `H0` and `H1`. It is kept

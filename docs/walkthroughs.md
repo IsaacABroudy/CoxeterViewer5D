@@ -194,6 +194,9 @@ Public-alpha path:
 4. Switch to **2D planar** when you want the planar-obstruction diagnostic.
 5. Confirm every drawn finite relation edge has a label, including `m = 2`
    commuting pairs. Infinite `m = inf` pairs are intentionally absent.
+6. Read **Relation-order connected components**. For `m = 3`, the compact
+   5-cube splits into the components `{g0, ..., g7}` and `{g8, g9}`. Click a
+   generator chip to inspect its incident relation classes above.
 
 What to say:
 
@@ -205,6 +208,8 @@ What to say:
 - The planar view is a drawing aid. If the graph is not planar, the app names a
   standard obstruction such as `K5` or `K3,3` when it detects one.
 - Edge labels belong to relation edges; they are not vertex labels.
+- The `Gamma_m` component rows use only edges with that one value of `m`;
+  isolated generators are shown separately as singleton components.
 
 Exact in this demo:
 
@@ -265,114 +270,82 @@ Still not claimed:
 ## JNW Legal-System Demo: Play The Cube Graph
 
 Goal: inspect the Jankiewicz-Norin-Wise state/move game on the right-angled
-Coxeter group whose defining graph is the 1-skeleton of a 3-cube.
-
-Public-alpha path:
-
-Read this view as: a finite state quotient whose local stars carry the
-generator and relation data from `Y_Gamma`.
+Coxeter group whose defining graph is the 1-skeleton of a 3-cube. The key is
+to keep the paper's commutator cover separate from the app's compact cover
+reader.
 
 1. Press **Start Here** -> **Study a quotient/game**, or open Research mode
-   and press **Load JNW cube game** in the Research Workflow panel.
-2. Confirm the active source is **JNW cube graph RACG**.
-3. Open **Gamma** if you want to see the defining graph first: the eight
-   generator vertices are binary cube vertices, and `m = 2` edges are exactly
-   cube edges.
-4. Return to **Quotient + Games** and open **JNW Legal-System Game**.
-5. Confirm the preset is the JNW21 bipartition/color-class move system and the
-   initial state is `{v000, v001, v010, v101}`.
-6. Press **Show JNW state quotient** if it is not already open. The main viewer
-   should show the derived state quotient. Its vertices are the four states
-   `S_1`, ..., `S_4`. A generator edge labeled `g` runs from a state `S_i` to
-   the state obtained by applying the move `m_g`. The small generator beads
-   around each state are drawing handles for the four local `Y_Gamma` charts,
-   not new quotient vertices. The charts are opened in tilted local frames so
-   the glued object is easier to inspect than the collapsed state graph. For
-   the cube preset, this state quotient has four state vertices, sixteen
-   generator-labeled rails, and twelve square relation cells.
-7. Use the six-step JNW workflow rail and the four compact reader groups:
-   **Choose state**, **Read one relation**, **Inspect link**, and
-   **Drawing options**. The advanced move tables and raw diagnostics are in
-   **Advanced JNW diagnostics**.
-8. In **Drawing options**, switch between **Exact state skeleton** and
-   **Readable quotient drawing**. Exact state skeleton shows only state
-   vertices and exact generator transition rails. Readable quotient drawing
-   adds drawing handles and relation sheets.
-9. Open **Drawing details** when teaching the
-   assembly order:
+   and press **Load JNW cube game**.
+2. Confirm that the source is **JNW cube graph RACG**. In **Gamma**, the eight
+   vertices are the binary cube vertices and the twelve drawn `m = 2` edges are
+   the cube edges.
+3. Open **JNW Legal-System Game**. The preset uses the cube's two color-class
+   moves and JNW21's displayed legal state
+   `{v000, v010, v110, v111}`.
+4. Keep the cover hierarchy in view:
+
+   ```text
+   Davis complex Sigma -> commutator cover X_ab
+                       -> four-state move-kernel cover X_mu
+                       -> Y_Gamma
+   ```
+
+   `X_ab` is the finite complex used in the paper. It has `2^8 = 256` vertices.
+   The app's compact reader shows `X_mu = ker(mu o alpha) \ Sigma`, a further
+   quotient with four state vertices. It does not claim that `X_ab` has only
+   four vertices.
+
+5. Press **Show four-state cover**. You should see four state vertices
+   `S_1`, ..., `S_4`, sixteen geometric generator rails, and twelve commuting
+   relation squares. A rail labeled `g` joins `S` to `S xor m_g`. Parallel
+   rails with different generator labels are different cover edges.
+6. Under **Drawing options**, compare **Exact cover 1-skeleton** with
+   **Four-chart cover drawing**. The first is the exact state/rail graph. The
+   second adds one shared midpoint to each rail and one shared center to each
+   square, dividing every square into four colored sectors. Follow one color
+   through the object to see one lift of the `Y_Gamma` fundamental domain; the
+   shared midpoint and center show where neighboring lifts are glued.
+7. Use **Drawing details** to build the picture in order:
    `States -> Generator rails -> Relation boundaries -> Glass relation sheets -> Orientations`.
-10. Use **Choose relation** to pick the exact rank-two diagnostic to read, or
-    click **Next relation** to advance through the closed diagnostics. Press
-    **Focus selected relation** to return the viewer to that relation. The
-    chosen relation boundary is numbered in the panel and bold in the viewer;
-    unrelated topology becomes context so the alternating generator walk can be
-    read directly.
-11. Use **Highlight g-edge gluing** to highlight the two state charts glued by
-    generator `g`. The panel spells out the move as `S -> S xor m_g`.
-12. Use **Choose state** to switch from `S_1` to another orbit state. Press
-    **Mirror selected state on Gamma** when you want that state drawn directly on
-    the main `Gamma` viewer. Colored generator vertices use the same state
-    color as the selected chart in the quotient; muted gray vertices are
-    outside the state.
-13. Use **Bundle equal moves** only as an explanatory bundled drawing. Expand
-    back to **Show every generator rail** when you need the full generator
-    1-skeleton.
-14. Read the breadcrumb:
-    `Coxeter system Gamma -> Y_Gamma fundamental domain -> JNW state quotient -> link at state S_k`.
-    This tells you the link is being inspected at a
-    selected state vertex in the derived quotient, not as an ambient Davis
-    chamber link. The panel expands that short state name as a subset, for
-    example `S_k = {v000, v001, v010, v101}`.
-15. Switch between **Ascending link at selected state**, **Descending link at
-    selected state**, **Level link at selected state**, and **Full local link at
-    selected state**.
+   **Outlines only** or **Glass faces** keeps the 1-skeleton readable.
+8. Use **Choose state** to inspect `S_1`, ..., `S_4`. The panel expands the
+   short name into its defining-graph subset. **Mirror selected state on
+   Gamma** switches to the main defining-graph viewer and colors exactly those
+   cube vertices in the selected state.
+9. Use **Highlight g-edge gluing** to isolate one generator rail. The reader
+   shows its source, target, and move equation `S -> S xor m_g`.
+10. Use **Choose relation**, **Next relation**, and **Focus selected relation**
+    to read one lifted square. The bold numbered boundary alternates the two
+    generator labels; unrelated cover cells become faint context.
+11. Use **Show every generator rail** for the exact 1-skeleton. **Bundle equal
+    moves** is only an explanatory drawing for generators with the same move;
+    its banner says that rails have been bundled.
+12. Press **Ascending link at selected state**. For selected state `S`, the
+    viewer now draws the induced flag subcomplex `Flag(Gamma)[S]`. Press
+    **Descending link at selected state** for
+    `Flag(Gamma)[V - S]`. These are simplicial links of generator directions,
+    not just lists of incoming and outgoing cover rails. **Level link at
+    selected state** is empty for the faithful JNW diagonal map; level
+    directions belong to the generalized cochain editor.
+13. Use **Compare source chart with state link** to place the base
+    `Y_Gamma` model beside the selected link. Save an experiment run when you
+    want the state, moves, diagnostics, and view settings recorded together.
 
-- Ascending shows the incident generator arrows classified as upward from
-  the selected state.
-- Descending shows the incident generator arrows classified as downward.
-- Level shows arrows with zero/currently level classification.
-- Full local link restores all incident generator arrows at that state.
+What is exact in this reader:
 
-16. Use **Compare source chart with state link** when you want the
-    fundamental-domain source object and the selected state-link diagnostic side
-    by side.
-17. Save an experiment notebook run when you want a reproducible record of the
-    selected state, moves, diagnostics, and view.
+- the cube defining graph and its finite-relation edges;
+- the state orbit and move-dependent rail endpoints;
+- the four-state move-kernel cover incidence and its projection to `Y_Gamma`;
+- the twelve square attaching cycles;
+- the induced ascending and descending flag subcomplexes.
 
-What to say:
+What is a drawing convention:
 
-- A JNW state is a subset of defining-graph vertices.
-- The JNW state quotient is drawn as one quotient complex. Its visible
-  quotient vertices are the states `S_i`. Generator labels belong to rails
-  between state charts, and relation diagnostics are read on alternating state
-  cycles drawn on separated rails. A local `Y_Gamma` chart at `S_i` means the
-  incident generator star and relation faces around that state inside this one
-  glued object; the generator beads are drawing handles that keep those charts
-  readable.
-- The cube graph is bipartite; the color-class moves toggle one whole color
-  class at a time.
-- Applying a generator changes the state by symmetric difference with its
-  move.
-- The direction of an edge depends on the endpoint state, not on one global
-  orientation for every occurrence of the generator.
-- Because this is a right-angled system and the legal-orbit diagnostics pass,
-  the app labels the demo **JNW faithful**. That label is scoped to the
-  browser-checked move property and legal orbit, not to an external subgroup
-  certificate.
+- the 3D coordinates, chart colors, glass fills, and camera angle;
+- the distance used to spread sectors apart;
+- the shared midpoint/center subdivision used to reveal the four lifts;
+- move-class bundling and ghosted context.
 
-Exact in this demo:
-
-- The defining graph is the 3-cube 1-skeleton.
-- `m = 2` exactly for cube-adjacent binary vertices.
-- The bipartition color-class moves satisfy the JNW move property.
-- The displayed state orbit is legal and strongly legal in the app's finite
-  diagnostic.
-
-Drawing convention:
-
-- The 3D placement of the state quotient.
-- The small generator beads and separated chart rails used to prevent the four
-  local charts from collapsing visually.
-- The camera angle and link-lens highlighting.
-- The line thickness and colors used to distinguish ascending, descending, and
-  level edges.
+The **JNW faithful** badge means the right-angled move property and legal-orbit
+checks pass for the supplied data. It is not an external fibering, subgroup, or
+manifold certificate.

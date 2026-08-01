@@ -9,7 +9,14 @@ import {
   Package,
   Save,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Panel } from "../components/Panel";
 import { LocalLinkView } from "../components/LocalLinkView";
 import { Stat } from "../components/Stat";
@@ -27,6 +34,7 @@ import {
   deriveDavisIncidencePoset,
   enumerateSphericalSubsets,
   type DavisCellProxy,
+  type SphericalSubsetEnumerationResult,
 } from "../davis";
 import {
   classifyIncidentEdges,
@@ -43,7 +51,6 @@ import {
   resolveIntegerEdgeAssignment,
   summarizeJnwLegalSystem,
   summarizeCocycle,
-  validateRankTwoCocycle,
   type EditableGameAssignment,
   type GameCocycleSummary,
   type GameWorkflowKind,
@@ -56,6 +63,7 @@ import {
 import { placeCayleyNodesInHyperbolicGeometry } from "../geometry";
 import {
   buildJnwGammaStateDiagram,
+  buildJnwStateLinkScene,
   buildJnwStateQuotientYGammaScene,
   decorateJnwStateQuotientScene,
   jnwStateChartColor,
@@ -66,6 +74,7 @@ import {
   type JnwReaderMode,
 } from "./jnwStateVisual";
 import {
+  QuotientValidationCancelledError,
   QuotientValidationError,
   parseQuotientComplex,
   quotientManifoldStatus,
@@ -100,6 +109,10 @@ import type {
 import { createGenerationClient } from "./generationClient";
 import { createLocalViewCache } from "./localLayoutCache";
 import {
+  createQuotientValidationClient,
+  type QuotientValidationClient,
+} from "./quotientValidationClient";
+import {
   baseOrbicomplexForSystem,
   quotientToGeneratedBall,
   syntheticSystemForGeneratedBall,
@@ -121,7 +134,6 @@ import type {
   YGamma2SkeletonSceneOptions,
 } from "./yGammaScene";
 import {
-  buildYGamma2SkeletonScene,
   type YGammaCellSeparation,
   type YGammaCutawayMode,
   type YGammaPeelMode,
@@ -129,6 +141,10 @@ import {
   type YGammaSeparationValue,
 } from "./yGammaScene";
 import { createYGammaSceneClient } from "./yGammaSceneClient";
+import {
+  buildYGammaDrawingComparisonScene,
+  type YGammaDrawingComparisonScene,
+} from "./yGammaComparisonScene";
 import {
   buildLocalNeighborhoodExport,
   cellBoundaryEdgeKeys,
@@ -155,8 +171,11 @@ import {
 } from "./viewStory";
 import {
   buildDefiningGraphScene,
+  definingGraphNodeId,
   type DefiningGraphScene,
   type DefiningGraphLayoutMode,
+  type DefiningGraphRelationOrderComponents,
+  type DefiningGraphVertexIncidence,
 } from "./definingGraphScene";
 import {
   activeGuidedInspectionStep,
@@ -184,9 +203,15 @@ import {
   duplicateNotebookBundle,
   parseNotebookBundles,
   readNotebookBundles,
-  readNotebookBundlesSync,
   writeNotebookBundles,
 } from "./notebookStorage";
+import { scheduleIdleTask } from "./idle";
+import {
+  createViewerInteractionStore,
+  useViewerInteractionSelector,
+  type ViewerInteractionStore,
+  type ViewerRenderStatsState,
+} from "./viewerInteractionStore";
 import {
   computeLocalLinkHomology,
   createFiniteSimplicialComplex,
@@ -397,7 +422,9 @@ const bundledExamples: ExampleRecord[] = [
 ];
 
 const jnwCubeExampleId = "jnw_cube_graph";
-const jnwCubeLegalInitialState = [0, 1, 2, 5];
+// This is the legal state displayed for the cube graph in JNW21, Section 5.a.1.
+// The binary labels are v000, v010, v110, and v111.
+const jnwCubeLegalInitialState = [0, 2, 6, 7];
 
 const viewPresetOptions: Array<{ id: ViewPresetId; label: string }> = [
   { id: "global", label: "See all" },
@@ -416,6 +443,8 @@ function preferredGeometricProjection(
 
 function initialWorkerGeneration(): {
   ball: GeneratedCayleyBall | null;
+  sphericalSubsets?: SphericalSubsetEnumerationResult;
+  datasetId?: string;
   error: string | null;
   pending: boolean;
   requestId: number;
@@ -426,14 +455,18 @@ function initialWorkerGeneration(): {
 
 function initialYGammaSceneState(): {
   scene: YGamma2SkeletonScene | undefined;
+  atlasVersion: string | undefined;
   sceneVersion: string | undefined;
+  pendingSceneVersion: string | undefined;
   pending: boolean;
   error: string | null;
   buildMs?: number;
 } {
   return {
     scene: undefined,
+    atlasVersion: undefined,
     sceneVersion: undefined,
+    pendingSceneVersion: undefined,
     pending: false,
     error: null,
   };
@@ -494,9 +527,44 @@ const firstPaintBall: GeneratedCayleyBall = {
   },
 };
 
+interface SceneCountSnapshot {
+  nodes: number;
+  edges: number;
+  cells: number;
+}
+
+function selectSceneCounts(stats: ViewerRenderStatsState): SceneCountSnapshot {
+  return {
+    nodes: stats.renderedNodes,
+    edges: stats.renderedEdges,
+    cells: stats.renderedCells,
+  };
+}
+
+function sameSceneCounts(
+  left: SceneCountSnapshot,
+  right: SceneCountSnapshot,
+): boolean {
+  return (
+    left.nodes === right.nodes &&
+    left.edges === right.edges &&
+    left.cells === right.cells
+  );
+}
+
+function isTransientBuildWarning(warning: string): boolean {
+  return (
+    warning === "Y_Gamma scene construction is running in a worker." ||
+    warning === "Cayley ball generation is running in a worker." ||
+    /^Radius \d+ is queued; currently showing radius \d+\.$/.test(warning)
+  );
+}
+
 export function App() {
   const desktopBridge = useMemo(() => createDesktopBridge(), []);
-  const initialViewPreset = readStoredViewPreset() ?? "global";
+  const [initialViewPreset] = useState<ViewPresetId>(
+    () => readStoredViewPreset() ?? "global",
+  );
   const [exampleId, setExampleId] = useState(bundledExamples[0].id);
   const [importedExample, setImportedExample] = useState<ExampleRecord | null>(
     null,
@@ -581,7 +649,7 @@ export function App() {
   const [showAllWarnings, setShowAllWarnings] = useState(false);
   const [experimentNote, setExperimentNote] = useState("");
   const [savedExperiments, setSavedExperiments] = useState<ExperimentBundle[]>(
-    () => readNotebookBundlesSync(),
+    [],
   );
   const [guidedInspection, setGuidedInspection] =
     useState<GuidedInspectionState>();
@@ -615,7 +683,7 @@ export function App() {
   const [jnwLayerCompareOpen, setJnwLayerCompareOpen] = useState(false);
   const [jnwReaderMode, setJnwReaderMode] =
     useState<JnwReaderMode>("readable-chart");
-  const [jnwReaderLens, setJnwReaderLens] = useState<JnwReaderLens>("state");
+  const [jnwReaderLens, setJnwReaderLens] = useState<JnwReaderLens>("none");
   const [jnwRailGrouping, setJnwRailGrouping] =
     useState<JnwRailGrouping>("individual");
   const [selectedJnwGenerator, setSelectedJnwGenerator] = useState(0);
@@ -631,7 +699,7 @@ export function App() {
   const [quotientBuilderError, setQuotientBuilderError] = useState<
     string | null
   >(null);
-  const [sceneStats, setSceneStats] = useState<SceneRenderStats | null>(null);
+  const [viewerInteractionStore] = useState(createViewerInteractionStore);
   const [desktopStatus, setDesktopStatus] =
     useState<DesktopBridgeStatus | null>(null);
   const [desktopMessage, setDesktopMessage] = useState<string | null>(null);
@@ -642,6 +710,27 @@ export function App() {
   >(() => readStoredRecentSessions());
   const captureScenePngRef = useRef<(() => Promise<string>) | undefined>(
     undefined,
+  );
+  const latestSceneStatsRef = useRef<SceneRenderStats | null>(null);
+  const handleSceneRenderStats = useCallback(
+    (stats: SceneRenderStats) => {
+      latestSceneStatsRef.current = stats;
+      viewerInteractionStore.setRenderStats({
+        runtimeId: stats.runtimeId,
+        renderCount: stats.renderCount,
+        renderReason: stats.renderReason,
+        frame: stats.frame,
+        lastFrameMs: stats.frameSamples.at(-1)?.deltaMs ?? 0,
+        lastGraphUpdateMs: stats.lastGraphUpdateMs,
+        drawCalls: stats.drawCalls,
+        triangles: stats.triangles,
+        renderedNodes: stats.renderedNodes,
+        renderedEdges: stats.renderedEdgeSegments,
+        renderedCells: stats.renderedCells,
+        renderedLabels: stats.renderedNodeLabels + stats.renderedEdgeLabels,
+      });
+    },
+    [viewerInteractionStore],
   );
   const desktopMenuCommandHandlerRef = useRef<
     (command: DesktopMenuCommand) => Promise<void>
@@ -681,6 +770,7 @@ export function App() {
     useState<YGammaCameraBookmark>("rank-three-cell");
   const [gammaLayoutMode, setGammaLayoutMode] =
     useState<DefiningGraphLayoutMode>("3d");
+  const [selectedGammaGenerator, setSelectedGammaGenerator] = useState(0);
   const applyYGammaCellSeparation = useCallback(
     (separation: YGammaCellSeparation) => {
       setYGammaCellSeparation(separation);
@@ -700,6 +790,8 @@ export function App() {
   const [debouncedRadius, setDebouncedRadius] = useState(radius);
   const [workerGeneration, setWorkerGeneration] = useState<{
     ball: GeneratedCayleyBall | null;
+    sphericalSubsets?: SphericalSubsetEnumerationResult;
+    datasetId?: string;
     error: string | null;
     pending: boolean;
     requestId: number;
@@ -708,10 +800,18 @@ export function App() {
   const [yGammaSceneState, setYGammaSceneState] = useState(
     initialYGammaSceneState,
   );
+  const [yGammaComparisonSceneState, setYGammaComparisonSceneState] = useState<{
+    version: string;
+    coherent: YGamma2SkeletonScene;
+    expanded: YGamma2SkeletonScene;
+  }>();
   const denseAutoAppliedIds = useRef(new Set<string>());
   const [generationClient] = useState(() => createGenerationClient());
   const [localViewCache] = useState(() => createLocalViewCache());
   const [yGammaSceneClient] = useState(() => createYGammaSceneClient());
+  const [quotientValidationClient] = useState(() =>
+    createQuotientValidationClient(),
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -723,18 +823,24 @@ export function App() {
         }
       }
     });
-    void desktopBridge.detectExternalTools().then((tools) => {
-      if (!cancelled) {
-        setDesktopTools(tools);
-      }
-    });
-    void desktopBridge.listDesktopJobs().then((jobs) => {
-      if (!cancelled) {
-        setDesktopJobs(jobs);
-      }
-    });
+    const cancelIdle = scheduleIdleTask(
+      () => {
+        void desktopBridge.detectExternalTools().then((tools) => {
+          if (!cancelled) {
+            setDesktopTools(tools);
+          }
+        });
+        void desktopBridge.listDesktopJobs().then((jobs) => {
+          if (!cancelled) {
+            setDesktopJobs(jobs);
+          }
+        });
+      },
+      { timeout: 1_500 },
+    );
     return () => {
       cancelled = true;
+      cancelIdle();
     };
   }, [desktopBridge]);
 
@@ -810,13 +916,19 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
-    void readNotebookBundles().then((bundles) => {
-      if (!cancelled && bundles.length > 0) {
-        setSavedExperiments(bundles.slice(0, 24));
-      }
-    });
+    const cancelIdle = scheduleIdleTask(
+      () => {
+        void readNotebookBundles().then((bundles) => {
+          if (!cancelled && bundles.length > 0) {
+            setSavedExperiments(bundles.slice(0, 24));
+          }
+        });
+      },
+      { timeout: 1_000 },
+    );
     return () => {
       cancelled = true;
+      cancelIdle();
     };
   }, []);
   const graphPreset = graphPresets[graphPresetId];
@@ -847,7 +959,7 @@ export function App() {
       } satisfies ViewerDataset),
     [importedDataset, selectedExample],
   );
-  const system = resolveSystem(activeDataset);
+  const system = useMemo(() => resolveSystem(activeDataset), [activeDataset]);
   const sourceSystem =
     activeDataset.kind === "coxeter-system"
       ? activeDataset.system
@@ -855,10 +967,22 @@ export function App() {
         ? (activeDataset.sourceSystem ?? activeDataset.quotient.sourceSystem)
         : activeDataset.sourceSystem;
   const hasMathContext = sourceSystem !== undefined;
-  const sphericalSubsetResult = useMemo(
-    () => (sourceSystem ? enumerateSphericalSubsets(sourceSystem) : undefined),
-    [sourceSystem],
+  const importedSphericalSubsetResult = useMemo(
+    () =>
+      activeDataset.kind !== "coxeter-system" && sourceSystem
+        ? enumerateSphericalSubsets(sourceSystem)
+        : undefined,
+    [activeDataset.kind, sourceSystem],
   );
+  // Browser-generated balls already enumerate spherical subsets in the
+  // worker. Reusing that result avoids repeating the same exponential subset
+  // search on the UI thread when a compact example is selected.
+  const sphericalSubsetResult =
+    activeDataset.kind === "coxeter-system"
+      ? workerGeneration.datasetId === activeDataset.id
+        ? workerGeneration.sphericalSubsets
+        : undefined
+      : importedSphericalSubsetResult;
   const activeGeneratorPair = useMemo(
     () => parsePairKey(activeGeneratorPairKey),
     [activeGeneratorPairKey],
@@ -963,8 +1087,9 @@ export function App() {
     () => () => {
       generationClient.dispose();
       yGammaSceneClient.dispose();
+      quotientValidationClient.dispose();
     },
-    [generationClient, yGammaSceneClient],
+    [generationClient, quotientValidationClient, yGammaSceneClient],
   );
 
   useEffect(() => {
@@ -989,6 +1114,11 @@ export function App() {
 
       setWorkerGeneration((current) => ({
         ball: current.ball,
+        sphericalSubsets:
+          current.datasetId === activeDataset.id
+            ? current.sphericalSubsets
+            : undefined,
+        datasetId: activeDataset.id,
         error: null,
         pending: true,
         requestId: current.requestId + 1,
@@ -1007,6 +1137,8 @@ export function App() {
           }
           setWorkerGeneration({
             ball: result.ball,
+            sphericalSubsets: result.sphericalSubsets,
+            datasetId: activeDataset.id,
             error: null,
             pending: false,
             requestId: result.requestId,
@@ -1019,6 +1151,8 @@ export function App() {
           }
           setWorkerGeneration({
             ball: null,
+            sphericalSubsets: undefined,
+            datasetId: activeDataset.id,
             error: error instanceof Error ? error.message : String(error),
             pending: false,
             requestId: 0,
@@ -1047,23 +1181,32 @@ export function App() {
 
     return {
       ball: withShellLayout(activeDataset.ball),
+      sphericalSubsets: importedSphericalSubsetResult,
+      datasetId: activeDataset.id,
       error: null,
       pending: false,
       requestId: 0,
       generationMs: undefined,
     };
-  }, [activeDataset, workerGeneration]);
+  }, [activeDataset, importedSphericalSubsetResult, workerGeneration]);
+
+  // Axis projections do not depend on the selected chamber. Only local PCA
+  // refits its basis around the selection, so ordinary picking must not place
+  // every hyperbolic point again.
+  const geometricSelectionKey = projection.endsWith("-pca")
+    ? selectedNodeId
+    : undefined;
 
   const displayed = useMemo(() => {
     if (!generation.ball || effectiveMode !== "geometric") {
       return generation;
     }
 
-    const localPcaCenterNodeId = generation.ball.nodes.some(
-      (node) => node.id === selectedNodeId,
-    )
-      ? selectedNodeId
-      : generation.ball.nodes[0]?.id;
+    const localPcaCenterNodeId = projection.endsWith("-pca")
+      ? generation.ball.nodes.some((node) => node.id === geometricSelectionKey)
+        ? geometricSelectionKey
+        : generation.ball.nodes[0]?.id
+      : undefined;
     const localPcaFitNodeIds =
       projection.endsWith("-pca") &&
       (system.geometry?.dimension ?? 0) > 3 &&
@@ -1101,7 +1244,7 @@ export function App() {
       },
       error: placement.ok ? null : placement.warnings.join(" "),
     };
-  }, [effectiveMode, generation, projection, selectedNodeId, system]);
+  }, [effectiveMode, generation, geometricSelectionKey, projection, system]);
 
   const ball = displayed.ball;
   const ballIdentity = useMemo(
@@ -1181,20 +1324,35 @@ export function App() {
     jnwDraft?.sourceKey === jnwSourceKey
       ? jnwDraft.initialState
       : defaultJnwInitialState;
+  const jnwComputationActive =
+    gameWorkflowKind === "jnw-legal-system" || activeIsJnwStateQuotient;
   const jnwSummary = useMemo(
     () =>
-      summarizeJnwLegalSystem(
-        jnwSourceSystem,
-        activeJnwMoveSystem,
-        activeJnwInitialState,
-      ),
-    [activeJnwInitialState, activeJnwMoveSystem, jnwSourceSystem],
+      jnwComputationActive
+        ? summarizeJnwLegalSystem(
+            jnwSourceSystem,
+            activeJnwMoveSystem,
+            activeJnwInitialState,
+          )
+        : undefined,
+    [
+      activeJnwInitialState,
+      activeJnwMoveSystem,
+      jnwComputationActive,
+      jnwSourceSystem,
+    ],
   );
   const jnwDerivedQuotient = useMemo(
-    () => jnwOrbitToQuotientComplex(jnwSourceSystem, jnwSummary),
+    () =>
+      jnwSummary
+        ? jnwOrbitToQuotientComplex(jnwSourceSystem, jnwSummary)
+        : undefined,
     [jnwSourceSystem, jnwSummary],
   );
   const activeJnwSelectedState = useMemo(() => {
+    if (!jnwSummary) {
+      return undefined;
+    }
     const preferredStateId =
       selectedJnwStateId ??
       (activeIsJnwStateQuotient && selectedNode?.id
@@ -1210,13 +1368,15 @@ export function App() {
   }, [
     activeIsJnwStateQuotient,
     activeJnwInitialState.id,
-    jnwSummary.states,
+    jnwSummary,
     selectedNode,
     selectedJnwStateId,
   ]);
   const activeJnwLayerBreadcrumb = useMemo(
     () =>
-      gameWorkflowKind === "jnw-legal-system" && activeJnwSelectedState
+      gameWorkflowKind === "jnw-legal-system" &&
+      activeJnwSelectedState &&
+      jnwSummary
         ? buildJnwLayerBreadcrumb(
             jnwSourceSystem,
             activeJnwSelectedState,
@@ -1280,14 +1440,14 @@ export function App() {
         : undefined,
     [activeQuotient, activeQuotientRank, effectiveQuotientGame],
   );
-  const quotientGameSummary = useMemo(
+  const quotientInvariantGameSummary = useMemo(
     () =>
       activeQuotient
         ? summarizeCocycle(
             activeQuotient.twoCells,
             activeQuotient.edges,
             effectiveGameAssignment,
-            selectedNode?.id ?? activeQuotient.vertices[0]?.id,
+            undefined,
             {
               rank: activeQuotientRank,
               generators: activeQuotientGenerators,
@@ -1301,19 +1461,7 @@ export function App() {
       activeQuotientRank,
       effectiveGameAssignment,
       effectiveQuotientGame?.activeCocycleId,
-      selectedNode?.id,
     ],
-  );
-  const quotientBoundaryChecks = useMemo(
-    () =>
-      activeQuotient && quotientAssignment
-        ? validateRankTwoCocycle(
-            activeQuotient.twoCells,
-            activeQuotient.edges,
-            quotientAssignment.edgeStates,
-          )
-        : undefined,
-    [activeQuotient, quotientAssignment],
   );
   const quotientIncidentFlows = useMemo(
     () =>
@@ -1325,6 +1473,16 @@ export function App() {
           )
         : [],
     [activeQuotient, quotientAssignment, selectedNode],
+  );
+  const quotientGameSummary = useMemo(
+    () =>
+      quotientInvariantGameSummary
+        ? {
+            ...quotientInvariantGameSummary,
+            flows: quotientIncidentFlows,
+          }
+        : undefined,
+    [quotientIncidentFlows, quotientInvariantGameSummary],
   );
   const quotientFlowByEdgeId = useMemo(
     () => new Map(quotientIncidentFlows.map((flow) => [flow.edgeId, flow])),
@@ -1385,7 +1543,7 @@ export function App() {
   }, [cellNeighborhoodMode, focusedRankTwoCell, localDepth]);
   const localLayout = useMemo(
     () =>
-      ball && selectedNode
+      graphView === "on-graph" && ball && selectedNode
         ? localViewCache.localChamber3DLayout({
             ball,
             centerNodeId: selectedNode.id,
@@ -1395,7 +1553,14 @@ export function App() {
             },
           })
         : undefined,
-    [ball, localLayoutDepth, localViewCache, selectedNode, system.rank],
+    [
+      ball,
+      graphView,
+      localLayoutDepth,
+      localViewCache,
+      selectedNode,
+      system.rank,
+    ],
   );
   const chamberNodeIds = useMemo(() => {
     if (graphView !== "on-graph" || !localLayout) {
@@ -1520,16 +1685,26 @@ export function App() {
   );
   const highlightedGammaJnwState = useMemo(() => {
     const requestedStateId = gammaHighlightedJnwStateId ?? selectedJnwStateId;
-    if (gameWorkflowKind !== "jnw-legal-system" || !requestedStateId) {
+    if (
+      gameWorkflowKind !== "jnw-legal-system" ||
+      !requestedStateId ||
+      !jnwSummary
+    ) {
       return undefined;
     }
     return jnwSummary.states.find((state) => state.id === requestedStateId);
   }, [
     gameWorkflowKind,
     gammaHighlightedJnwStateId,
-    jnwSummary.states,
+    jnwSummary,
     selectedJnwStateId,
   ]);
+  const activeGammaGenerator =
+    sourceSystem &&
+    selectedGammaGenerator >= 0 &&
+    selectedGammaGenerator < sourceSystem.rank
+      ? selectedGammaGenerator
+      : 0;
   const gammaDefiningGraphScene = useMemo(
     () =>
       sourceSystem
@@ -1537,17 +1712,19 @@ export function App() {
             layoutMode: gammaLayoutMode,
             highlightedGenerators: highlightedGammaJnwState?.generators,
             highlightLabel:
-              highlightedGammaJnwState !== undefined
+              highlightedGammaJnwState !== undefined && jnwSummary
                 ? formatJnwStateName(jnwSummary, highlightedGammaJnwState)
                 : undefined,
             highlightColor:
-              highlightedGammaJnwState !== undefined
+              highlightedGammaJnwState !== undefined && jnwSummary
                 ? jnwStateChartColor(jnwSummary, highlightedGammaJnwState.id)
                 : undefined,
           })
         : undefined,
     [gammaLayoutMode, highlightedGammaJnwState, jnwSummary, sourceSystem],
   );
+  const selectedGammaIncidence =
+    gammaDefiningGraphScene?.incidencePartitions[activeGammaGenerator];
   const yGammaRankThreeFocus = useMemo(
     () =>
       yGammaAtlas
@@ -1726,20 +1903,41 @@ export function App() {
   );
   const requestedYGammaSceneVersion = useMemo(
     () =>
-      yGammaAtlas
+      activeIsYGammaBaseComplex && yGammaAtlas
         ? yGammaSceneClient.sceneVersionFor({
             atlas: yGammaAtlas,
             options: yGammaSceneOptions,
           })
         : undefined,
-    [yGammaAtlas, yGammaSceneClient, yGammaSceneOptions],
+    [
+      activeIsYGammaBaseComplex,
+      yGammaAtlas,
+      yGammaSceneClient,
+      yGammaSceneOptions,
+    ],
+  );
+  const requestedYGammaAtlasVersion = useMemo(
+    () =>
+      activeIsYGammaBaseComplex && yGammaAtlas
+        ? yGammaSceneClient.atlasVersionFor({
+            atlas: yGammaAtlas,
+            options: yGammaSceneOptions,
+          })
+        : undefined,
+    [
+      activeIsYGammaBaseComplex,
+      yGammaAtlas,
+      yGammaSceneClient,
+      yGammaSceneOptions,
+    ],
   );
 
   useEffect(() => {
     if (
       !activeIsYGammaBaseComplex ||
       !yGammaAtlas ||
-      !requestedYGammaSceneVersion
+      !requestedYGammaSceneVersion ||
+      !requestedYGammaAtlasVersion
     ) {
       return;
     }
@@ -1751,16 +1949,18 @@ export function App() {
         return;
       }
       setYGammaSceneState((current) =>
-        current.sceneVersion === requestedYGammaSceneVersion && current.scene
+        (current.sceneVersion === requestedYGammaSceneVersion &&
+          current.scene) ||
+        current.pendingSceneVersion === requestedYGammaSceneVersion
           ? current
           : {
               ...current,
               pending: true,
               error: null,
-              sceneVersion: requestedYGammaSceneVersion,
+              pendingSceneVersion: requestedYGammaSceneVersion,
             },
       );
-    }, 0);
+    }, 48);
 
     void client
       .build({ atlas: yGammaAtlas, options: yGammaSceneOptions })
@@ -1768,9 +1968,12 @@ export function App() {
         if (cancelled || result.sceneVersion !== requestedYGammaSceneVersion) {
           return;
         }
+        window.clearTimeout(pendingTimeoutId);
         setYGammaSceneState({
           scene: result.scene,
+          atlasVersion: requestedYGammaAtlasVersion,
           sceneVersion: result.sceneVersion,
+          pendingSceneVersion: undefined,
           pending: false,
           error: null,
           buildMs: result.buildMs,
@@ -1780,8 +1983,13 @@ export function App() {
         if (cancelled) {
           return;
         }
+        window.clearTimeout(pendingTimeoutId);
         setYGammaSceneState((current) => ({
           ...current,
+          pendingSceneVersion:
+            current.pendingSceneVersion === requestedYGammaSceneVersion
+              ? undefined
+              : current.pendingSceneVersion,
           pending: false,
           error: error instanceof Error ? error.message : String(error),
         }));
@@ -1793,6 +2001,7 @@ export function App() {
     };
   }, [
     activeIsYGammaBaseComplex,
+    requestedYGammaAtlasVersion,
     requestedYGammaSceneVersion,
     yGammaAtlas,
     yGammaSceneClient,
@@ -1800,7 +2009,7 @@ export function App() {
   ]);
 
   const yGamma2SkeletonScene =
-    yGammaSceneState.sceneVersion === requestedYGammaSceneVersion
+    yGammaSceneState.atlasVersion === requestedYGammaAtlasVersion
       ? yGammaSceneState.scene
       : undefined;
   const showingYGammaComplex =
@@ -2049,13 +2258,6 @@ export function App() {
     yGammaRankThreeFocus,
     yGammaRankThreeFocusEnabled,
   ]);
-  const cameraFocusTarget =
-    yGammaCameraFocus?.target ??
-    focusedCellCameraTarget ??
-    (graphView === "on-graph" && activeGeneratorPairKey
-      ? localLayout?.cameraTargets.get(activeGeneratorPairKey)
-      : undefined);
-  const cameraFocusOffset = yGammaCameraFocus?.offset;
   const denseExample = system.rank >= 7 || (ball?.nodes.length ?? 0) > 500;
   const sceneNodes = useMemo(() => {
     const viewRootNodeId =
@@ -2139,9 +2341,27 @@ export function App() {
       !activeIsJnwStateQuotient ||
       (topologyLens.id !== "state-quotient-orbit" &&
         !isQuotientLinkLens(topologyLens.id)) ||
-      !yGammaAtlas
+      !yGammaAtlas ||
+      !jnwSummary
     ) {
       return undefined;
+    }
+    const effectiveReaderLens = jnwReaderLensForTopologyLens(
+      topologyLens.id,
+      jnwReaderLens,
+    );
+    if (
+      effectiveReaderLens === "ascending-link" ||
+      effectiveReaderLens === "descending-link" ||
+      effectiveReaderLens === "level-link" ||
+      effectiveReaderLens === "full-link"
+    ) {
+      return buildJnwStateLinkScene({
+        system,
+        summary: jnwSummary,
+        selectedStateId: activeJnwSelectedState?.id ?? selectedNode?.id,
+        readerLens: effectiveReaderLens,
+      });
     }
     return buildJnwStateQuotientYGammaScene({
       system,
@@ -2154,7 +2374,7 @@ export function App() {
       sheetMode: jnwQuotientSheetMode,
       constructionStage: jnwQuotientConstructionStage,
       readerMode: jnwReaderMode,
-      readerLens: jnwReaderLensForTopologyLens(topologyLens.id, jnwReaderLens),
+      readerLens: effectiveReaderLens,
       railGrouping: jnwRailGrouping,
     });
   }, [
@@ -2174,8 +2394,69 @@ export function App() {
     topologyLens.id,
     yGammaAtlas,
   ]);
+  const jnwCameraFrame = useMemo(() => {
+    if (!jnwStateYGammaOrbitScene) {
+      return undefined;
+    }
+    const positionedNodes = jnwStateYGammaOrbitScene.nodes.filter(
+      (node): node is typeof node & { position: [number, number, number] } =>
+        node.position !== undefined,
+    );
+    const relationCenterId = selectedCellId
+      ? jnwStateYGammaOrbitScene.coverModel?.relationCells.find(
+          (relation) => relation.id === selectedCellId,
+        )?.centerId
+      : undefined;
+    const relationCenter = relationCenterId
+      ? positionedNodes.find((node) => node.id === relationCenterId)?.position
+      : undefined;
+    const target =
+      relationCenter ??
+      centroid3(positionedNodes.map((node) => node.position)) ??
+      ([0, 0, 0] as [number, number, number]);
+    const radius = positionedNodes.reduce(
+      (maximum, node) =>
+        Math.max(
+          maximum,
+          Math.hypot(
+            node.position[0] - target[0],
+            node.position[1] - target[1],
+            node.position[2] - target[2],
+          ),
+        ),
+      0,
+    );
+    const focusedRelation = relationCenter !== undefined;
+    // A cover subdivision fills a volume, rather than a nearly planar graph.
+    // Keeping the camera roughly four bounding radii from the target leaves
+    // all four state vertices visible without making the user zoom out first.
+    const distance = focusedRelation
+      ? Math.max(24, Math.min(radius * 1.35, 38))
+      : Math.max(30, radius * 1.3);
+    return {
+      target,
+      offset: [distance * 1.05, -distance * 1.55, distance * 0.95] as [
+        number,
+        number,
+        number,
+      ],
+    };
+  }, [jnwStateYGammaOrbitScene, selectedCellId]);
+  const cameraFocusTarget =
+    jnwCameraFrame?.target ??
+    yGammaCameraFocus?.target ??
+    focusedCellCameraTarget ??
+    (graphView === "on-graph" && activeGeneratorPairKey
+      ? localLayout?.cameraTargets.get(activeGeneratorPairKey)
+      : undefined);
+  const cameraFocusOffset = jnwCameraFrame?.offset ?? yGammaCameraFocus?.offset;
+  // The Y_Gamma atlas may finish after the workflow click that increments the
+  // ordinary focus signal. This offset causes one additional focus pass when
+  // the derived JNW scene itself becomes available.
+  const activeFocusSignal =
+    focusSignal + (jnwStateYGammaOrbitScene ? 1_000_000 : 0);
   const jnwStateSceneDecoration = useMemo(() => {
-    if (!activeIsJnwStateQuotient || jnwStateYGammaOrbitScene) {
+    if (!activeIsJnwStateQuotient || jnwStateYGammaOrbitScene || !jnwSummary) {
       return undefined;
     }
     return decorateJnwStateQuotientScene({
@@ -2255,7 +2536,11 @@ export function App() {
     if (
       !quotientLensSceneIds ||
       topologyLens.id === "full-local-link" ||
-      !isQuotientLinkLens(topologyLens.id)
+      !isQuotientLinkLens(topologyLens.id) ||
+      jnwStateYGammaOrbitScene?.readerLens === "ascending-link" ||
+      jnwStateYGammaOrbitScene?.readerLens === "descending-link" ||
+      jnwStateYGammaOrbitScene?.readerLens === "level-link" ||
+      jnwStateYGammaOrbitScene?.readerLens === "full-link"
     ) {
       return decorated;
     }
@@ -2301,7 +2586,7 @@ export function App() {
     ],
   );
   const activeSceneSelectedNodeId = showingGammaDefiningGraph
-    ? gammaDefiningGraphScene?.selectedNodeId
+    ? definingGraphNodeId(activeGammaGenerator)
     : showingYGammaComplex
       ? yGamma2SkeletonScene?.selectedNodeId
       : (jnwStateYGammaOrbitScene?.selectedNodeId ?? selectedNode?.id);
@@ -2410,14 +2695,9 @@ export function App() {
         cellGeometryParts: [
           `cell-render:${activeLocalCellRenderMode}`,
           `show-cells:${showingDerivedScene || showCells || showHigherCells}`,
-          `active-pair:${activeGeneratorPairKey ?? ""}`,
-          `ygamma-separation:${showingYGammaComplex ? yGammaCellSeparation : ""}`,
-          `ygamma-separation-value:${
-            showingYGammaComplex ? yGammaSeparationValue : ""
-          }`,
-          `ygamma-cutaway:${showingYGammaComplex ? yGammaCutawayMode : ""}`,
-          `ygamma-relation-star:${
-            showingYGammaComplex ? yGammaRelationStarActive : ""
+          `active-pair:${showingYGammaComplex ? "" : (activeGeneratorPairKey ?? "")}`,
+          `ygamma-applied-scene:${
+            showingYGammaComplex ? (yGammaSceneState.sceneVersion ?? "") : ""
           }`,
           `panel-offset:${
             showingYGammaComplex
@@ -2434,9 +2714,6 @@ export function App() {
           `selected-node:${activeSceneSelectedNodeId ?? ""}`,
           `selected-cell:${selectedCellId ?? ""}`,
           `show-cells:${showingDerivedScene || showCells || showHigherCells}`,
-          `show-node-labels:${forceBudgetedSceneLabels || showNodeLabels}`,
-          `show-edge-labels:${showingDerivedScene || showEdgeLabels}`,
-          `label-scope:${sceneLabelScope}`,
           `active-pair:${activeGeneratorPairKey ?? ""}`,
           `occlusion:${occlusionMode}`,
           `cell-opacity:${activeCellOpacity}`,
@@ -2455,13 +2732,12 @@ export function App() {
               .join(",") ?? ""
           }:${quotientGameSummary?.status ?? ""}`,
           `camera:${showingDerivedScene ? "global" : graphView}`,
-          `max-node-labels:${sceneMaxNodeLabels}`,
-          `max-edge-labels:${sceneMaxEdgeLabels}`,
           ...system.generators.map(
             (generator) => `${generator.label}:${generator.colorHint ?? ""}`,
           ),
         ],
         labelParts: [
+          `selected-node:${activeSceneSelectedNodeId ?? ""}`,
           `show-node-labels:${forceBudgetedSceneLabels || showNodeLabels}`,
           `show-edge-labels:${showingDerivedScene || showEdgeLabels}`,
           `label-scope:${sceneLabelScope}`,
@@ -2507,18 +2783,15 @@ export function App() {
       showNodeLabels,
       system.generators,
       yGammaTopologyMode,
-      yGammaCellSeparation,
-      yGammaCutawayMode,
       yGammaInspectMode,
-      yGammaRelationStarActive,
-      yGammaSeparationValue,
+      yGammaSceneState.sceneVersion,
     ],
   );
   const activeSceneStructureVersion = activeSceneRevisionSet.structureVersion;
   const activeSceneAppearanceVersion =
     activeSceneRevisionSet.renderAppearanceVersion;
-  const yGammaComparisonScenes = useMemo(() => {
-    if (!showingYGammaComplex || !yGammaCompareDrawing || !yGammaAtlas) {
+  const yGammaComparisonWarmRequests = useMemo(() => {
+    if (!showingYGammaComplex || !yGammaAtlas) {
       return undefined;
     }
     const commonOptions: YGamma2SkeletonSceneOptions = {
@@ -2528,24 +2801,95 @@ export function App() {
       relationStar: yGammaSceneOptions.relationStar,
       cutaway: yGammaSceneOptions.cutaway,
     };
-    return {
-      coherent: buildYGamma2SkeletonScene(yGammaAtlas, {
+    const coherent = {
+      atlas: yGammaAtlas,
+      options: {
         ...commonOptions,
         cellSeparation: "coherent",
         separationValue: 0,
-      }),
-      expanded: buildYGamma2SkeletonScene(yGammaAtlas, {
+      } satisfies YGamma2SkeletonSceneOptions,
+    };
+    const expanded = {
+      atlas: yGammaAtlas,
+      options: {
         ...commonOptions,
         cellSeparation: "expanded",
         separationValue: 100,
-      }),
+      } satisfies YGamma2SkeletonSceneOptions,
+    };
+    return {
+      coherent,
+      expanded,
+      version: `${yGammaSceneClient.sceneVersionFor(coherent)}:${yGammaSceneClient.sceneVersionFor(expanded)}`,
     };
   }, [
     showingYGammaComplex,
     yGammaAtlas,
-    yGammaCompareDrawing,
+    yGammaSceneClient,
     yGammaSceneOptions,
   ]);
+  const yGammaComparisonRequests = yGammaCompareDrawing
+    ? yGammaComparisonWarmRequests
+    : undefined;
+  useEffect(() => {
+    if (!yGammaComparisonWarmRequests || yGammaCompareDrawing) {
+      return;
+    }
+    let cancelIdle: (() => void) | undefined;
+    const timer = window.setTimeout(() => {
+      cancelIdle = scheduleIdleTask(
+        () => {
+          void yGammaSceneClient.prefetch([
+            yGammaComparisonWarmRequests.coherent,
+            yGammaComparisonWarmRequests.expanded,
+          ]);
+        },
+        { timeout: 1_000 },
+      );
+    }, 750);
+    return () => {
+      window.clearTimeout(timer);
+      cancelIdle?.();
+    };
+  }, [yGammaCompareDrawing, yGammaComparisonWarmRequests, yGammaSceneClient]);
+  useEffect(() => {
+    if (!yGammaComparisonRequests) {
+      return;
+    }
+    let cancelled = false;
+    void Promise.all([
+      yGammaSceneClient.build(yGammaComparisonRequests.coherent),
+      yGammaSceneClient.build(yGammaComparisonRequests.expanded),
+    ])
+      .then(([coherent, expanded]) => {
+        if (!cancelled) {
+          setYGammaComparisonSceneState({
+            version: yGammaComparisonRequests.version,
+            coherent: coherent.scene,
+            expanded: expanded.scene,
+          });
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [yGammaComparisonRequests, yGammaSceneClient]);
+  const yGammaComparisonScenes =
+    yGammaComparisonRequests &&
+    yGammaComparisonSceneState?.version === yGammaComparisonRequests.version
+      ? yGammaComparisonSceneState
+      : undefined;
+  const yGammaDrawingComparisonScene = useMemo(
+    () =>
+      yGammaComparisonScenes
+        ? buildYGammaDrawingComparisonScene(
+            yGammaComparisonScenes.coherent,
+            yGammaComparisonScenes.expanded,
+          )
+        : undefined,
+    [yGammaComparisonScenes],
+  );
   const warnings = useMemo(
     () => [
       ...(system.warnings ?? []),
@@ -2800,6 +3144,9 @@ export function App() {
     [savedExperiments],
   );
   const topologyInspectorSubject = useMemo<TopologyInspectorSubject>(() => {
+    if (showingGammaDefiningGraph && selectedGammaIncidence) {
+      return { kind: "gamma-vertex", incidence: selectedGammaIncidence };
+    }
     if (showingYGammaComplex && yGammaActiveRelation) {
       return { kind: "ygamma-cell", cell: yGammaActiveRelation };
     }
@@ -2820,7 +3167,7 @@ export function App() {
       (isQuotientLinkLens(topologyLens.id) ||
         topologyLens.id === "state-quotient-orbit")
     ) {
-      if (activeIsJnwStateQuotient) {
+      if (activeIsJnwStateQuotient && jnwSummary) {
         return buildJnwStateLinkSubject(
           activeDataset.quotient,
           jnwSummary,
@@ -2877,6 +3224,8 @@ export function App() {
     selectedHigherCell,
     selectedHigherProxy,
     selectedNode,
+    selectedGammaIncidence,
+    showingGammaDefiningGraph,
     showingYGammaComplex,
     sphericalSubsetResult?.subsets.length,
     topologyLens.id,
@@ -2892,6 +3241,10 @@ export function App() {
           system.geometry?.certifiedModel?.certificate.status === "passed",
       }),
     [effectiveMode, system, topologyInspectorSubject],
+  );
+  const sessionWarnings = useMemo(
+    () => warnings.filter((warning) => !isTransientBuildWarning(warning)),
+    [warnings],
   );
 
   const currentProjectSession = useMemo(
@@ -2955,7 +3308,7 @@ export function App() {
                 workflowKind: gameWorkflowKind,
                 claimStatus:
                   gameWorkflowKind === "jnw-legal-system"
-                    ? jnwSummary.claimStatus
+                    ? (jnwSummary?.claimStatus ?? "failed")
                     : quotientGameSummary.status === "passed"
                       ? "experimental-non-jnw"
                       : "failed",
@@ -2968,23 +3321,27 @@ export function App() {
                   cocycleStatus: quotientGameSummary.status,
                   failedCellIds: quotientGameSummary.failedCellIds,
                 },
-                jnwLegalSystem: {
-                  sourceSystemName: jnwSourceSystem.name,
-                  initialState: activeJnwInitialState.generators,
-                  moves: activeJnwMoveSystem.moves,
-                  orbitStateCount: jnwSummary.states.length,
-                  legalStateCount: jnwSummary.legalStateCount,
-                  stronglyLegalStateCount: jnwSummary.stronglyLegalStateCount,
-                  reader: {
-                    mode: jnwReaderMode,
-                    lens: jnwReaderLens,
-                    railGrouping: jnwRailGrouping,
-                    selectedStateId: activeJnwSelectedState?.id,
-                    selectedGenerator: selectedJnwGenerator,
-                    selectedRelationId: selectedCellId,
-                    constructionStage: jnwQuotientConstructionStage,
-                  },
-                },
+                jnwLegalSystem:
+                  gameWorkflowKind === "jnw-legal-system" && jnwSummary
+                    ? {
+                        sourceSystemName: jnwSourceSystem.name,
+                        initialState: activeJnwInitialState.generators,
+                        moves: activeJnwMoveSystem.moves,
+                        orbitStateCount: jnwSummary.states.length,
+                        legalStateCount: jnwSummary.legalStateCount,
+                        stronglyLegalStateCount:
+                          jnwSummary.stronglyLegalStateCount,
+                        reader: {
+                          mode: jnwReaderMode,
+                          lens: jnwReaderLens,
+                          railGrouping: jnwRailGrouping,
+                          selectedStateId: activeJnwSelectedState?.id,
+                          selectedGenerator: selectedJnwGenerator,
+                          selectedRelationId: selectedCellId,
+                          constructionStage: jnwQuotientConstructionStage,
+                        },
+                      }
+                    : undefined,
                 selectedVertexId: selectedNode?.id,
                 cocycleStatus: quotientGameSummary.status,
                 failedCellIds: quotientGameSummary.failedCellIds,
@@ -2995,7 +3352,7 @@ export function App() {
           preferredRuntime:
             desktopStatus?.runtime === "tauri" ? "tauri" : "web",
         },
-        warnings,
+        warnings: sessionWarnings,
         notes: annotations.map((annotation) => annotation.body),
       }),
     [
@@ -3022,10 +3379,7 @@ export function App() {
       jnwReaderLens,
       jnwReaderMode,
       jnwSourceSystem.name,
-      jnwSummary.claimStatus,
-      jnwSummary.legalStateCount,
-      jnwSummary.states.length,
-      jnwSummary.stronglyLegalStateCount,
+      jnwSummary,
       labelScope,
       quotientGameSummary,
       radius,
@@ -3039,7 +3393,7 @@ export function App() {
       showEdgeLabels,
       showHigherCells,
       showNodeLabels,
-      warnings,
+      sessionWarnings,
     ],
   );
   const currentSessionSnapshot = useMemo(
@@ -3282,6 +3636,12 @@ export function App() {
     setShowNodeLabels(true);
     setShowEdgeLabels(true);
     setLabelScope("focused");
+    setJnwReaderMode("readable-chart");
+    setJnwReaderLens("none");
+    setJnwRailGrouping("individual");
+    setSelectedJnwGenerator(0);
+    setJnwQuotientSheetMode("glass");
+    setJnwQuotientConstructionStage(4);
     setTopologyLens({ id: "state-quotient-orbit", selectedGenerator: 0 });
     setDesktopMessage(
       "Loaded the JNW cube graph with bipartition moves and a legal initial state.",
@@ -3351,7 +3711,9 @@ export function App() {
   };
 
   const applyTopologyLens = (lensId: TopologyLensId) => {
-    setTopologyLens((current) => ({ ...current, id: lensId }));
+    setTopologyLens((current) =>
+      current.id === lensId ? current : { ...current, id: lensId },
+    );
     setShowNodeLabels(true);
     setShowEdgeLabels(true);
     setLabelScope("focused");
@@ -3422,6 +3784,12 @@ export function App() {
   };
 
   const setTopologyLensGenerator = (generator: number) => {
+    if (
+      topologyLens.selectedGenerator === generator &&
+      yGammaFocusGenerator === generator
+    ) {
+      return;
+    }
     setTopologyLens((current) => ({
       ...current,
       selectedGenerator: generator,
@@ -3506,8 +3874,8 @@ export function App() {
     }
 
     try {
-      const parsed = JSON.parse(await file.text()) as unknown;
-      const quotient = parseQuotientComplex(parsed);
+      const { quotient } = await quotientValidationClient.validateFile(file);
+      const initialVertexId = quotient.vertices[0]?.id;
       setImportedDataset({
         kind: "quotient-complex",
         id: `quotient:${quotient.name}`,
@@ -3517,8 +3885,17 @@ export function App() {
         sourceSystem: quotient.sourceSystem,
       });
       resetSelectionForImport();
+      if (initialVertexId) {
+        setSelectedNodeId(initialVertexId);
+        setRootNodeId(initialVertexId);
+      }
+      // An imported quotient must not inherit a link lens that filters it to a
+      // stale local neighborhood, nor a Y_Gamma lens that replaces the file.
+      setTopologyLens({ id: "generator-family", selectedGenerator: 0 });
     } catch (error) {
-      if (error instanceof QuotientValidationError) {
+      if (error instanceof QuotientValidationCancelledError) {
+        return;
+      } else if (error instanceof QuotientValidationError) {
         setImportError(error.errors.join(" "));
       } else if (error instanceof Error) {
         setImportError(error.message);
@@ -3753,7 +4130,7 @@ export function App() {
             kind: "coxeter-viewer-browser-diagnostics",
             createdAt: new Date().toISOString(),
             runtime: desktopStatus?.runtime ?? "browser",
-            sceneStats,
+            sceneStats: latestSceneStatsRef.current,
             warnings,
           },
           null,
@@ -3770,7 +4147,6 @@ export function App() {
     desktopBridge,
     desktopStatus?.runtime,
     desktopStatus?.workspace.rootPathHint,
-    sceneStats,
     warnings,
   ]);
 
@@ -3998,7 +4374,18 @@ export function App() {
   const openJnwStateQuotient = (
     requestedStateId = activeJnwInitialState.id,
   ) => {
-    const quotient = jnwDerivedQuotient;
+    // The expensive orbit is normally lazy. An explicit "open" action is the
+    // one safe synchronous fallback when this handler came from the inactive
+    // workflow card before React committed the workflow-kind change.
+    const summary =
+      jnwSummary ??
+      summarizeJnwLegalSystem(
+        jnwSourceSystem,
+        activeJnwMoveSystem,
+        activeJnwInitialState,
+      );
+    const quotient =
+      jnwDerivedQuotient ?? jnwOrbitToQuotientComplex(jnwSourceSystem, summary);
     const selectedStateId = quotient.vertices.some(
       (vertex) => vertex.id === requestedStateId,
     )
@@ -4028,11 +4415,11 @@ export function App() {
     setShowEdgeLabels(true);
     setLabelScope("budgeted");
     setJnwReaderMode("readable-chart");
-    setJnwReaderLens("state");
+    setJnwReaderLens("none");
     setJnwRailGrouping("individual");
     setSelectedJnwGenerator(0);
     setJnwQuotientSheetMode("glass");
-    setJnwQuotientConstructionStage(3);
+    setJnwQuotientConstructionStage(4);
     setTopologyLens({ id: "state-quotient-orbit" });
     setFocusSignal((value) => value + 1);
   };
@@ -4063,7 +4450,7 @@ export function App() {
   };
 
   const showJnwStateOnGamma = (stateId: string) => {
-    const state = jnwSummary.states.find((entry) => entry.id === stateId);
+    const state = jnwSummary?.states.find((entry) => entry.id === stateId);
     const nextStateId = state?.id ?? stateId;
     setSelectedJnwStateId(nextStateId);
     setGammaHighlightedJnwStateId(nextStateId);
@@ -4089,7 +4476,7 @@ export function App() {
     setSelectedCellId(diagnosticId);
     setActiveGeneratorPairKey(
       pairKey(
-        jnwSummary.rankTwoDiagnostics.find(
+        jnwSummary?.rankTwoDiagnostics.find(
           (diagnostic) => diagnostic.id === diagnosticId,
         )?.generatorPair ?? [0, 1],
       ),
@@ -4697,17 +5084,32 @@ export function App() {
       if (showingYGammaComplex) {
         return;
       }
+      if (showingGammaDefiningGraph) {
+        const match = /^Gamma:v:(\d+)$/.exec(nodeId);
+        if (match) {
+          setSelectedGammaGenerator(Number(match[1]));
+          setSelectedCellId(undefined);
+        }
+        return;
+      }
       setSelectedNodeId(nodeId);
       setSelectedCellId(undefined);
       setCellFocusMode("incident-selected");
       setCellNeighborhoodMode("chamber");
     },
-    [showingYGammaComplex],
+    [
+      setSelectedGammaGenerator,
+      showingGammaDefiningGraph,
+      showingYGammaComplex,
+    ],
   );
 
   const handleSceneSelectCell = useCallback(
     (cellId: string) => {
-      setSelectedCellId(cellId);
+      const sourceCellId =
+        jnwStateYGammaOrbitScene?.sourceCellIdByRenderedId?.get(cellId) ??
+        cellId;
+      setSelectedCellId(sourceCellId);
       if (showingYGammaComplex && yGamma2SkeletonScene) {
         const cell = yGamma2SkeletonScene.cells.find(
           (entry) => entry.id === cellId,
@@ -4722,7 +5124,7 @@ export function App() {
           return;
         }
       }
-      const cell = ballIndexes.twoCellsById.get(cellId);
+      const cell = ballIndexes.twoCellsById.get(sourceCellId);
       if (cell) {
         setActiveGeneratorPairKey(pairKey(cell.generatorPair));
         setCellFocusMode("selected-cell");
@@ -4734,7 +5136,12 @@ export function App() {
         setFocusSignal((value) => value + 1);
       }
     },
-    [ballIndexes.twoCellsById, showingYGammaComplex, yGamma2SkeletonScene],
+    [
+      ballIndexes.twoCellsById,
+      jnwStateYGammaOrbitScene,
+      showingYGammaComplex,
+      yGamma2SkeletonScene,
+    ],
   );
 
   const toggleHigherSubset = (subsetId: string, enabled: boolean) => {
@@ -4897,7 +5304,7 @@ export function App() {
       },
       annotations,
       cameraBookmarks,
-      sceneStats,
+      sceneStats: latestSceneStatsRef.current,
       warnings: [...new Set(warnings)].sort(),
     };
     void requestNativeExport({
@@ -4929,7 +5336,6 @@ export function App() {
     projection,
     relationWalkMode,
     requestNativeExport,
-    sceneStats,
     selectedNode,
     system,
     warnings,
@@ -5177,7 +5583,7 @@ export function App() {
                 : undefined,
             },
             render: {
-              sceneStats,
+              sceneStats: latestSceneStatsRef.current,
               cellOpacity,
               panelOffsetStrength,
               bringFocusedCellsForward,
@@ -5197,7 +5603,7 @@ export function App() {
                           workflowKind: gameWorkflowKind,
                           claimStatus:
                             gameWorkflowKind === "jnw-legal-system"
-                              ? jnwSummary.claimStatus
+                              ? (jnwSummary?.claimStatus ?? "failed")
                               : quotientGameSummary.status === "passed"
                                 ? "experimental-non-jnw"
                                 : "failed",
@@ -5209,28 +5615,34 @@ export function App() {
                             cocycleStatus: quotientGameSummary.status,
                             failedCellIds: quotientGameSummary.failedCellIds,
                           },
-                          jnwLegalSystem: {
-                            sourceSystemName: jnwSourceSystem.name,
-                            initialState:
-                              jnwSummary.states.find(
-                                (state) =>
-                                  state.id === activeJnwInitialState.id,
-                              )?.generators ?? activeJnwInitialState.generators,
-                            moves: activeJnwMoveSystem.moves,
-                            orbitStateCount: jnwSummary.states.length,
-                            legalStateCount: jnwSummary.legalStateCount,
-                            stronglyLegalStateCount:
-                              jnwSummary.stronglyLegalStateCount,
-                            reader: {
-                              mode: jnwReaderMode,
-                              lens: jnwReaderLens,
-                              railGrouping: jnwRailGrouping,
-                              selectedStateId: activeJnwSelectedState?.id,
-                              selectedGenerator: selectedJnwGenerator,
-                              selectedRelationId: selectedCellId,
-                              constructionStage: jnwQuotientConstructionStage,
-                            },
-                          },
+                          jnwLegalSystem:
+                            gameWorkflowKind === "jnw-legal-system" &&
+                            jnwSummary
+                              ? {
+                                  sourceSystemName: jnwSourceSystem.name,
+                                  initialState:
+                                    jnwSummary.states.find(
+                                      (state) =>
+                                        state.id === activeJnwInitialState.id,
+                                    )?.generators ??
+                                    activeJnwInitialState.generators,
+                                  moves: activeJnwMoveSystem.moves,
+                                  orbitStateCount: jnwSummary.states.length,
+                                  legalStateCount: jnwSummary.legalStateCount,
+                                  stronglyLegalStateCount:
+                                    jnwSummary.stronglyLegalStateCount,
+                                  reader: {
+                                    mode: jnwReaderMode,
+                                    lens: jnwReaderLens,
+                                    railGrouping: jnwRailGrouping,
+                                    selectedStateId: activeJnwSelectedState?.id,
+                                    selectedGenerator: selectedJnwGenerator,
+                                    selectedRelationId: selectedCellId,
+                                    constructionStage:
+                                      jnwQuotientConstructionStage,
+                                  },
+                                }
+                              : undefined,
                           cocycleStatus: quotientGameSummary.status,
                           failedCellIds: quotientGameSummary.failedCellIds,
                           selectedVertexId:
@@ -5286,10 +5698,7 @@ export function App() {
       jnwReaderLens,
       jnwReaderMode,
       jnwSourceSystem.name,
-      jnwSummary.claimStatus,
-      jnwSummary.legalStateCount,
-      jnwSummary.states,
-      jnwSummary.stronglyLegalStateCount,
+      jnwSummary,
       labelScope,
       localDepth,
       localViewLayout,
@@ -5299,7 +5708,6 @@ export function App() {
       quotientGameSummary,
       relationWalkMode,
       researchWorkflow,
-      sceneStats,
       selectedCellId,
       selectedJnwGenerator,
       selectedNode?.id,
@@ -5814,6 +6222,7 @@ export function App() {
                   void handleImportCoxeterFile(event.currentTarget.files?.[0])
                 }
               />
+              <QuotientImportProgress client={quotientValidationClient} />
               <label
                 className="button file-button"
                 htmlFor="import-generated-input"
@@ -6176,11 +6585,12 @@ export function App() {
             >
               <summary>Example catalogue: 5D eight-facet cases</summary>
               <p className="math-note">
-                Tumarkin lists 15 compact 5D Coxeter polytopes with 8 facets in{" "}
-                {tumarkinEightFacetSourceRef.locator}. These entries are
-                transcribed from the source EPS artwork, their dotted weights
-                are solved from the determinant equations, and each bundled JSON
-                has a passed rank/signature certificate.
+                Tumarkin lists 16 compact 5D Coxeter polytopes with 8 facets in{" "}
+                {tumarkinEightFacetSourceRef.locator}: 15 in the G11411 family
+                and one unique G12221 case. These entries are transcribed from
+                the source EPS artwork, their dotted weights are solved from the
+                determinant equations, and each bundled JSON has a passed
+                rank/signature certificate.
               </p>
               <div className="field">
                 <label htmlFor="eight-facet-catalogue-search">
@@ -6192,7 +6602,7 @@ export function App() {
                   onChange={(event) =>
                     setEightFacetCatalogueQuery(event.target.value)
                   }
-                  placeholder="G11411, 01, blocked, Table 4.10"
+                  placeholder="G11411, G12221, 01, Table 4.10"
                 />
               </div>
               <div className="field">
@@ -6206,7 +6616,7 @@ export function App() {
                     )
                   }
                 >
-                  <option value="all">All 15 entries</option>
+                  <option value="all">All 16 entries</option>
                   <option value="representative">
                     Representative gallery entries
                   </option>
@@ -6283,17 +6693,18 @@ export function App() {
               selectedVertexId={selectedNode?.id}
               assignmentLabel={quotientAssignment?.label}
               boundaryCheckSummary={
-                quotientBoundaryChecks
-                  ? `${quotientBoundaryChecks.checks.filter((check) => check.ok).length}/${quotientBoundaryChecks.checks.length} rank-two boundary checks passed`
+                quotientGameSummary
+                  ? `${quotientGameSummary.passedCellCount}/${quotientGameSummary.totalCellCount} rank-two boundary checks passed`
                   : "no quotient boundary checks"
               }
               incidentFlows={quotientIncidentFlows}
               localLinkHomology={localLinkHomology}
               topologyDiagnostics={topologyDiagnostics}
-              visibleCounts={{
-                nodes: sceneStats?.renderedNodes ?? viewNodes.length,
-                edges: sceneStats?.renderedEdgeSegments ?? viewEdges.length,
-                cells: sceneStats?.renderedCells ?? activeSceneCells.length,
+              sceneCountStore={viewerInteractionStore}
+              fallbackVisibleCounts={{
+                nodes: viewNodes.length,
+                edges: viewEdges.length,
+                cells: activeSceneCells.length,
               }}
               savedRunCount={savedExperiments.length}
               comparisonStatus={
@@ -6852,28 +7263,36 @@ export function App() {
             <Stat
               label="Nodes"
               value={
-                showingDerivedScene
-                  ? activeSceneVisibleNodeCount
-                  : (ball?.nodes.length ?? 0)
+                activeIsJnwStateQuotient && jnwSummary
+                  ? jnwSummary.states.length
+                  : showingDerivedScene
+                    ? activeSceneVisibleNodeCount
+                    : (ball?.nodes.length ?? 0)
               }
               testId="node-count"
             />
             <Stat
-              label="Edges"
+              label={activeIsJnwStateQuotient ? "Rails" : "Edges"}
               value={
-                showingDerivedScene
-                  ? activeSceneEdges.length
-                  : (ball?.edges.length ?? 0)
+                activeIsJnwStateQuotient && jnwSummary
+                  ? jnwSummary.edges.length
+                  : showingDerivedScene
+                    ? activeSceneEdges.length
+                    : (ball?.edges.length ?? 0)
               }
             />
             <Stat
               label="Cells"
               value={
-                showingGammaDefiningGraph
-                  ? 0
-                  : showingYGammaComplex
-                    ? activeSceneCells.length
-                    : visibleCells.length + visibleHigherProxies.length
+                activeIsJnwStateQuotient && jnwSummary
+                  ? jnwSummary.rankTwoDiagnostics.filter(
+                      (diagnostic) => diagnostic.ok,
+                    ).length
+                  : showingGammaDefiningGraph
+                    ? 0
+                    : showingYGammaComplex
+                      ? activeSceneCells.length
+                      : visibleCells.length + visibleHigherProxies.length
               }
               testId="rank-two-cell-count"
             />
@@ -6896,6 +7315,14 @@ export function App() {
                 ? " is-comparing"
                 : ""
             }`}
+            data-ygamma-scene-version={
+              showingYGammaComplex ? (yGammaSceneState.sceneVersion ?? "") : ""
+            }
+            data-ygamma-scene-pending={
+              showingYGammaComplex && yGammaSceneState.pending
+                ? "true"
+                : "false"
+            }
           >
             {viewerOnly ? (
               <button
@@ -6936,36 +7363,19 @@ export function App() {
                 </span>
               </div>
             ) : null}
-            {showingYGammaComplex && yGammaComparisonScenes ? (
-              <div
-                className="ygamma-comparison-grid"
-                aria-label="Coherent and expanded Y_Gamma drawing comparison"
-              >
-                <YGammaComparisonPane
-                  label="Coherent shared spine"
-                  testId="ygamma-comparison-left"
-                  scene={yGammaComparisonScenes.coherent}
-                  generators={system.generators}
-                  activeGeneratorPair={activeGeneratorPair}
-                  selectedCellId={selectedCellId}
-                  topologyMode={yGammaTopologyMode}
-                  colorScheme={colorScheme}
-                  focusSignal={focusSignal}
-                  onSelectCell={handleSceneSelectCell}
-                />
-                <YGammaComparisonPane
-                  label="Expanded readability"
-                  testId="ygamma-comparison-right"
-                  scene={yGammaComparisonScenes.expanded}
-                  generators={system.generators}
-                  activeGeneratorPair={activeGeneratorPair}
-                  selectedCellId={selectedCellId}
-                  topologyMode={yGammaTopologyMode}
-                  colorScheme={colorScheme}
-                  focusSignal={focusSignal}
-                  onSelectCell={handleSceneSelectCell}
-                />
-              </div>
+            {showingYGammaComplex && yGammaDrawingComparisonScene ? (
+              <YGammaCombinedComparisonView
+                scene={yGammaDrawingComparisonScene}
+                generators={system.generators}
+                activeGeneratorPair={activeGeneratorPair}
+                selectedCellId={selectedCellId}
+                topologyMode={yGammaTopologyMode}
+                colorScheme={colorScheme}
+                focusSignal={activeFocusSignal}
+                onCapturePngReady={handleCapturePngReady}
+                onRenderStats={handleSceneRenderStats}
+                onSelectCell={handleSceneSelectCell}
+              />
             ) : (
               <SceneView
                 nodes={activeSceneNodes}
@@ -7007,16 +7417,18 @@ export function App() {
                 }
                 resetSignal={resetSignal}
                 focusNodeId={activeSceneSelectedNodeId}
-                focusSignal={focusSignal}
+                focusSignal={activeFocusSignal}
                 maxNodeLabels={sceneMaxNodeLabels}
                 maxEdgeLabels={sceneMaxEdgeLabels}
-                pickingEnabled={!showingDerivedScene}
+                pickingEnabled={
+                  !showingDerivedScene || showingGammaDefiningGraph
+                }
                 workerGenerationMs={generation.generationMs}
                 colorScheme={colorScheme}
                 sceneLabel={`${currentModelBadge.label}: ${currentModelBadge.status}`}
                 layoutVersion={sceneLayoutSignal}
                 onCapturePngReady={handleCapturePngReady}
-                onRenderStats={setSceneStats}
+                onRenderStats={handleSceneRenderStats}
                 onHoverCell={
                   showingYGammaComplex ? setHoveredCellId : undefined
                 }
@@ -7131,7 +7543,9 @@ export function App() {
               system={sourceSystem ?? system}
               scene={gammaDefiningGraphScene}
               layoutMode={gammaLayoutMode}
+              selectedIncidence={selectedGammaIncidence}
               onLayoutMode={setGammaLayoutMode}
+              onSelectGenerator={setSelectedGammaGenerator}
             />
           ) : showingYGammaComplex && yGammaAtlas ? (
             <YGammaWhyPanel
@@ -7147,6 +7561,7 @@ export function App() {
               pairKeyValue={activeGeneratorPairKey}
               pairOptions={pairOptions}
               relationWalk={relationWalk}
+              context={activeIsJnwStateQuotient ? "jnw-cover" : "davis"}
             />
           )}
         </Panel>
@@ -7187,7 +7602,7 @@ export function App() {
                 system={system}
                 ball={ball ?? undefined}
                 davisIncidence={davisIncidence}
-                sceneStats={sceneStats}
+                sceneCountStore={viewerInteractionStore}
                 desktopStatus={desktopStatus}
                 desktopMessage={desktopMessage}
                 sessionDirty={sessionDirty}
@@ -7634,7 +8049,7 @@ function describeCurrentModel(input: {
     if (input.activeIsJnwStateQuotient) {
       return {
         label: "Quotient + Games",
-        status: "JNW state quotient / browser diagnostic",
+        status: "JNW move-kernel cover / in-repo diagnostic",
       };
     }
     return {
@@ -7784,12 +8199,16 @@ function DefiningGraphPanel({
   system,
   scene,
   layoutMode,
+  selectedIncidence,
   onLayoutMode,
+  onSelectGenerator,
 }: {
   system: CoxeterSystemInput;
   scene: DefiningGraphScene;
   layoutMode: DefiningGraphLayoutMode;
+  selectedIncidence?: DefiningGraphVertexIncidence;
   onLayoutMode: (mode: DefiningGraphLayoutMode) => void;
+  onSelectGenerator: (generator: number) => void;
 }) {
   const stateHighlightWarning = scene.warnings.find((warning) =>
     warning.includes("is highlighted on Gamma"),
@@ -7809,6 +8228,21 @@ function DefiningGraphPanel({
         a finite relation edge, including commuting m=2 pairs. Pairs with m=inf
         are omitted because they are not finite relations.
       </p>
+      <div className="field inline-field gamma-generator-picker">
+        <label htmlFor="gamma-generator-inspector">Inspect generator</label>
+        <select
+          id="gamma-generator-inspector"
+          aria-label="Inspect Gamma generator"
+          value={selectedIncidence?.generator ?? 0}
+          onChange={(event) => onSelectGenerator(Number(event.target.value))}
+        >
+          {system.generators.map((generator, index) => (
+            <option value={index} key={generator.id}>
+              {generator.label}
+            </option>
+          ))}
+        </select>
+      </div>
       <div
         className="segmented gamma-layout-toggle"
         role="group"
@@ -7869,6 +8303,18 @@ function DefiningGraphPanel({
           ) : null}
         </tbody>
       </table>
+      {selectedIncidence ? (
+        <GammaIncidencePartition
+          incidence={selectedIncidence}
+          onSelectGenerator={onSelectGenerator}
+        />
+      ) : null}
+      {scene.relationOrderComponents.length > 0 ? (
+        <GammaRelationOrderComponents
+          summaries={scene.relationOrderComponents}
+          onSelectGenerator={onSelectGenerator}
+        />
+      ) : null}
       <div className="topology-summary gamma-planarity-note">
         <span className="small-label">Why crossings remain</span>
         <strong>
@@ -7903,23 +8349,26 @@ function DefiningGraphPanel({
         </div>
       ) : null}
       {scene.records.length > 0 ? (
-        <ul className="plain-list">
-          {scene.records.slice(0, 12).map((record) => {
-            const left =
-              system.generators[record.sourceGenerator]?.label ??
-              `s${record.sourceGenerator}`;
-            const right =
-              system.generators[record.targetGenerator]?.label ??
-              `s${record.targetGenerator}`;
-            return (
-              <li key={record.id}>
-                <span className="matrix-key">
-                  {left}-{right}: {record.label}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+        <details className="advanced-details compact-details">
+          <summary>All finite relation edges ({scene.records.length})</summary>
+          <ul className="plain-list gamma-edge-record-list">
+            {scene.records.map((record) => {
+              const left =
+                system.generators[record.sourceGenerator]?.label ??
+                `s${record.sourceGenerator}`;
+              const right =
+                system.generators[record.targetGenerator]?.label ??
+                `s${record.targetGenerator}`;
+              return (
+                <li key={record.id}>
+                  <span className="matrix-key">
+                    {left}-{right}: {record.label}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </details>
       ) : (
         <p className="math-note">
           No finite rank-two relation edges are drawn. For example, a universal
@@ -7928,6 +8377,177 @@ function DefiningGraphPanel({
         </p>
       )}
     </div>
+  );
+}
+
+function GammaRelationOrderComponents({
+  summaries,
+  onSelectGenerator,
+}: {
+  summaries: DefiningGraphRelationOrderComponents[];
+  onSelectGenerator: (generator: number) => void;
+}) {
+  return (
+    <section
+      className="gamma-relation-components"
+      aria-label="Relation-order connected components"
+    >
+      <div className="gamma-relation-components-heading">
+        <div>
+          <span className="small-label">Monochromatic subgraphs</span>
+          <h4>Relation-order connected components</h4>
+        </div>
+        <span className="status-badge">{summaries.length} orders</span>
+      </div>
+      <p className="math-note gamma-partition-note">
+        Gamma_m keeps exactly the edges labelled m. A value required to agree
+        across every m-edge is constant on each component of Gamma_m.
+      </p>
+      <div className="gamma-relation-order-list">
+        {summaries.map((summary) => (
+          <div
+            className="gamma-relation-order"
+            aria-label={`${summary.label} connected components`}
+            key={summary.relationOrder}
+          >
+            <div className="gamma-relation-order-heading">
+              <span
+                className="gamma-legend-swatch"
+                style={{ backgroundColor: summary.color }}
+                aria-hidden="true"
+              />
+              <strong>{summary.label}</strong>
+              <span>
+                {summary.components.length} edge-bearing component
+                {summary.components.length === 1 ? "" : "s"};{" "}
+                {summary.edgeCount} edge{summary.edgeCount === 1 ? "" : "s"}
+              </span>
+            </div>
+            <ol className="plain-list gamma-component-list">
+              {summary.components.map((component, index) => (
+                <li key={component.id}>
+                  <span className="gamma-component-label">C{index + 1}</span>
+                  <span className="gamma-component-generators">
+                    {component.generators.map((generator, generatorIndex) => (
+                      <button
+                        type="button"
+                        className="gamma-neighbor-chip"
+                        key={generator}
+                        onClick={() => onSelectGenerator(generator)}
+                        title={`Inspect ${component.generatorLabels[generatorIndex]}`}
+                      >
+                        {component.generatorLabels[generatorIndex]}
+                      </button>
+                    ))}
+                  </span>
+                  <span className="small-label">
+                    {component.edgeIds.length} edge
+                    {component.edgeIds.length === 1 ? "" : "s"}
+                  </span>
+                </li>
+              ))}
+            </ol>
+            <p className="gamma-isolated-generators">
+              <strong>Isolated in Gamma_{summary.relationOrder}:</strong>{" "}
+              {summary.isolatedGeneratorLabels.length > 0
+                ? summary.isolatedGeneratorLabels.join(", ")
+                : "none"}
+            </p>
+          </div>
+        ))}
+      </div>
+      <p className="gamma-partition-check">
+        Each row, together with its isolated singleton generators, partitions
+        every generator exactly once.
+      </p>
+    </section>
+  );
+}
+
+function GammaIncidencePartition({
+  incidence,
+  onSelectGenerator,
+}: {
+  incidence: DefiningGraphVertexIncidence;
+  onSelectGenerator: (generator: number) => void;
+}) {
+  const nonemptyClasses = incidence.classes.filter(
+    (relationClass) => relationClass.neighbors.length > 0,
+  );
+  const classNames = nonemptyClasses.map((relationClass) =>
+    relationClass.entry === "inf"
+      ? `N_inf(${incidence.label})`
+      : `N_${relationClass.entry}(${incidence.label})`,
+  );
+
+  return (
+    <section
+      className="gamma-incidence-partition"
+      aria-label={`Incident relation partition for ${incidence.label}`}
+    >
+      <div className="gamma-incidence-heading">
+        <div>
+          <span className="small-label">Selected generator</span>
+          <h4>Incident relation classes for {incidence.label}</h4>
+        </div>
+        <span className="status-badge">
+          finite degree {incidence.finiteDegree}
+        </span>
+      </div>
+      <p className="math-note gamma-partition-note">
+        Each other generator has one Coxeter exponent with {incidence.label}.
+        Thus {classNames.join(", ")} form disjoint classes. The m=inf class is
+        listed for completeness but has no edge in Gamma.
+      </p>
+      <div className="gamma-incidence-classes">
+        {incidence.classes.map((relationClass) => (
+          <div
+            className={`gamma-incidence-class${
+              relationClass.drawnInGamma ? "" : " is-omitted"
+            }`}
+            key={relationClass.label}
+          >
+            <div className="gamma-incidence-class-heading">
+              <span
+                className="gamma-legend-swatch"
+                style={{ backgroundColor: relationClass.color }}
+                aria-hidden="true"
+              />
+              <strong>{relationClass.label}</strong>
+              <span>
+                {relationClass.neighbors.length} neighbor
+                {relationClass.neighbors.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            <div className="gamma-neighbor-list">
+              {relationClass.neighbors.length > 0 ? (
+                relationClass.neighbors.map((neighbor) => (
+                  <button
+                    type="button"
+                    className="gamma-neighbor-chip"
+                    key={neighbor.nodeId}
+                    onClick={() => onSelectGenerator(neighbor.generator)}
+                    title={`Inspect ${neighbor.label}`}
+                  >
+                    {neighbor.label}
+                  </button>
+                ))
+              ) : (
+                <span className="small-label">none</span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p
+        className="gamma-partition-check"
+        data-partition-complete={incidence.isCompletePartition}
+      >
+        {incidence.isCompletePartition
+          ? `Partition check: all ${incidence.totalOtherGenerators} other generators are accounted for exactly once.`
+          : `Partition incomplete: ${incidence.accountedNeighborCount} of ${incidence.totalOtherGenerators} other generators are accounted for.`}
+      </p>
+    </section>
   );
 }
 
@@ -7950,7 +8570,8 @@ function ResearchWorkflowPanel({
   incidentFlows,
   localLinkHomology,
   topologyDiagnostics,
-  visibleCounts,
+  sceneCountStore,
+  fallbackVisibleCounts,
   savedRunCount,
   comparisonStatus,
   onSetStep,
@@ -7974,7 +8595,8 @@ function ResearchWorkflowPanel({
   incidentFlows: ReturnType<typeof classifyIncidentEdges>;
   localLinkHomology?: LocalLinkHomologySummary;
   topologyDiagnostics?: ReturnType<typeof summarizeTopologyDiagnostics>;
-  visibleCounts: { nodes: number; edges: number; cells: number };
+  sceneCountStore: ViewerInteractionStore;
+  fallbackVisibleCounts: SceneCountSnapshot;
   savedRunCount: number;
   comparisonStatus: string;
   onSetStep: (stepId: ResearchWorkflowStepId) => void;
@@ -7987,6 +8609,17 @@ function ResearchWorkflowPanel({
   onCompare: () => void;
   onExport: () => void;
 }) {
+  const sceneCounts = useViewerInteractionSelector(
+    sceneCountStore,
+    "renderStats",
+    selectSceneCounts,
+    sameSceneCounts,
+  );
+  const visibleCounts = {
+    nodes: sceneCounts.nodes || fallbackVisibleCounts.nodes,
+    edges: sceneCounts.edges || fallbackVisibleCounts.edges,
+    cells: sceneCounts.cells || fallbackVisibleCounts.cells,
+  };
   const steps = researchWorkflowSteps();
   const stepIndex = steps.findIndex((step) => step.id === state.stepId);
   const lensCounts = incidentFlows.reduce(
@@ -8232,22 +8865,25 @@ function RelationFocusPanel({
   pairKeyValue,
   pairOptions,
   relationWalk,
+  context = "davis",
 }: {
   cell?: DavisTwoCell;
   pairKeyValue?: string;
   pairOptions: ReturnType<typeof rankTwoPairDiagnostics>;
   relationWalk: ReturnType<typeof relationWalkEntries>;
+  context?: "davis" | "jnw-cover";
 }) {
   const option = pairOptions.find(
     (entry) =>
       entry.key === (cell ? pairKey(cell.generatorPair) : pairKeyValue),
   );
 
-  if (!option) {
+  if (!option || (context === "jnw-cover" && !cell)) {
     return (
       <p className="math-note">
-        Pick a finite generator pair in the pair matrix to isolate one rank-two
-        relation.
+        {context === "jnw-cover"
+          ? "Choose Read relation in the JNW Reader to isolate one lifted relation boundary."
+          : "Pick a finite generator pair in the relation atlas to isolate one rank-two relation."}
       </p>
     );
   }
@@ -8256,8 +8892,12 @@ function RelationFocusPanel({
     <>
       <p className="math-note">
         Pair <strong>{option.label}</strong> has <strong>m={option.m}</strong>,
-        so the Davis rank-two cell is a <strong>{option.polygonLabel}</strong>{" "}
-        with {option.boundaryLength} alternating generator edges.
+        so{" "}
+        {context === "jnw-cover"
+          ? "each lifted relation cell"
+          : "the Davis rank-two cell"}{" "}
+        is a <strong>{option.polygonLabel}</strong> with {option.boundaryLength}{" "}
+        alternating generator edges.
       </p>
       <p className="math-note">
         Visible cells: {option.visibleCount}/{option.totalCount}
@@ -8791,9 +9431,7 @@ function YGammaMiniAtlasOverlay({
   );
 }
 
-function YGammaComparisonPane({
-  label,
-  testId,
+function YGammaCombinedComparisonView({
   scene,
   generators,
   activeGeneratorPair,
@@ -8801,17 +9439,19 @@ function YGammaComparisonPane({
   topologyMode,
   colorScheme,
   focusSignal,
+  onCapturePngReady,
+  onRenderStats,
   onSelectCell,
 }: {
-  label: string;
-  testId: string;
-  scene: YGamma2SkeletonScene;
+  scene: YGammaDrawingComparisonScene;
   generators: SceneGenerator[];
   activeGeneratorPair?: [number, number];
   selectedCellId?: string;
   topologyMode: boolean;
   colorScheme: "light" | "dark";
   focusSignal: number;
+  onCapturePngReady: (capture: (() => Promise<string>) | undefined) => void;
+  onRenderStats: (stats: SceneRenderStats) => void;
   onSelectCell: (cellId: string) => void;
 }) {
   const revisionSet = useMemo(
@@ -8821,7 +9461,7 @@ function YGammaComparisonPane({
         edges: scene.edges,
         cells: scene.cells,
         appearanceParts: [
-          `comparison:${label}`,
+          "comparison:coherent-expanded",
           `selected-cell:${selectedCellId ?? ""}`,
           `pair:${activeGeneratorPair ? pairKey(activeGeneratorPair) : ""}`,
           `topology:${topologyMode}`,
@@ -8829,19 +9469,36 @@ function YGammaComparisonPane({
         ],
         labelParts: [`edge-labels:${scene.edges.length}`],
       }),
-    [
-      activeGeneratorPair,
-      colorScheme,
-      label,
-      scene,
-      selectedCellId,
-      topologyMode,
-    ],
+    [activeGeneratorPair, colorScheme, scene, selectedCellId, topologyMode],
+  );
+  const selectSourceCell = useCallback(
+    (renderedCellId: string) =>
+      onSelectCell(
+        scene.sourceCellIdByRenderedId.get(renderedCellId) ?? renderedCellId,
+      ),
+    [onSelectCell, scene],
   );
 
   return (
-    <div className="ygamma-comparison-pane" data-testid={testId}>
-      <span className="small-label">{label}</span>
+    <div
+      className="ygamma-comparison-grid is-shared-canvas"
+      aria-label="Coherent and expanded Y_Gamma drawing comparison"
+      data-testid="ygamma-comparison-scene"
+    >
+      <div
+        className="ygamma-comparison-pane-label is-left"
+        data-testid="ygamma-comparison-left"
+      >
+        <strong>Coherent shared spine</strong>
+        <span>Shared incidence, no visual separation</span>
+      </div>
+      <div
+        className="ygamma-comparison-pane-label is-right"
+        data-testid="ygamma-comparison-right"
+      >
+        <strong>Expanded readability</strong>
+        <span>The same incidence with drawing-only separation</span>
+      </div>
       <SceneView
         nodes={scene.nodes}
         edges={scene.edges}
@@ -8871,12 +9528,19 @@ function YGammaComparisonPane({
         maxEdgeLabels={Math.max(scene.edges.length, 160)}
         pickingEnabled
         colorScheme={colorScheme}
-        sceneLabel={label}
-        onSelectNode={() => undefined}
-        onSelectCell={onSelectCell}
+        sceneLabel="Coherent and expanded Y_Gamma drawing comparison"
+        onCapturePngReady={onCapturePngReady}
+        onRenderStats={onRenderStats}
+        onSelectNode={ignoreSceneNodeSelection}
+        onSelectCell={selectSourceCell}
       />
     </div>
   );
+}
+
+function ignoreSceneNodeSelection() {
+  // Comparison mode reads relation cells; its duplicated drawing nodes are not
+  // separate mathematical selections.
 }
 
 function YGammaWhyPanel({
@@ -9513,11 +10177,59 @@ function generatorPalette(index: number): string {
   return colors[index % colors.length];
 }
 
+function QuotientImportProgress({
+  client,
+}: {
+  client: QuotientValidationClient;
+}) {
+  const progress = useSyncExternalStore(
+    client.subscribe,
+    client.getSnapshot,
+    client.getSnapshot,
+  );
+  if (progress.stage === "idle") {
+    return null;
+  }
+
+  const percent = Math.round(progress.progress * 100);
+  const running =
+    progress.stage === "reading" ||
+    progress.stage === "parsing" ||
+    progress.stage === "validating";
+  return (
+    <div
+      className={`quotient-import-progress is-${progress.stage}`}
+      data-testid="quotient-import-progress"
+      role={progress.stage === "failed" ? "alert" : "status"}
+    >
+      <div className="quotient-import-progress-heading">
+        <strong>{running ? "Checking quotient" : "Quotient import"}</strong>
+        <span>{running ? `${percent}%` : progress.stage}</span>
+      </div>
+      <progress
+        max={1}
+        value={progress.progress}
+        aria-label={progress.message}
+      />
+      <span>{progress.message}</span>
+      {running ? (
+        <button
+          type="button"
+          className="button subtle"
+          onClick={() => client.cancel()}
+        >
+          Cancel
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function ResearchStatusPanel({
   system,
   ball,
   davisIncidence,
-  sceneStats,
+  sceneCountStore,
   desktopStatus,
   desktopMessage,
   sessionDirty,
@@ -9528,7 +10240,7 @@ function ResearchStatusPanel({
   system: CoxeterSystemInput;
   ball?: GeneratedCayleyBall;
   davisIncidence?: import("../types").DavisIncidencePoset;
-  sceneStats: SceneRenderStats | null;
+  sceneCountStore: ViewerInteractionStore;
   desktopStatus: DesktopBridgeStatus | null;
   desktopMessage: string | null;
   sessionDirty: boolean;
@@ -9536,6 +10248,12 @@ function ResearchStatusPanel({
   desktopTools: readonly ExternalToolStatus[];
   desktopJobs: readonly DesktopJobRecord[];
 }) {
+  const sceneCounts = useViewerInteractionSelector(
+    sceneCountStore,
+    "renderStats",
+    selectSceneCounts,
+    sameSceneCounts,
+  );
   const status = system.dataStatus ?? "toy";
   const certification =
     ball?.metadata.certification?.status ??
@@ -9587,9 +10305,7 @@ function ResearchStatusPanel({
           <li>
             <span className="subset-rank">scene</span>
             <span>
-              {sceneStats
-                ? `${sceneStats.renderedNodes} nodes, ${sceneStats.renderedEdgeSegments} edges`
-                : "not sampled"}
+              {sceneCounts.nodes} nodes, {sceneCounts.edges} edges
             </span>
           </li>
         </ul>
@@ -10363,7 +11079,7 @@ function QuotientGamePanel({
   jnwSourceSystem: CoxeterSystemInput;
   jnwMoveSystem: JnwMoveSystem;
   jnwInitialState: JnwState;
-  jnwSummary: JnwLegalOrbitSummary;
+  jnwSummary?: JnwLegalOrbitSummary;
   jnwSelectedStateId?: string;
   jnwSelectedRelationId?: string;
   jnwLayerBreadcrumb?: import("../game").JnwLayerBreadcrumb;
@@ -10437,7 +11153,7 @@ function QuotientGamePanel({
           onPreset={onPreset}
           onFocusCell={onFocusCell}
         />
-      ) : (
+      ) : jnwSummary ? (
         <JnwLegalSystemPanel
           system={jnwSourceSystem}
           moveSystem={jnwMoveSystem}
@@ -10471,6 +11187,8 @@ function QuotientGamePanel({
             onJnwQuotientConstructionStageChange
           }
         />
+      ) : (
+        <p className="math-note">Preparing the selected JNW move system.</p>
       )}
     </>
   );
@@ -10867,7 +11585,8 @@ function JnwLegalSystemPanel({
   const linkLensActive =
     readerLens === "ascending-link" ||
     readerLens === "descending-link" ||
-    readerLens === "level-link";
+    readerLens === "level-link" ||
+    readerLens === "full-link";
   const workflowSteps: Array<{
     id: string;
     label: string;
@@ -10888,7 +11607,7 @@ function JnwLegalSystemPanel({
     },
     {
       id: "quotient",
-      label: "State quotient",
+      label: moveSystemIsJnw21Preset ? "Move-kernel cover" : "State orbit",
       status:
         readerLens === "state" || readerLens === "none" ? "active" : "complete",
       detail: `${summary.states.length} states, ${summary.edges.length} rails`,
@@ -10960,12 +11679,28 @@ function JnwLegalSystemPanel({
               strongly legal.
             </dd>
           </div>
+          {moveSystemIsJnw21Preset ? (
+            <>
+              <div>
+                <dt>Cover map</dt>
+                <dd>
+                  Four lifts over Y_Gamma; {summary.edges.length} geometric
+                  rails and {closedDiagnostics.length} square cells.
+                </dd>
+              </div>
+              <div>
+                <dt>JNW21 commutator cover</dt>
+                <dd>256 vertices; not the compact cover shown here.</dd>
+              </div>
+            </>
+          ) : null}
         </dl>
       </div>
       <p className="math-note reader-kicker">
-        You are reading four local <span className="matrix-key">Y_Gamma</span>{" "}
-        charts glued by generator moves. Use the controls below as a path:
-        choose a state, read a relation, then inspect a link.
+        You are reading four lifts of the{" "}
+        <span className="matrix-key">Y_Gamma</span> fundamental domain, glued
+        along generator faces in the move-kernel cover. Choose a state, read a
+        relation, then inspect its link.
       </p>
       <JnwStateGammaDiagramView
         diagram={selectedStateDiagram}
@@ -11007,7 +11742,9 @@ function JnwLegalSystemPanel({
               className="button primary"
               onClick={() => onOpenStateQuotient(selectedOrbitState?.id)}
             >
-              Show JNW state quotient
+              {summary.rightAngled && summary.states.length === 4
+                ? "Show four-state cover"
+                : "Show state-orbit model"}
             </button>
           </div>
           <div className="chip-grid">
@@ -11152,14 +11889,14 @@ function JnwLegalSystemPanel({
               aria-pressed={readerMode === "exact-skeleton"}
               onClick={() => onReaderModeChange("exact-skeleton")}
             >
-              Exact state skeleton
+              Exact cover 1-skeleton
             </button>
             <button
               type="button"
               aria-pressed={readerMode === "readable-chart"}
               onClick={() => onReaderModeChange("readable-chart")}
             >
-              Readable quotient drawing
+              Four-chart cover drawing
             </button>
           </div>
           <div
@@ -11273,7 +12010,7 @@ function JnwLegalSystemPanel({
             </span>
           </article>
           <article>
-            <strong>JNW state quotient local link</strong>
+            <strong>JNW move-kernel cover local link</strong>
             <span>
               Selected state {selectedStateName}
               {selectedStateSubsetLabel !== "none"
@@ -11327,7 +12064,7 @@ function JnwLegalSystemPanel({
             layerBreadcrumb?.items ?? [
               "Coxeter system Gamma",
               "Y_Gamma fundamental domain",
-              "JNW state quotient",
+              "JNW move-kernel cover",
               `link at state ${selectedStateName}`,
             ]
           ).map((item, index, items) => (
@@ -11341,16 +12078,16 @@ function JnwLegalSystemPanel({
         </div>
         <p className="math-note">
           Ascending, descending, and level links below are links at the selected
-          state vertex in the derived state quotient. They are not drawn as
-          ambient links in the universal Davis complex. In the 3D state
-          quotient, each <span className="matrix-key">S_i</span> is a state
-          vertex, each generator-labeled rail is the move{" "}
+          state vertex in the derived move-kernel cover. They are not drawn as
+          ambient links in the universal Davis complex. In the 3D state cover,
+          each <span className="matrix-key">S_i</span> is a state vertex, each
+          generator-labeled rail is the move{" "}
           <span className="matrix-key">S_i {"->"} S_i + m_g</span>, and each
           relation face is the alternating state cycle for a commuting pair
           drawn on separated rails. Highlighted Gamma vertices record which
           defining-graph vertices lie in the selected state. This is the visual
           bridge: <span className="matrix-key">Y_Gamma</span> supplies the local
-          generator/relation data, and the JNW state quotient records how the
+          generator/relation data, and the move-kernel cover records how the
           move system orients that data at each state.
         </p>
         <div className="button-row">
@@ -11387,14 +12124,16 @@ function JnwLegalSystemPanel({
             className="button primary"
             onClick={() => onOpenStateQuotient(selectedOrbitState?.id)}
           >
-            Show JNW state quotient
+            {summary.rightAngled && summary.states.length === 4
+              ? "Show four-state cover"
+              : "Show state-orbit model"}
           </button>
         </div>
         <div
           className="jnw-reader-controls"
           aria-label="Advanced reader details"
         >
-          <strong>JNW State Quotient Reader</strong>
+          <strong>JNW Four-State Cover Reader</strong>
           <span className="reader-kicker">
             {summary.states.length} state vertices, {summary.edges.length}{" "}
             generator edges,{" "}
@@ -11414,27 +12153,27 @@ function JnwLegalSystemPanel({
               <dd>labeled quotient rail</dd>
             </div>
             <div>
-              <dt>small g bead</dt>
-              <dd>drawing handle for a local chart</dd>
+              <dt>small rail bead</dt>
+              <dd>shared subdivision midpoint of one generator rail</dd>
             </div>
             <div>
-              <dt>square face</dt>
-              <dd>commuting relation cycle</dd>
+              <dt>small center bead</dt>
+              <dd>shared center of one commuting relation square</dd>
             </div>
             <div>
-              <dt>state color</dt>
-              <dd>local chart/star at S_i</dd>
+              <dt>colored sector</dt>
+              <dd>one cell sector owned by the Y_Gamma lift at S_i</dd>
             </div>
           </dl>
           <p className="math-note">
-            You are reading one quotient object. The state vertices and
-            generator-labeled rails form the quotient 1-skeleton; relation faces
-            attach along the same exact state cycles, but are drawn on separated
-            chart rails so the four local charts do not collapse into one blob.
-            A local <span className="matrix-key">Y_Gamma</span> chart at{" "}
-            <span className="matrix-key">S_i</span> means the visible generator
-            star and relation sheets incident to that state inside this one
-            glued quotient object.
+            This is one cover, not four detached diagrams. The state vertices
+            and generator-labeled rails are its exact 1-skeleton. Each rail is
+            split at one shared midpoint, and each relation square at one shared
+            center. The colored sectors meeting{" "}
+            <span className="matrix-key">S_i</span> form the visible lift of the{" "}
+            <span className="matrix-key">Y_Gamma</span> fundamental domain based
+            at that state. Shared midpoint and center vertices show where the
+            four lifts are glued.
           </p>
         </div>
         <h4>Initial state</h4>
@@ -11672,6 +12411,9 @@ function jnwReaderLensForTopologyLens(
   if (lensId === "level-link") {
     return "level-link";
   }
+  if (lensId === "full-local-link") {
+    return "full-link";
+  }
   return fallback;
 }
 
@@ -11683,6 +12425,7 @@ function isJnwStateQuotient(
   }
   return (
     quotient.name.toLowerCase().includes("jnw state quotient") ||
+    quotient.name.toLowerCase().includes("jnw move-kernel cover") ||
     quotient.game?.assignments.some(
       (assignment) => assignment.id === "jnw-state-directions",
     ) === true
@@ -11822,7 +12565,7 @@ function topologyLensLabel(lensId: TopologyLensId): string {
     case "full-local-link":
       return "Full local link at selected state";
     case "state-quotient-orbit":
-      return "JNW state quotient";
+      return "JNW move-kernel cover";
     default:
       return "State-quotient link at selected state";
   }

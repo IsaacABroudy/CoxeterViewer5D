@@ -42,10 +42,19 @@ import {
   certifyVisibleTorsionFree,
   parseQuotientComplex,
   quotientManifoldStatus,
+  QuotientValidationCancelledError,
   validateQuotientComplex,
+  validateQuotientComplexProgressive,
 } from "../src/quotient";
 import { browserApproxBackend } from "../src/cayley";
-import type { QuotientComplex } from "../src/quotient";
+import type {
+  QuotientComplex,
+  QuotientValidationProgress,
+} from "../src/quotient";
+import {
+  quotientValidationTransferables,
+  type QuotientValidationWorkerRequest,
+} from "../src/app/quotientValidationWorkerTypes";
 import type { CoxeterSystemInput } from "../src/types";
 
 const createdAt = "2026-01-01T00:00:00.000Z";
@@ -257,7 +266,132 @@ function oneVertexI2Quotient(): QuotientComplex {
   };
 }
 
+function largeRankOneQuotient(vertexCount = 256): QuotientComplex {
+  if (vertexCount % 2 !== 0) {
+    throw new Error("Rank-one quotient fixture requires an even vertex count.");
+  }
+
+  const vertices = Array.from({ length: vertexCount }, (_unused, index) => ({
+    id: `q${index}`,
+  }));
+  const images: Record<string, string> = {};
+  const edges = vertices.map((vertex, index) => {
+    const targetIndex = index % 2 === 0 ? index + 1 : index - 1;
+    const targetId = `q${targetIndex}`;
+    images[vertex.id] = targetId;
+    return {
+      id: `g0:${vertex.id}->${targetId}`,
+      source: vertex.id,
+      target: targetId,
+      generator: 0,
+      inverseEdgeId: `g0:${targetId}->${vertex.id}`,
+    };
+  });
+
+  return {
+    schemaVersion: 1,
+    name: `Rank-one quotient on ${vertexCount} states`,
+    generatorRank: 1,
+    vertices,
+    edges,
+    permutationAction: [{ generator: 0, images }],
+    twoCells: [],
+  };
+}
+
 describe("quotient preparation validators", () => {
+  it("keeps progressive validation identical to synchronous validation", async () => {
+    const valid = largeRankOneQuotient();
+    const broken: QuotientComplex = {
+      ...valid,
+      edges: valid.edges.map((edge, index) =>
+        index === 3 ? { ...edge, inverseEdgeId: "missing" } : edge,
+      ),
+      permutationAction: valid.permutationAction?.map((action) => ({
+        ...action,
+        images: { ...action.images, q7: "missing" },
+      })),
+    };
+
+    await expect(
+      validateQuotientComplexProgressive(valid, {
+        chunkSize: 11,
+        yieldControl: () => Promise.resolve(),
+      }),
+    ).resolves.toEqual(validateQuotientComplex(valid));
+    await expect(
+      validateQuotientComplexProgressive(broken, {
+        chunkSize: 13,
+        yieldControl: () => Promise.resolve(),
+      }),
+    ).resolves.toEqual(validateQuotientComplex(broken));
+  });
+
+  it("reports bounded progress and observes cancellation between chunks", async () => {
+    const progress: QuotientValidationProgress[] = [];
+    const valid = largeRankOneQuotient(128);
+    const result = await validateQuotientComplexProgressive(valid, {
+      chunkSize: 7,
+      onProgress: (entry) => progress.push(entry),
+      yieldControl: () => Promise.resolve(),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(progress[0]).toMatchObject({ phase: "root", completed: 0 });
+    expect(progress.at(-1)).toMatchObject({
+      phase: "complete",
+      phaseProgress: 1,
+      overallProgress: 1,
+    });
+    expect(
+      progress.filter((entry) => entry.phase === "vertices").length,
+    ).toBeGreaterThan(2);
+    expect(
+      progress.every(
+        (entry) => entry.phaseProgress >= 0 && entry.phaseProgress <= 1,
+      ),
+    ).toBe(true);
+
+    const abortController = new AbortController();
+    let yieldCount = 0;
+    await expect(
+      validateQuotientComplexProgressive(largeRankOneQuotient(512), {
+        chunkSize: 5,
+        signal: abortController.signal,
+        yieldControl: async () => {
+          yieldCount += 1;
+          if (yieldCount === 3) {
+            abortController.abort();
+          }
+          await Promise.resolve();
+        },
+      }),
+    ).rejects.toBeInstanceOf(QuotientValidationCancelledError);
+    expect(yieldCount).toBe(3);
+  });
+
+  it("defines transferred buffers as the preferred worker payload", () => {
+    const jsonBuffer = new TextEncoder().encode(
+      JSON.stringify(largeRankOneQuotient(4)),
+    ).buffer;
+    const request: QuotientValidationWorkerRequest = {
+      type: "validate-quotient-json",
+      requestId: 17,
+      jsonBuffer,
+      chunkSize: 64,
+    };
+
+    expect(request).toMatchObject({
+      type: "validate-quotient-json",
+      requestId: 17,
+    });
+    expect("jsonText" in request).toBe(false);
+    expect(quotientValidationTransferables(request)).toEqual([jsonBuffer]);
+    expect(new TextDecoder().decode(request.jsonBuffer)).toContain(
+      "Rank-one quotient on 4 states",
+    );
+  });
+
   it("catches broken edge pairings and cell vertex references", () => {
     const broken: QuotientComplex = {
       ...validQuotient(),
@@ -806,7 +940,7 @@ describe("game and PL Morse preparation helpers", () => {
     const moveSystem = createBipartiteJnwMoveSystem(JNW_CUBE_INPUT);
     expect(moveSystem).toBeDefined();
 
-    const initialState = createJnwState([0, 1, 2, 5]);
+    const initialState = createJnwState([0, 2, 6, 7]);
     const summary = summarizeJnwLegalSystem(
       JNW_CUBE_INPUT,
       moveSystem!,
@@ -823,6 +957,27 @@ describe("game and PL Morse preparation helpers", () => {
 
     const quotient = jnwOrbitToQuotientComplex(JNW_CUBE_INPUT, summary);
     expect(quotient.vertices).toHaveLength(4);
+    expect(quotient.edges).toHaveLength(32);
+    expect(
+      new Set(quotient.edges.flatMap((edge) => [edge.id, edge.inverseEdgeId]))
+        .size,
+    ).toBe(32);
+    expect(quotient.twoCells).toHaveLength(12);
+    expect(validateQuotientComplex(quotient).ok).toBe(true);
+    expect(quotient.coverProjection).toMatchObject({
+      kind: "jnw-move-kernel",
+      deckGroupOrder: 4,
+      status: "in-repo-checked",
+      checks: {
+        totalGeneratorAction: true,
+        involutiveGeneratorAction: true,
+        relationBoundariesClose: true,
+        projectionPreservesLabels: true,
+      },
+    });
+    expect(
+      Object.keys(quotient.coverProjection?.edgeImages ?? {}),
+    ).toHaveLength(32);
     expect(quotient.sourceSystem?.name).toBe(JNW_CUBE_INPUT.name);
     expect(quotient.game?.notes?.join(" ")).toContain("jnw-faithful");
     expect(quotient.vertices.map((vertex) => vertex.label).sort()).toEqual([
@@ -842,7 +997,35 @@ describe("game and PL Morse preparation helpers", () => {
         "Ascending link at selected state",
         summary,
       ).items.join(" -> "),
-    ).toContain("Y_Gamma fundamental domain -> JNW state quotient");
+    ).toContain("Y_Gamma fundamental domain -> JNW move-kernel cover");
+  });
+
+  it("rejects stale or incomplete JNW cover projection maps", () => {
+    const moveSystem = createBipartiteJnwMoveSystem(JNW_CUBE_INPUT)!;
+    const summary = summarizeJnwLegalSystem(
+      JNW_CUBE_INPUT,
+      moveSystem,
+      createJnwState([0, 2, 6, 7]),
+    );
+    const quotient = jnwOrbitToQuotientComplex(JNW_CUBE_INPUT, summary);
+    const [firstEdgeId] = Object.keys(
+      quotient.coverProjection?.edgeImages ?? {},
+    );
+    const edgeImages = { ...(quotient.coverProjection?.edgeImages ?? {}) };
+    delete edgeImages[firstEdgeId];
+
+    const result = validateQuotientComplex({
+      ...quotient,
+      coverProjection: {
+        ...quotient.coverProjection,
+        edgeImages,
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toContain(
+      `coverProjection.edgeImages["${firstEdgeId}"]`,
+    );
   });
 
   it("marks non-right-angled JNW diagnostics as experimental", () => {

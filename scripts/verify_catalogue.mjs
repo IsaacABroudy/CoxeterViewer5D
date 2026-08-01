@@ -224,8 +224,8 @@ function verifyEightFacetCatalogue(errors, file, catalogue) {
   if (catalogue.sourceRef?.id !== "tumarkin-2007-n-plus-3") {
     fail(errors, file, "sourceRef must cite Tumarkin Table 4.10.");
   }
-  if (!Array.isArray(catalogue.entries) || catalogue.entries.length !== 15) {
-    fail(errors, file, "catalogue must contain exactly 15 entries.");
+  if (!Array.isArray(catalogue.entries) || catalogue.entries.length !== 16) {
+    fail(errors, file, "catalogue must contain exactly 16 entries.");
     return;
   }
 
@@ -242,7 +242,7 @@ function verifyEightFacetCatalogue(errors, file, catalogue) {
     if (
       entry.dimension !== 5 ||
       entry.facets !== 8 ||
-      entry.galeDiagram !== "G11411"
+      !["G11411", "G12221"].includes(entry.galeDiagram)
     ) {
       fail(errors, file, `entry ${entry.id} has wrong compact 5D metadata.`);
     }
@@ -264,7 +264,10 @@ function verifyEightFacetCatalogue(errors, file, catalogue) {
         `entry ${entry.id} must carry a passed Tumarkin checker certificate.`,
       );
     }
-    const expectedExample = `tumarkin_5d_8facet_g11411_${String(entry.tableIndex).padStart(2, "0")}.json`;
+    const expectedExample =
+      entry.galeDiagram === "G12221"
+        ? "tumarkin_5d_8facet_g12221_01.json"
+        : `tumarkin_5d_8facet_g11411_${String(entry.tableIndex).padStart(2, "0")}.json`;
     if (entry.exampleFile !== expectedExample) {
       fail(errors, file, `entry ${entry.id} must point at ${expectedExample}.`);
     } else {
@@ -287,6 +290,23 @@ function verifyEightFacetCatalogue(errors, file, catalogue) {
       errors,
       file,
       "representative catalogue entries must be 1, 8, and 15.",
+    );
+  }
+  const g11411Entries = catalogue.entries.filter(
+    (entry) => entry.galeDiagram === "G11411",
+  );
+  const g12221Entries = catalogue.entries.filter(
+    (entry) => entry.galeDiagram === "G12221",
+  );
+  if (
+    g11411Entries.length !== 15 ||
+    g12221Entries.length !== 1 ||
+    g12221Entries[0]?.tableIndex !== 16
+  ) {
+    fail(
+      errors,
+      file,
+      "catalogue must contain 15 G11411 entries and the unique G12221 entry at source index 16.",
     );
   }
 }
@@ -318,7 +338,7 @@ const result = {
   checked: {
     examples: examples.length,
     generated: generated.length,
-    eightFacetCatalogueEntries: 15,
+    eightFacetCatalogueEntries: 16,
   },
   errors,
 };

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Certify Tumarkin's 5D eight-facet ``G11411`` examples.
+"""Certify Tumarkin's compact 5D eight-facet examples.
 
 The source diagrams are transcribed from the arXiv EPS file for Table 4.10 and
 stored in ``scripts/data/tumarkin_8facet_transcription.json``.  The table hides
 the dotted-edge labels, so this checker solves the determinant equations
-described in Lemma 4.7: each seven-node extension has determinant zero, and the
-full normal Gram matrix has rank six and inertia ``(5, 1, 2)``.
+described in the dimension-five classification: each seven-node extension has
+determinant zero, and the full normal Gram matrix has rank six and inertia
+``(5, 1, 2)``.  Entries 1--15 are the ``G11411`` family; entry 16 is the
+unique ``G12221`` case.
 
 The JSON examples produced by ``--write-examples`` store dotted weights as
 minimal-polynomial data plus decimal caches.  The formulas used internally by
@@ -26,7 +28,7 @@ from typing import Any
 
 import sympy as sp
 
-from tumarkin_8facet_solve import build_gram, solve_g11411_path
+from tumarkin_8facet_solve import build_gram, rank_equations, solve_g11411_path
 
 
 BACKEND = "tumarkin8FacetExactChecker"
@@ -34,6 +36,7 @@ BACKEND_VERSION = "1.0.0"
 SOURCE_REF_ID = "tumarkin-2007-n-plus-3"
 TRANSCRIPTION_PATH = Path("scripts/data/tumarkin_8facet_transcription.json")
 EXPECTED_SIGNATURE = {"positive": 5, "negative": 1, "zero": 2}
+G12221_SOURCE_WEIGHT = sp.sqrt(2) * (sp.sqrt(5) + 1) / 4
 EXACT_REAL_CACHE: dict[str, dict[str, Any]] = {}
 
 
@@ -41,8 +44,8 @@ SOURCE_REF = {
     "id": SOURCE_REF_ID,
     "citation": "Pavel Tumarkin, Compact Hyperbolic Coxeter n-Polytopes with n+3 Facets, Electronic Journal of Combinatorics 14 (2007), R69.",
     "url": "https://www.combinatorics.org/ojs/index.php/eljc/article/view/v14i1r69",
-    "locator": "Lemma 4.7 and Table 4.10",
-    "notes": "Lemma 4.7 states that there are 15 compact hyperbolic Coxeter 5-polytopes with 8 facets and Gale diagram G11411. The repository transcription is taken from the arXiv EPS artwork pic/5/5_n.eps.",
+    "locator": "Dimension 5 classification and Table 4.10",
+    "notes": "Tumarkin lists one compact 5D eight-facet case with Gale diagram G12221 and 15 with Gale diagram G11411. The repository transcription is taken from the arXiv EPS artwork pic/5/5_n.eps.",
 }
 
 
@@ -68,7 +71,32 @@ def load_transcriptions() -> list[dict[str, Any]]:
     diagrams = data.get("diagrams")
     if not isinstance(diagrams, list):
         raise ValueError("transcription file must contain a diagrams array")
-    return [diagram for diagram in diagrams if 1 <= int(diagram["diagramIndex"]) <= 15]
+    return [diagram for diagram in diagrams if 1 <= int(diagram["diagramIndex"]) <= 16]
+
+
+def diagram_identity(diagram: dict[str, Any]) -> dict[str, Any]:
+    """Return the source family and stable file identity for one table diagram."""
+
+    source_index = int(diagram["diagramIndex"])
+    if 1 <= source_index <= 15:
+        return {
+            "family": "G11411",
+            "familyIndex": source_index,
+            "stem": f"tumarkin_5d_8facet_g11411_{source_index:02d}",
+            "name": f"Tumarkin 5D eight-facet G11411 #{source_index:02d}",
+            "locator": f"Lemma 4.7 and Table 4.10, G11411 diagram {source_index} of 15",
+            "expectedDottedWeights": 3,
+        }
+    if source_index == 16:
+        return {
+            "family": "G12221",
+            "familyIndex": 1,
+            "stem": "tumarkin_5d_8facet_g12221_01",
+            "name": "Tumarkin 5D eight-facet G12221 (unique)",
+            "locator": "Dimension 5 unique Gale diagram D10 case and Table 4.10, G12221 diagram",
+            "expectedDottedWeights": 1,
+        }
+    raise ValueError(f"unsupported Tumarkin transcription index {source_index}")
 
 
 def exact_real(expr: sp.Expr) -> dict[str, Any]:
@@ -232,6 +260,38 @@ def numerical_signature(diagram: dict[str, Any], solution: dict[sp.Symbol, sp.Ex
     }
 
 
+def solve_dotted_weights(diagram: dict[str, Any]) -> dict[sp.Symbol, sp.Expr]:
+    """Solve the dotted weights using the equations appropriate to each family.
+
+    The G11411 diagrams have a three-edge dotted path, for which the staged
+    solver keeps the exact expressions manageable.  G12221 has one dotted edge,
+    so all principal rank equations can be solved together.  The latter result
+    is also checked against the closed formula printed in Tumarkin's proof.
+    """
+
+    identity = diagram_identity(diagram)
+    if identity["family"] == "G11411":
+        return solve_g11411_path(diagram)
+
+    gram, variables, _pairs = build_gram(diagram)
+    candidates = sp.solve(rank_equations(gram), variables, dict=True)
+    viable: list[dict[sp.Symbol, sp.Expr]] = []
+    for candidate in candidates:
+        if any(variable not in candidate for variable in variables):
+            continue
+        values = [complex(sp.N(candidate[variable], 50)) for variable in variables]
+        if all(abs(value.imag) < 1e-30 and value.real > 1 for value in values):
+            viable.append({variable: sp.factor(candidate[variable]) for variable in variables})
+    if len(viable) != 1:
+        raise ValueError(
+            f"expected one admissible G12221 dotted-weight solution, got {viable}"
+        )
+    solution = viable[0]
+    if len(variables) != 1 or sp.simplify(solution[variables[0]] - G12221_SOURCE_WEIGHT) != 0:
+        raise ValueError("G12221 dotted weight does not match Tumarkin's source formula")
+    return solution
+
+
 def exact_rank_checks(diagram: dict[str, Any], solution: dict[sp.Symbol, sp.Expr]) -> dict[str, Any]:
     eigenvalues = symmetric_eigenvalues(evaluated_gram_matrix(diagram, solution, 80))
     numerical_rank = sum(1 for value in eigenvalues if abs(value) > 1e-8)
@@ -247,7 +307,8 @@ def exact_rank_checks(diagram: dict[str, Any], solution: dict[sp.Symbol, sp.Expr
 
 def build_example(diagram: dict[str, Any]) -> dict[str, Any]:
     index = int(diagram["diagramIndex"])
-    solution = solve_g11411_path(diagram)
+    identity = diagram_identity(diagram)
+    solution = solve_dotted_weights(diagram)
     signature = numerical_signature(diagram, solution)
     rank_checks = exact_rank_checks(diagram, solution)
     if signature != EXPECTED_SIGNATURE:
@@ -261,10 +322,10 @@ def build_example(diagram: dict[str, Any]) -> dict[str, Any]:
     ]
     matrix = coxeter_matrix(diagram)
     dotted = dotted_diagnostics(diagram, solution)
-    stem = f"tumarkin_5d_8facet_g11411_{index:02d}"
+    stem = str(identity["stem"])
     example = {
         "schemaVersion": 1,
-        "name": f"Tumarkin 5D eight-facet G11411 #{index:02d}",
+        "name": identity["name"],
         "description": "Compact hyperbolic Coxeter 5-polytope with 8 facets from Tumarkin Table 4.10.",
         "rank": 8,
         "generators": generators,
@@ -279,7 +340,7 @@ def build_example(diagram: dict[str, Any]) -> dict[str, Any]:
         "sourceRefs": [
             {
                 **SOURCE_REF,
-                "locator": f"Lemma 4.7 and Table 4.10, G11411 diagram {index} of 15",
+                "locator": identity["locator"],
             }
         ],
         "certificate": {
@@ -291,8 +352,9 @@ def build_example(diagram: dict[str, Any]) -> dict[str, Any]:
             "sourceRefIds": [SOURCE_REF_ID],
             "diagnostics": {
                 "table": "4.10",
-                "galeDiagram": "G11411",
+                "galeDiagram": identity["family"],
                 "tableIndex": index,
+                "familyIndex": identity["familyIndex"],
                 "sourceTranscription": "scripts/data/tumarkin_8facet_transcription.json",
                 "rankChecks": rank_checks,
                 "signature": signature,
@@ -301,6 +363,11 @@ def build_example(diagram: dict[str, Any]) -> dict[str, Any]:
                     "Tumarkin Table 4.10 source-vector transcription",
                     "dotted weights solved from determinant equations",
                     "normal Gram rank 6 and inertia (5,1,2)",
+                    *(
+                        ["G12221 dotted weight agrees with Tumarkin's printed exact formula"]
+                        if identity["family"] == "G12221"
+                        else []
+                    ),
                 ],
                 "nonClaims": [
                     "not a generated Cayley-ball certificate",
@@ -311,7 +378,11 @@ def build_example(diagram: dict[str, Any]) -> dict[str, Any]:
         },
         "notes": [
             "The generator labels u1..u8 are repository labels for the transcribed Coxeter diagram; the source table diagrams are unlabeled.",
-            "The dotted weights are not printed in Table 4.10; the certificate solves them from the determinant/rank equations described in Lemma 4.7.",
+            (
+                "The dotted weight is checked both from the determinant/rank equations and against the exact formula printed in Tumarkin's proof."
+                if identity["family"] == "G12221"
+                else "The dotted weights are not printed in Table 4.10; the certificate solves them from the determinant/rank equations described in Lemma 4.7."
+            ),
             "Normal coordinates and chamber basepoints are computed numerically from normalGram; geometric mode is visualization-grade.",
         ],
         "warnings": [
@@ -360,6 +431,7 @@ def coxiter_checker_summary(stem: str) -> dict[str, Any] | None:
 
 def validate_example(path: Path, example: dict[str, Any], diagram: dict[str, Any]) -> list[str]:
     errors: list[str] = []
+    identity = diagram_identity(diagram)
     expected = build_example(diagram)
     if example.get("dataStatus") != "certified":
         errors.append("dataStatus must be certified")
@@ -381,17 +453,21 @@ def validate_example(path: Path, example: dict[str, Any], diagram: dict[str, Any
         errors.append("certificate determinant-equation diagnostics must pass")
     if len(rank_checks.get("smallestAbsoluteEigenvalues", [])) < 3:
         errors.append("certificate must keep three eigenvalue-scale diagnostics")
-    if len(actual_diag.get("dottedWeights", [])) != 3:
-        errors.append("certificate must record the three dotted weights")
-    if path.name != f"tumarkin_5d_8facet_g11411_{diagram['diagramIndex']:02d}.json":
+    if len(actual_diag.get("dottedWeights", [])) != identity["expectedDottedWeights"]:
+        errors.append(
+            f"certificate must record {identity['expectedDottedWeights']} dotted weight(s)"
+        )
+    if path.name != f"{identity['stem']}.json":
         errors.append("filename does not match diagram index")
     return errors
 
 
-def write_examples() -> None:
+def write_examples(source_index: int | None = None) -> None:
     for diagram in load_transcriptions():
+        if source_index is not None and int(diagram["diagramIndex"]) != source_index:
+            continue
         example = build_example(diagram)
-        stem = f"tumarkin_5d_8facet_g11411_{diagram['diagramIndex']:02d}.json"
+        stem = f"{diagram_identity(diagram)['stem']}.json"
         write_json(Path("src/examples") / stem, example)
         write_json(Path("public/examples") / stem, example)
 
@@ -424,15 +500,21 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("examples", nargs="*", type=Path)
     parser.add_argument("--write-examples", action="store_true")
+    parser.add_argument(
+        "--diagram",
+        type=int,
+        choices=range(1, 17),
+        help="Limit --write-examples to one combined source-transcription index.",
+    )
     args = parser.parse_args()
 
     if args.write_examples:
-        write_examples()
+        write_examples(args.diagram)
         return 0
 
     paths = args.examples
     if not paths:
-        paths = sorted(Path("public/examples").glob("tumarkin_5d_8facet_g11411_*.json"))
+        paths = sorted(Path("public/examples").glob("tumarkin_5d_8facet_*.json"))
     result = validate_paths(paths)
     print(json.dumps(result, indent=2, sort_keys=True))
     if not result["ok"]:

@@ -41,3 +41,9 @@ manifold unless torsion-free verification metadata is present. The JNW
 Legal-System Game is theorem-level JNW data only for right-angled systems with
 passing move and legal-orbit checks; non-right-angled uses are explicitly
 experimental diagnostics.
+
+The compact cube reader displays the four-state move-kernel cover
+`ker(mu o alpha) \ Sigma`. It is a factor of the 256-vertex commutator cover
+used in JNW21, not a four-vertex rendering of that full cover. The in-repo
+cover projection and link calculations are exact finite diagnostics for the
+supplied move system; they are not an external fibering certificate.

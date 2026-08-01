@@ -127,7 +127,7 @@ ship explicit coordinates or cite an independently verified computation.
 
 The matrix-composition convention for a word must match the right-multiplication convention used by the Cayley graph. Tests should verify that traversing an edge labeled `i` applies the same reflection `R_i` used by geometric placement.
 
-The bundled `hyperbolic_toy_rank2.json` example supplies explicit normals and a basepoint so geometric mode can be exercised end to end. It is a self-contained toy fixture and is not compact 5-prism or 5-cube data. The bundled compact 5-cube, Makarov `P0` prism, Emery-Kellerhals `P1 = D P0` double, Makarov `P2` prism, and Tumarkin's 15 compact 5D eight-facet `G11411` cases carry machine-checkable certificates for source transcription, algebraic dotted weights, and normal Gram rank/signature diagnostics. `P1` remains labeled as a double of the prism, not as a simplicial prism. All compact examples still rely on numerical `normalGram` factorization and basepoint solving for visualization.
+The bundled `hyperbolic_toy_rank2.json` example supplies explicit normals and a basepoint so geometric mode can be exercised end to end. It is a self-contained toy fixture and is not compact 5-prism or 5-cube data. The bundled compact 5-cube, Makarov `P0` prism, Emery-Kellerhals `P1 = D P0` double, Makarov `P2` prism, and all 16 compact 5D eight-facet cases in Tumarkin's table carry machine-checkable certificates for source transcription, algebraic dotted weights, and normal Gram rank/signature diagnostics. The eight-facet list comprises 15 `G11411` cases and the unique `G12221` case. `P1` remains labeled as a double of the prism, not as a simplicial prism. All compact examples still rely on numerical `normalGram` factorization and basepoint solving for visualization.
 
 ## Projection To 3D
 
@@ -173,19 +173,30 @@ numerically solved chamber point.
 
 Finite quotient complexes are separate from the base Davis viewer. A quotient can carry vertices, generator-labeled edges, rank-two cells, and subgroup metadata, but it should not be called a manifold unless torsion-free verification is supplied.
 
-The base complex `Y_Gamma` is a fundamental-domain cell complex for the Coxeter
-data being inspected. It has a base vertex, one oriented arrow for each
+In this project, `Y_Gamma` is the base fundamental-domain orbicomplex for the
+Coxeter system. In covering notation,
+
+```text
+Sigma_Gamma -> X = H \ Sigma_Gamma -> Y_Gamma = W \ Sigma_Gamma.
+```
+
+The app records `Y_Gamma` through a base vertex, one oriented arrow for each
 Coxeter generator/facet direction, and one rank-two `2m`-gon for each finite
 Coxeter pair. Higher spherical subsets are recorded as higher-cell
-incidence/proxy data when the viewer can enumerate them. `Y_Gamma` is not a
-torsion-free quotient manifold.
+incidence/proxy data when the viewer can enumerate them. A finite cover `X` is
+assembled from lifted copies of this fundamental domain. `Y_Gamma` itself is
+not a torsion-free quotient manifold.
 
 The defining graph `Gamma` is a different object. It has one vertex for each
-Coxeter generator and an edge for each off-diagonal Coxeter matrix entry. The
-app labels every drawn edge by `m`; `m=2` commuting pairs are included even
-though standard Coxeter diagrams usually omit them. `Gamma` is useful for
-reading the full presentation matrix, but it is not the Davis complex, not the
-`Y_Gamma` fundamental-domain complex, and not the nerve/local-link diagnostic.
+Coxeter generator and an edge for each finite off-diagonal Coxeter matrix
+entry. The app labels every drawn edge by `m`; `m=2` commuting pairs are
+included even though standard Coxeter diagrams usually omit them, while
+`m=inf` pairs are not drawn. For a selected generator `s_i`, the inspector
+groups the other generators into the disjoint classes
+`N_m(s_i) = {s_j : m_ij = m}`. It lists `N_inf(s_i)` as an omitted class so the
+partition still accounts for every `j != i`. `Gamma` is useful for reading the
+full presentation matrix, but it is not the Davis complex, not the `Y_Gamma`
+fundamental-domain complex, and not the nerve/local-link diagnostic.
 
 The app represents `Y_Gamma` primarily as a 3D 2-skeleton scene in the main
 viewer and as a cell inventory in the side panel: a base vertex, generator
@@ -238,34 +249,52 @@ experimental diagnostic and does not carry the JNW theorem.
 
 The guiding bundled example is `jnw_cube_graph.json`. Its defining graph is the
 1-skeleton of a 3-cube, with generators labeled by binary cube vertices. The
-JNW preset preloads the cube bipartition/color-class move system from JNW21 and
-starts from the legal state `{v000, v001, v010, v101}`. The resulting state
-quotient is small enough to inspect directly while still showing the key point:
-edge directions depend on the current state, not on a single global sign
-attached to a generator. In the 3D scene those quotient vertices are named
-`S_1`, `S_2`, ...; the inspector displays the underlying subset next to the
-state name.
+JNW preset uses the cube bipartition/color-class moves from JNW21 and the
+paper's displayed legal initial state `{v000, v010, v110, v111}`. Edge directions
+depend on the current state, not on a global sign attached to a generator.
 
-The quotient vertex set is the state orbit itself. A generator-labeled edge
-from `S_i` ends at the state obtained by applying the corresponding move
-`m_i`. For the bundled 3-cube move system this produces four state vertices,
-sixteen generator edges, and twelve square commuting-relation cells.
+Two finite covers must be distinguished. JNW use the commutator cover
 
-The 3D JNW reader separates this exact quotient data with drawing handles:
-small generator beads around each state and labeled rails between beads. These
-handles are not additional quotient vertices. They are there because the cube
-example has only two move classes, so many generator edges and square cells
-would otherwise lie on top of the same state cycle. This makes the four local
-`Y_Gamma` charts visible inside one glued quotient object while preserving the
-underlying state/move incidence.
+```text
+X_ab = W' \ Sigma_Gamma,
+W' = ker(W -> (Z/2)^V).
+```
 
-The JNW view is layered. `Gamma` is the source Coxeter defining graph;
-`Y_Gamma` is the one-vertex fundamental-domain complex for that source; the
-JNW state quotient is a derived finite orbit of states under the selected move
-system; and the ascending, descending, or level link is the local link at one
-selected state vertex in that derived quotient. Those links are not rendered as
-ambient local links in the universal Davis complex, even though the Davis
-complex is the covering/source object for the broader story.
+For the eight-generator cube group, `X_ab` has 256 vertices. Its vertices carry
+only four distinct state patterns under the chosen move system. The compact
+four-state reader instead targets the derived move-kernel cover
+
+```text
+X_mu = H_mu \ Sigma_Gamma,
+H_mu = ker(mu o alpha),    mu(e_v) = m_v.
+```
+
+Its deck group is the four-element move group. Consequently
+
+```text
+Sigma_Gamma -> X_mu -> Y_Gamma
+```
+
+has four lifted copies of the `Y_Gamma` fundamental domain. The state names
+`S_1`, ..., `S_4` index those copies; they do not define `Y_Gamma`. For the cube
+move system, `X_mu` has four state vertices, sixteen distinct generator edges,
+and twelve square commuting-relation cells.
+
+The intended readable subdivision keeps the gluing visible. Each generator
+rail has one midpoint shared by the two adjacent lifted charts. Each commuting
+square has one relation center, and its rail midpoints and center divide it into
+four chart sectors. Thus the picture shows four fundamental domains joined
+along shared data, rather than four detached models or duplicated endpoint
+handles. Chart spreading and glass fills are drawing conventions only; they do
+not change the exact rails, cells, or covering map.
+
+Let `L = Flag(Gamma)` be the local link. At a quotient vertex carrying state
+`S`, the JNW ascending and descending links are the full induced subcomplexes
+`L[S]` and `L[V - S]`. They are complexes of generator directions, not merely
+the outgoing and incoming quotient edges. Highlighting `S` in `Gamma` is an
+explanatory linked view, while the actual link is based at the selected vertex
+of `X_mu`. The faithful JNW diagonal map has no level link; level directions
+belong to the separate generalized cochain workflow.
 
 Experiment logs record the assignment or state/move system, input hash,
 diagnostics, and certificate summary for reproducibility.

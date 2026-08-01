@@ -144,7 +144,7 @@ const guideDefinitions: GuidedInspectionDefinition[] = [
       {
         id: "read-cocycle",
         title: "Read game diagnostics",
-        body: "Generator-uniform cochains check boundary sums; JNW moves build a state quotient and classify ascending/descending links by state.",
+        body: "Generator-uniform cochains check boundary sums; JNW moves build a move-kernel cover and classify ascending/descending links at its state vertices.",
         focus: "quotient",
       },
       {

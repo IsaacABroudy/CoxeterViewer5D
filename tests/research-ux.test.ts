@@ -35,6 +35,7 @@ import {
   buildJnwStateLinkSubject,
   buildTopologyExplanation,
 } from "../src/app/topologyInspector";
+import { buildDefiningGraphScene } from "../src/app/definingGraphScene";
 import {
   buildJnwGammaStateDiagram,
   buildJnwStateQuotientYGammaScene,
@@ -250,6 +251,28 @@ describe("topology-first explanations", () => {
     expect(explanation.summary).toContain("m=5");
   });
 
+  it("explains the relation-order partition at a selected Gamma vertex", () => {
+    const gammaScene = buildDefiningGraphScene(system);
+    const explanation = buildTopologyExplanation({
+      system,
+      subject: {
+        kind: "gamma-vertex",
+        incidence: gammaScene.incidencePartitions[0],
+      },
+    });
+
+    expect(explanation.layer).toBe("Gamma");
+    expect(explanation.title).toBe("Generator s0");
+    expect(explanation.summary).toContain("split into disjoint classes");
+    expect(explanation.rows).toContainEqual({
+      label: "m=5 neighbors",
+      value: "s1",
+    });
+    expect(explanation.rows.at(-1)?.value).toContain(
+      "all 1 other generators accounted for once",
+    );
+  });
+
   it("explains Y_Gamma, quotient, and game subjects without changing claims", () => {
     const yGammaExplanation = buildTopologyExplanation({
       system,
@@ -312,15 +335,15 @@ describe("topology-first explanations", () => {
     expect(quotientExplanation.layer).toBe("quotient");
     expect(quotientExplanation.summary).toContain("rank-two cell");
     expect(gameExplanation.summary).toContain("browser diagnostics");
-    expect(jnwExplanation.layer).toBe("JNW state quotient");
-    expect(jnwExplanation.status).toBe("browser diagnostic");
+    expect(jnwExplanation.layer).toBe("JNW move-kernel cover");
+    expect(jnwExplanation.status).toBe("exact incidence");
     expect(jnwExplanation.title).toContain("Ascending link at selected state");
-    expect(jnwExplanation.rows.map((row) => row.label)).toContain(
-      "What is selected?",
-    );
-    expect(jnwExplanation.rows.map((row) => row.label)).toContain(
-      "Exact or drawing?",
-    );
+    expect(jnwExplanation.summary).toContain("move-kernel cover");
+    expect(jnwExplanation.rows.map((row) => row.label)).toEqual([
+      "Selected state",
+      "Active link",
+      "Claim status",
+    ]);
   });
 
   it("draws JNW state vertices as highlighted Gamma subsets", () => {
@@ -407,44 +430,70 @@ describe("topology-first explanations", () => {
       "S_3",
       "S_4",
     ]);
-    expect(
-      orbitScene.nodes
-        .filter((node) => !node.id.startsWith("jnw:chart-port:"))
-        .map((node) => node.id)
-        .sort(),
-    ).toEqual(jnwSummary.states.map((state) => state.id).sort());
-    expect(
-      orbitScene.nodes.filter((node) => node.id.startsWith("jnw:chart-port:")),
-    ).toHaveLength(jnwSummary.states.length * jnwSystem.rank);
+    const midpointNodes = orbitScene.nodes.filter((node) =>
+      node.id.startsWith("jnw:cover:midpoint:"),
+    );
+    const centerNodes = orbitScene.nodes.filter((node) =>
+      node.id.startsWith("jnw:cover:center:"),
+    );
+    expect(midpointNodes).toHaveLength(jnwSummary.edges.length);
+    expect(centerNodes).toHaveLength(12);
+    expect(orbitScene.coverModel?.invariants.ok).toBe(true);
+    expect(orbitScene.coverModel?.invariants.counts).toEqual({
+      states: 4,
+      rails: 16,
+      relationCells: 12,
+      railMidpoints: 16,
+      relationCenters: 12,
+      sectors: 48,
+    });
     const stateDepths = stateBaseNodes.map((node) => node.position?.[2] ?? 0);
     expect(Math.max(...stateDepths) - Math.min(...stateDepths)).toBeGreaterThan(
       10,
     );
-    const chartPortDepths = orbitScene.nodes
-      .filter((node) => node.id.startsWith("jnw:chart-port:"))
+    const subdivisionDepths = orbitScene.nodes
+      .filter(
+        (node) =>
+          node.id.startsWith("jnw:cover:midpoint:") ||
+          node.id.startsWith("jnw:cover:center:"),
+      )
       .map((node) => node.position?.[2] ?? 0);
     expect(
-      Math.max(...chartPortDepths) - Math.min(...chartPortDepths),
-    ).toBeGreaterThan(18);
+      Math.max(...subdivisionDepths) - Math.min(...subdivisionDepths),
+    ).toBeGreaterThan(10);
     expect(
       orbitScene.nodes.some((node) => node.id.startsWith("jnw:endpoint:")),
     ).toBe(false);
     expect(
       orbitScene.nodes.some((node) => node.id.startsWith("jnw:chart-corner:")),
     ).toBe(false);
-    expect(
-      orbitScene.edges
-        .filter((edge) => edge.id.startsWith("jnw:e:"))
-        .map((edge) => edge.id)
-        .sort(),
-    ).toEqual(jnwSummary.edges.map((edge) => edge.id).sort());
-    expect(
-      orbitScene.edges.filter((edge) => edge.id.startsWith("jnw:chart-spoke:")),
-    ).toHaveLength(jnwSummary.states.length * jnwSystem.rank);
-    expect(orbitScene.cells).toHaveLength(
-      jnwSummary.rankTwoDiagnostics.filter((diagnostic) => diagnostic.ok)
-        .length,
+    const semanticRailId = (renderedId: string) => {
+      const fromIndex = renderedId.indexOf(":from:");
+      return fromIndex >= 0
+        ? renderedId.slice(0, fromIndex)
+        : renderedId.endsWith(":continuation")
+          ? renderedId.slice(0, -":continuation".length)
+          : renderedId;
+    };
+    const orbitEdgeIds = new Set(jnwSummary.edges.map((edge) => edge.id));
+    const railSegments = orbitScene.edges.filter((edge) =>
+      orbitEdgeIds.has(semanticRailId(edge.id)),
     );
+    expect(railSegments).toHaveLength(jnwSummary.edges.length * 2);
+    for (const railId of orbitEdgeIds) {
+      expect(
+        railSegments.filter((edge) => semanticRailId(edge.id) === railId),
+      ).toHaveLength(2);
+    }
+    expect(
+      railSegments.filter(
+        (edge) => edge.compactLabel && !edge.suppressSemanticLabel,
+      ),
+    ).toHaveLength(jnwSummary.edges.length);
+    expect(
+      railSegments.filter((edge) => edge.suppressSemanticLabel),
+    ).toHaveLength(jnwSummary.edges.length);
+    expect(orbitScene.cells).toHaveLength(48);
     expect(
       orbitScene.edges.some((edge) =>
         edge.id.startsWith("jnw:state-transition-bundle:"),
@@ -460,35 +509,12 @@ describe("topology-first explanations", () => {
           edge.id.startsWith("jnw:copy-glue:"),
       ),
     ).toBe(false);
-    const orbitEdgeIds = new Set(jnwSummary.edges.map((edge) => edge.id));
-    const quotientRails = orbitScene.edges.filter((edge) =>
-      orbitEdgeIds.has(edge.id),
-    );
-    const chartSpokes = orbitScene.edges.filter((edge) =>
-      edge.id.startsWith("jnw:chart-spoke:"),
-    );
-    expect(quotientRails).toHaveLength(jnwSummary.edges.length);
+    const sceneNodeIds = new Set(orbitScene.nodes.map((node) => node.id));
     expect(
-      quotientRails.every(
-        (edge) =>
-          edge.source.startsWith("jnw:chart-port:") &&
-          edge.target.startsWith("jnw:chart-port:") &&
-          edge.alwaysLabel === true &&
-          edge.labelLeader === true,
-      ),
-    ).toBe(true);
-    expect(quotientRails.every((edge) => orbitEdgeIds.has(edge.id))).toBe(true);
-    expect(
-      quotientRails.every((edge) => edge.suppressSemanticLabel !== true),
-    ).toBe(true);
-    expect(
-      chartSpokes.every((edge) => edge.suppressSemanticLabel === true),
-    ).toBe(true);
-    expect(
-      orbitScene.cells.every((cell) =>
-        cell.boundaryNodeIds.every((nodeId) =>
-          nodeId.startsWith("jnw:chart-port:"),
-        ),
+      orbitScene.cells.every(
+        (cell) =>
+          cell.boundaryNodeIds.length === 4 &&
+          cell.boundaryNodeIds.every((nodeId) => sceneNodeIds.has(nodeId)),
       ),
     ).toBe(true);
     const relationDiagnosticIds = new Set(
@@ -502,19 +528,21 @@ describe("topology-first explanations", () => {
         .map((diagnostic) => [diagnostic.id, diagnostic]),
     );
     expect(
-      orbitScene.cells.every((cell) => relationDiagnosticIds.has(cell.id)),
+      orbitScene.cells.every(
+        (cell) =>
+          cell.sourceCellId !== undefined &&
+          relationDiagnosticIds.has(cell.sourceCellId),
+      ),
     ).toBe(true);
-    expect(
-      orbitScene.cells.every((cell) => {
-        const diagnostic = relationDiagnosticById.get(cell.id);
-        return (
-          diagnostic !== undefined &&
-          cell.boundaryNodeIds.length ===
-            diagnostic.boundaryStateIds.length * 2 &&
-          diagnostic.boundaryEdgeIds.every((edgeId) => orbitEdgeIds.has(edgeId))
-        );
-      }),
-    ).toBe(true);
+    for (const diagnostic of relationDiagnosticById.values()) {
+      const sectors = orbitScene.cells.filter(
+        (cell) => cell.sourceCellId === diagnostic.id,
+      );
+      expect(sectors).toHaveLength(4);
+      expect(sectors.map((cell) => cell.boundaryNodeIds[0]).sort()).toEqual(
+        [...diagnostic.boundaryStateIds].sort(),
+      );
+    }
     expect(
       orbitScene.cells.some((cell) => cell.id.startsWith("jnw:chart-shell:")),
     ).toBe(false);
@@ -548,13 +576,10 @@ describe("topology-first explanations", () => {
           edge.alwaysLabel === true,
       ),
     ).toBe(true);
-    expect(
-      orbitScene.nodes
-        .filter((node) => node.id.startsWith("jnw:chart-port:"))
-        .every((node) => node.drawingOnly === true),
-    ).toBe(true);
-    expect(chartSpokes.every((edge) => edge.drawingOnly === true)).toBe(true);
-    expect(orbitScene.cells.every((cell) => cell.drawingOnly === true)).toBe(
+    expect(midpointNodes.every((node) => node.drawingOnly === true)).toBe(true);
+    expect(centerNodes.every((node) => node.drawingOnly === true)).toBe(true);
+    expect(railSegments.every((edge) => edge.drawingOnly === true)).toBe(true);
+    expect(orbitScene.cells.every((cell) => cell.drawingOnly !== true)).toBe(
       true,
     );
 
@@ -595,11 +620,9 @@ describe("topology-first explanations", () => {
       constructionStage: 2,
     });
     expect(oneSkeleton.nodes).toHaveLength(
-      jnwSummary.states.length * (jnwSystem.rank + 1),
+      jnwSummary.states.length + jnwSummary.edges.length,
     );
-    expect(oneSkeleton.edges).toHaveLength(
-      jnwSummary.edges.length + jnwSummary.states.length * jnwSystem.rank,
-    );
+    expect(oneSkeleton.edges).toHaveLength(jnwSummary.edges.length * 2);
     expect(oneSkeleton.cells).toHaveLength(0);
 
     const selectedDiagnostic = jnwSummary.rankTwoDiagnostics.find(
@@ -614,7 +637,9 @@ describe("topology-first explanations", () => {
       constructionStage: 4,
     });
     expect(
-      relationFocus.cells.some((cell) => cell.id === selectedDiagnostic?.id),
+      relationFocus.cells.some(
+        (cell) => cell.sourceCellId === selectedDiagnostic?.id,
+      ),
     ).toBe(true);
     expect(
       relationFocus.cells.every(
@@ -622,12 +647,13 @@ describe("topology-first explanations", () => {
       ),
     ).toBe(true);
     const ghostedSemanticEdges = relationFocus.edges.filter(
-      (edge) => orbitEdgeIds.has(edge.id) && edge.ghost,
+      (edge) => orbitEdgeIds.has(semanticRailId(edge.id)) && edge.ghost,
     );
     expect(ghostedSemanticEdges.length).toBeGreaterThan(0);
     const focusedBoundaryEdges = relationFocus.edges.filter(
       (edge) =>
-        orbitEdgeIds.has(edge.id) && edge.selectedHighlight === "outline",
+        orbitEdgeIds.has(semanticRailId(edge.id)) &&
+        edge.selectedHighlight === "outline",
     );
     expect(focusedBoundaryEdges.length).toBeGreaterThan(0);
   });

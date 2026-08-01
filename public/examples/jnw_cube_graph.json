@@ -68,8 +68,8 @@
   "notes": [
     "The generators are the binary vertices of the 3-cube.",
     "The Coxeter entry is m=2 exactly when the corresponding cube vertices differ in one coordinate; otherwise it is infinite.",
-    "The JNW Legal-System Game preset preloads the JNW21 bipartition color-class moves and the legal initial state {v000, v001, v010, v101}.",
-    "The derived state quotient displays vertices as S_1, S_2, ... while the panel/inspector expands each name as a subset of cube vertices.",
-    "The app's JNW orbit and link diagnostics are browser checks for exploration, not an external certificate."
+    "The JNW Legal-System Game preset preloads the JNW21 bipartition color-class moves and the paper's displayed legal initial state {v000, v010, v110, v111}.",
+    "The compact reader displays the derived four-state move-kernel cover with vertices S_1, S_2, ...; it is distinct from the 256-vertex commutator cover in JNW21.",
+    "The app checks the move orbit, move-kernel cover incidence, and induced flag links in-repo; these checks are not an external fibering certificate."
   ]
 }

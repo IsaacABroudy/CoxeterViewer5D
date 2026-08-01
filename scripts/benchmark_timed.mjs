@@ -6,14 +6,15 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { dirname, extname, join, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { chromium } from "@playwright/test";
 
 const DEFAULT_OUTPUT = "scripts/benchmarks/timed-browser-v1.json";
-const BENCHMARK_URL =
-  process.env.COXETER_BENCHMARK_URL ?? "http://127.0.0.1:5173/";
+const EXTERNAL_BENCHMARK_URL = process.env.COXETER_BENCHMARK_URL;
+const BENCHMARK_URL = EXTERNAL_BENCHMARK_URL ?? "http://127.0.0.1:4178/";
 const CASES = [
   {
     exampleId: "I2_5",
@@ -56,8 +57,12 @@ const FRAME_BUDGETS = {
   frameDeltaP95Ms: 160,
   frameDeltaMaxMs: 300,
 };
+const CASE_LONG_TASK_BUDGET_MS = 250;
+const INTERACTION_LONG_TASK_BUDGET_MS = 180;
+const SCREENSHOT_LONG_TASK_BUDGET_MS = 300;
 const INTERACTION_BUDGETS = new Map([
   ["label-toggle", { elapsedMs: 900, lastGraphUpdateMs: 200 }],
+  ["gamma-incidence-selection", { elapsedMs: 900, lastGraphUpdateMs: 160 }],
   ["rank-two-pair-focus", { elapsedMs: 1400, lastGraphUpdateMs: 300 }],
   ["ygamma-preset-switch", { elapsedMs: 2200, lastGraphUpdateMs: 450 }],
   ["quotient-link-lens", { elapsedMs: 1800, lastGraphUpdateMs: 350 }],
@@ -80,6 +85,14 @@ const INTERACTION_BUDGETS = new Map([
   ["idle-render-count", { maxRenderCountDelta: 3 }],
 ]);
 const INTERACTION_FEATURE_FLOORS = new Map([
+  [
+    "gamma-incidence-selection",
+    {
+      renderedNodes: 10,
+      renderedEdgeSegments: 40,
+      renderedEdgeLabels: 40,
+    },
+  ],
   ["rank-two-pair-focus", { renderedCells: 1, renderedEdgeLabels: 1 }],
   ["ygamma-preset-switch", { renderedCells: 1, renderedEdgeLabels: 1 }],
   [
@@ -160,7 +173,7 @@ async function waitForBenchmarkUrl(timeoutMs = 60_000) {
 }
 
 async function ensureBenchmarkServer() {
-  if (await canReachBenchmarkUrl()) {
+  if (EXTERNAL_BENCHMARK_URL && (await canReachBenchmarkUrl())) {
     return { dispose: async () => undefined };
   }
   const url = new URL(BENCHMARK_URL);
@@ -170,6 +183,9 @@ async function ensureBenchmarkServer() {
     );
   }
 
+  // The default benchmark owns a production static server. Reusing an
+  // arbitrary Vite process on port 5173 made local results depend on whether a
+  // developer happened to have the dev server open.
   const server = await startStaticBenchmarkServer(url);
   await waitForBenchmarkUrl();
   return {
@@ -278,6 +294,305 @@ async function sceneStats(page) {
   return page.evaluate(() => globalThis.__coxeterSceneStats ?? null);
 }
 
+async function yGammaSceneVersion(page) {
+  return page
+    .locator(".viewer-with-overlay")
+    .getAttribute("data-ygamma-scene-version");
+}
+
+async function waitForYGammaSceneChange(page, previousVersion) {
+  await page.waitForFunction((previous) => {
+    const viewer = globalThis.document.querySelector(".viewer-with-overlay");
+    const version = viewer?.getAttribute("data-ygamma-scene-version");
+    return Boolean(
+      version &&
+      version !== previous &&
+      viewer?.getAttribute("data-ygamma-scene-pending") === "false",
+    );
+  }, previousVersion);
+}
+
+async function browserHeapBytes(page) {
+  return page.evaluate(() => {
+    const memory = globalThis.performance?.memory;
+    return Number(memory?.usedJSHeapSize ?? 0);
+  });
+}
+
+let nextInteractionTraceId = 1;
+const BROWSER_INTERACTION_TRACE_KEY = "__coxeterBenchmarkInteractionTrace";
+
+async function beginBrowserInteractionTrace(page, interactionId) {
+  const token = `${interactionId}-${nextInteractionTraceId++}`;
+  await page.evaluate(
+    ({ traceKey, traceToken }) => {
+      const previous = globalThis[traceKey];
+      previous?.cleanup?.();
+
+      const revisionFields = [
+        "topologyVersion",
+        "layoutVersion",
+        "cellGeometryVersion",
+        "appearanceVersion",
+        "labelVersion",
+        "pickingVersion",
+        "cameraVersion",
+      ];
+      const prefix = `coxeter-benchmark:${traceToken}`;
+      const marks = {};
+      const markSources = {};
+      const longTaskDurations = [];
+      let mutationFrame = 0;
+      let cleanedUp = false;
+
+      const sceneSnapshot = () => {
+        const stats = globalThis.__coxeterSceneStats;
+        const viewer = globalThis.document.querySelector(
+          ".viewer-with-overlay",
+        );
+        const revisions = stats?.revisions ?? {};
+        return {
+          runtimeId: stats?.runtimeId ?? "",
+          renderCount: Number(stats?.renderCount ?? 0),
+          revisions: Object.fromEntries(
+            revisionFields.map((field) => [field, revisions[field] ?? ""]),
+          ),
+          yGammaVersion:
+            viewer?.getAttribute("data-ygamma-scene-version") ?? "",
+          yGammaPending:
+            viewer?.getAttribute("data-ygamma-scene-pending") ?? "false",
+        };
+      };
+
+      const baseline = sceneSnapshot();
+      const changedRevisionFields = new Set();
+      let sceneVersionChanged = false;
+      let firstVisualFeedbackPrecision = "observed";
+
+      const markOnce = (name, source) => {
+        if (marks[name] !== undefined) {
+          return;
+        }
+        marks[name] = globalThis.performance.now();
+        markSources[name] = source;
+        globalThis.performance.mark(`${prefix}:${name}`);
+      };
+
+      const sampleScene = (source) => {
+        const current = sceneSnapshot();
+        const runtimeChanged = current.runtimeId !== baseline.runtimeId;
+        for (const field of revisionFields) {
+          if (current.revisions[field] !== baseline.revisions[field]) {
+            changedRevisionFields.add(field);
+          }
+        }
+        const revisionsChanged = changedRevisionFields.size > 0;
+        const yGammaChanged =
+          current.yGammaVersion !== baseline.yGammaVersion &&
+          current.yGammaPending !== "true";
+        const rendered =
+          runtimeChanged || current.renderCount > baseline.renderCount;
+
+        if (runtimeChanged || revisionsChanged || yGammaChanged) {
+          sceneVersionChanged = true;
+        }
+        if (
+          (runtimeChanged || revisionsChanged || yGammaChanged) &&
+          rendered &&
+          current.yGammaPending !== "true"
+        ) {
+          markOnce("scene-version-ready", source);
+        }
+        return { current, rendered };
+      };
+
+      const onSceneStats = () => {
+        markOnce("first-visual-feedback", "scene-render-event");
+        sampleScene("scene-render-event");
+      };
+      globalThis.addEventListener("coxeter:scene-stats", onSceneStats);
+
+      const mutationObserver = new globalThis.MutationObserver(() => {
+        if (mutationFrame) {
+          return;
+        }
+        mutationFrame = globalThis.requestAnimationFrame(() => {
+          mutationFrame = 0;
+          markOnce("first-visual-feedback", "dom-mutation-frame");
+          sampleScene("dom-mutation-frame");
+        });
+      });
+      mutationObserver.observe(globalThis.document.documentElement, {
+        attributes: true,
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+
+      const longTaskSupported = Boolean(
+        globalThis.PerformanceObserver?.supportedEntryTypes?.includes(
+          "longtask",
+        ),
+      );
+      let longTaskObserver;
+      if (longTaskSupported) {
+        longTaskObserver = new globalThis.PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            longTaskDurations.push(entry.duration);
+          }
+        });
+        longTaskObserver.observe({ type: "longtask", buffered: false });
+      }
+
+      const cleanup = () => {
+        if (cleanedUp) {
+          return;
+        }
+        cleanedUp = true;
+        if (mutationFrame) {
+          globalThis.cancelAnimationFrame(mutationFrame);
+        }
+        mutationObserver.disconnect();
+        globalThis.removeEventListener("coxeter:scene-stats", onSceneStats);
+        if (longTaskObserver) {
+          for (const entry of longTaskObserver.takeRecords()) {
+            longTaskDurations.push(entry.duration);
+          }
+          longTaskObserver.disconnect();
+        }
+      };
+
+      const startedAt = globalThis.performance.now();
+      marks["action-dispatch-start"] = startedAt;
+      markSources["action-dispatch-start"] = "benchmark-harness";
+      globalThis.performance.mark(`${prefix}:action-dispatch-start`);
+
+      globalThis[traceKey] = {
+        token: traceToken,
+        cleanup,
+        markActionDispatched() {
+          markOnce("action-dispatch-complete", "playwright-action-returned");
+        },
+        finish() {
+          const finalSample = sampleScene("final-semantic-sample");
+          if (
+            marks["first-visual-feedback"] === undefined &&
+            (finalSample.rendered || sceneVersionChanged)
+          ) {
+            firstVisualFeedbackPrecision = "upper-bound";
+            markOnce("first-visual-feedback", "final-semantic-sample");
+          }
+          markOnce("semantic-settle-observed", "browser-main-thread-available");
+          cleanup();
+
+          const relativeMs = (name) =>
+            marks[name] === undefined
+              ? null
+              : Number((marks[name] - startedAt).toFixed(3));
+          const actionDispatchCompleteMs = relativeMs(
+            "action-dispatch-complete",
+          );
+          const firstVisualFeedbackMs = relativeMs("first-visual-feedback");
+          const sceneVersionReadyMs = relativeMs("scene-version-ready");
+          const semanticSettleObservedMs = relativeMs(
+            "semantic-settle-observed",
+          );
+          const segmentedLongTaskTotalMs = longTaskDurations.reduce(
+            (total, duration) => total + duration,
+            0,
+          );
+
+          const result = {
+            phaseTiming: {
+              clock: "browser-performance",
+              actionDispatchMs: actionDispatchCompleteMs,
+              firstVisualFeedbackMs,
+              sceneVersionReadyMs,
+              semanticSettleObservedMs,
+              firstVisualFeedbackSource:
+                markSources["first-visual-feedback"] ?? null,
+              firstVisualFeedbackPrecision:
+                firstVisualFeedbackMs === null
+                  ? "not-observed"
+                  : firstVisualFeedbackPrecision,
+              sceneVersionReadySource:
+                markSources["scene-version-ready"] ?? null,
+              sceneVersionChanged,
+              changedSceneRevisions: [...changedRevisionFields].sort(),
+              longTaskSegmentation: longTaskSupported
+                ? "interaction-performance-observer"
+                : "scene-trace-delta",
+              segmentedLongTaskCount: longTaskSupported
+                ? longTaskDurations.length
+                : null,
+              segmentedLongTaskTotalMs: longTaskSupported
+                ? Number(segmentedLongTaskTotalMs.toFixed(3))
+                : null,
+              segmentedLongTaskMaxMs:
+                longTaskSupported && longTaskDurations.length > 0
+                  ? Number(Math.max(...longTaskDurations).toFixed(3))
+                  : longTaskSupported
+                    ? 0
+                    : null,
+            },
+            longTasks: {
+              supported: longTaskSupported,
+              durations: longTaskDurations.map((duration) =>
+                Number(duration.toFixed(3)),
+              ),
+            },
+          };
+
+          for (const name of Object.keys(marks)) {
+            globalThis.performance.clearMarks(`${prefix}:${name}`);
+          }
+          delete globalThis[traceKey];
+          return result;
+        },
+      };
+    },
+    { traceKey: BROWSER_INTERACTION_TRACE_KEY, traceToken: token },
+  );
+  return token;
+}
+
+async function markBrowserActionDispatched(page, token) {
+  await page.evaluate(
+    ({ traceKey, traceToken }) => {
+      const trace = globalThis[traceKey];
+      if (trace?.token === traceToken) {
+        trace.markActionDispatched();
+      }
+    },
+    { traceKey: BROWSER_INTERACTION_TRACE_KEY, traceToken: token },
+  );
+}
+
+async function finishBrowserInteractionTrace(page, token) {
+  return page.evaluate(
+    ({ traceKey, traceToken }) => {
+      const trace = globalThis[traceKey];
+      return trace?.token === traceToken ? trace.finish() : null;
+    },
+    { traceKey: BROWSER_INTERACTION_TRACE_KEY, traceToken: token },
+  );
+}
+
+async function cancelBrowserInteractionTrace(page, token) {
+  await page
+    .evaluate(
+      ({ traceKey, traceToken }) => {
+        const trace = globalThis[traceKey];
+        if (trace?.token === traceToken) {
+          trace.cleanup();
+          delete globalThis[traceKey];
+        }
+      },
+      { traceKey: BROWSER_INTERACTION_TRACE_KEY, traceToken: token },
+    )
+    .catch(() => undefined);
+}
+
 async function clickSemanticControl(page, selector) {
   await page.locator(selector).first().waitFor({ state: "attached" });
   await page.evaluate((controlSelector) => {
@@ -372,16 +687,33 @@ async function runInteraction(
   const before = await sceneStats(page);
   const beforeTrace = before?.performanceTrace ?? {};
   const beforeLongTasks = beforeTrace.longTaskDurations ?? [];
+  const browserTraceToken = await beginBrowserInteractionTrace(page, id);
   const startedAt = performance.now();
-  await action();
-  await waitForSettled();
+  let elapsedMs;
+  let browserTrace;
+  try {
+    await action();
+    await markBrowserActionDispatched(page, browserTraceToken);
+    await waitForSettled();
+    elapsedMs = performance.now() - startedAt;
+    browserTrace = await finishBrowserInteractionTrace(page, browserTraceToken);
+  } catch (error) {
+    await cancelBrowserInteractionTrace(page, browserTraceToken);
+    throw error;
+  }
   const after = await sceneStats(page);
+  const jsHeapUsedBytes = await browserHeapBytes(page);
   const afterTrace = after?.performanceTrace ?? {};
   const afterLongTasks = afterTrace.longTaskDurations ?? [];
-  const actionLongTasks =
+  const sceneTraceLongTasks =
     afterLongTasks.length >= beforeLongTasks.length
       ? afterLongTasks.slice(beforeLongTasks.length)
       : [];
+  // Keep the established top-level fields tied to the renderer trace because
+  // release budgets already consume them. The isolated browser observer lives
+  // in phaseTiming, where it can expose work that finishes after a semantic
+  // predicate without silently redefining the existing hard gate.
+  const actionLongTasks = sceneTraceLongTasks;
   const longTaskCount =
     actionLongTasks.length > 0
       ? actionLongTasks.length
@@ -400,15 +732,49 @@ async function runInteraction(
         );
   const longTaskMaxMs =
     actionLongTasks.length > 0 ? Math.max(...actionLongTasks) : 0;
+  const phaseTiming = browserTrace?.phaseTiming
+    ? {
+        ...browserTrace.phaseTiming,
+        finalSemanticSettleMs: Number(elapsedMs.toFixed(3)),
+        finalSemanticSettleClock: "benchmark-harness",
+        postSemanticMainThreadDelayMs:
+          browserTrace.phaseTiming.semanticSettleObservedMs === null
+            ? null
+            : Number(
+                Math.max(
+                  0,
+                  browserTrace.phaseTiming.semanticSettleObservedMs - elapsedMs,
+                ).toFixed(3),
+              ),
+        firstVisualBeforeSemanticSettle:
+          browserTrace.phaseTiming.firstVisualFeedbackMs === null
+            ? null
+            : browserTrace.phaseTiming.firstVisualFeedbackMs <= elapsedMs,
+        sceneReadyBeforeSemanticSettle:
+          browserTrace.phaseTiming.sceneVersionReadyMs === null
+            ? null
+            : browserTrace.phaseTiming.sceneVersionReadyMs <= elapsedMs,
+        ...(browserTrace.longTasks?.supported
+          ? {}
+          : {
+              segmentedLongTaskCount: longTaskCount,
+              segmentedLongTaskTotalMs: Number(longTaskTotalMs.toFixed(3)),
+              segmentedLongTaskMaxMs: Number(longTaskMaxMs.toFixed(3)),
+            }),
+      }
+    : undefined;
   const renderCountDelta =
-    Number.isFinite(before?.renderCount) && Number.isFinite(after?.renderCount)
+    before?.runtimeId === after?.runtimeId &&
+    Number.isFinite(before?.renderCount) &&
+    Number.isFinite(after?.renderCount)
       ? after.renderCount - before.renderCount
       : undefined;
 
   return {
     id,
     status: "measured",
-    elapsedMs: Number((performance.now() - startedAt).toFixed(3)),
+    elapsedMs: Number(elapsedMs.toFixed(3)),
+    ...(phaseTiming ? { phaseTiming } : {}),
     ...(details
       ? { details: typeof details === "function" ? details() : details }
       : {}),
@@ -425,8 +791,13 @@ async function runInteraction(
     longTaskTotalMs: Number(longTaskTotalMs.toFixed(3)),
     longTaskMaxMs: Number(longTaskMaxMs.toFixed(3)),
     estimatedSceneBytes: after?.performanceTrace?.estimatedSceneBytes ?? 0,
+    jsHeapUsedBytes,
     pickingCandidates: after?.picking?.candidates ?? 0,
     pickingRejected: after?.picking?.rejected ?? 0,
+    pickingStrategy: after?.picking?.strategy ?? "linear",
+    pickingBuildMs: Number((after?.picking?.buildMs ?? 0).toFixed(3)),
+    pickingQueryMs: Number((after?.picking?.queryMs ?? 0).toFixed(3)),
+    labelRenderer: after?.labelRenderer ?? "sprite",
     lastGraphUpdateMs: Number((after?.lastGraphUpdateMs ?? 0).toFixed(3)),
     ...(renderCountDelta !== undefined ? { renderCountDelta } : {}),
     ...frameTimingSummary(after?.frameSamples ?? []),
@@ -475,6 +846,41 @@ async function runLabelToggleInteraction(page) {
   );
 }
 
+async function runGammaIncidenceSelectionInteraction(page) {
+  return runInteraction(
+    page,
+    "gamma-incidence-selection",
+    async () => {
+      await resetPage(page);
+      await page
+        .locator("#example-select")
+        .selectOption("compact_5_cube_gamma1");
+      await switchModel(page, /^Defining graph Gamma$/);
+      await page.getByLabel(/Inspect Gamma generator/i).waitFor({
+        state: "visible",
+      });
+      await page.waitForFunction(() => {
+        const stats = globalThis.__coxeterSceneStats;
+        return Boolean(
+          stats &&
+          stats.renderedNodes === 10 &&
+          stats.renderedEdgeSegments === 40 &&
+          stats.renderedEdgeLabels === 40,
+        );
+      });
+    },
+    async () => {
+      await page.getByLabel(/Inspect Gamma generator/i).selectOption("8");
+    },
+    async () => {
+      await page
+        .getByLabel(/Incident relation partition for g8/i)
+        .waitFor({ state: "visible" });
+    },
+    { selectedGenerator: "g8", expectedPartitionSize: 9 },
+  );
+}
+
 async function runRankTwoPairFocusInteraction(page) {
   return runInteraction(
     page,
@@ -512,6 +918,7 @@ async function runRankTwoPairFocusInteraction(page) {
 
 async function runYGammaPresetInteraction(page) {
   let presetLabel = "Show m=3 hexagon relations";
+  let previousVersion = "";
 
   return runInteraction(
     page,
@@ -520,6 +927,15 @@ async function runYGammaPresetInteraction(page) {
       await resetPage(page);
       await page.locator("#example-select").selectOption("A3");
       await switchModel(page, /^Y_Gamma$/);
+      await page.waitForFunction(() => {
+        const viewer = globalThis.document.querySelector(
+          ".viewer-with-overlay",
+        );
+        return Boolean(
+          viewer?.getAttribute("data-ygamma-scene-version") &&
+          viewer.getAttribute("data-ygamma-scene-pending") === "false",
+        );
+      });
       await page.waitForFunction(() => {
         const stats = globalThis.__coxeterSceneStats;
         return (
@@ -537,6 +953,7 @@ async function runYGammaPresetInteraction(page) {
       if (!(await hexagons.isEnabled().catch(() => false))) {
         presetLabel = "Show all relation faces";
       }
+      previousVersion = (await yGammaSceneVersion(page)) ?? "";
     },
     async () => {
       await page
@@ -545,6 +962,7 @@ async function runYGammaPresetInteraction(page) {
         .click();
     },
     async () => {
+      await waitForYGammaSceneChange(page, previousVersion);
       await page.waitForFunction((label) => {
         const stats = globalThis.__coxeterSceneStats;
         const pressed = [
@@ -566,6 +984,13 @@ async function setupYGammaReadableCase(page) {
   await page.locator("#example-select").selectOption("compact_5_cube_gamma1");
   await switchModel(page, /^Y_Gamma$/);
   await page.getByTestId("ygamma-reader").waitFor({ state: "visible" });
+  await page.waitForFunction(() => {
+    const viewer = globalThis.document.querySelector(".viewer-with-overlay");
+    return Boolean(
+      viewer?.getAttribute("data-ygamma-scene-version") &&
+      viewer.getAttribute("data-ygamma-scene-pending") === "false",
+    );
+  });
   const focusRelation = page.getByLabel(/focus relation/i);
   const m3Relation = await focusRelation
     .locator("option", { hasText: /m=3/i })
@@ -573,7 +998,9 @@ async function setupYGammaReadableCase(page) {
     .getAttribute("value")
     .catch(() => null);
   if (m3Relation) {
+    const previousVersion = await yGammaSceneVersion(page);
     await focusRelation.selectOption(m3Relation);
+    await waitForYGammaSceneChange(page, previousVersion);
   }
   await page.waitForFunction(() => {
     const stats = globalThis.__coxeterSceneStats;
@@ -584,12 +1011,14 @@ async function setupYGammaReadableCase(page) {
 }
 
 async function runYGammaCutawayInteraction(page) {
+  let previousVersion = "";
   return runInteraction(
     page,
     "ygamma-cutaway-switch",
     async () => {
       await setupYGammaReadableCase(page);
       await page.getByTestId("ygamma-cutaway").scrollIntoViewIfNeeded();
+      previousVersion = (await yGammaSceneVersion(page)) ?? "";
     },
     async () => {
       await clickSemanticControl(
@@ -598,6 +1027,7 @@ async function runYGammaCutawayInteraction(page) {
       );
     },
     async () => {
+      await waitForYGammaSceneChange(page, previousVersion);
       await page.waitForFunction(() => {
         const stats = globalThis.__coxeterSceneStats;
         const pressed = [
@@ -615,6 +1045,7 @@ async function runYGammaCutawayInteraction(page) {
 }
 
 async function runYGammaRelationStarInteraction(page) {
+  let previousVersion = "";
   return runInteraction(
     page,
     "ygamma-relation-star",
@@ -623,6 +1054,7 @@ async function runYGammaRelationStarInteraction(page) {
       await page
         .getByTestId("ygamma-advanced-readability")
         .scrollIntoViewIfNeeded();
+      previousVersion = (await yGammaSceneVersion(page)) ?? "";
     },
     async () => {
       const advanced = page.getByTestId("ygamma-advanced-readability");
@@ -633,6 +1065,7 @@ async function runYGammaRelationStarInteraction(page) {
       );
     },
     async () => {
+      await waitForYGammaSceneChange(page, previousVersion);
       await page.waitForFunction(() => {
         const stats = globalThis.__coxeterSceneStats;
         return Boolean(
@@ -648,12 +1081,14 @@ async function runYGammaRelationStarInteraction(page) {
 }
 
 async function runYGammaLeaderLabelInteraction(page) {
+  let previousVersion = "";
   return runInteraction(
     page,
     "ygamma-leader-labels",
     async () => {
       await setupYGammaReadableCase(page);
       await page.getByTestId("ygamma-drawing").scrollIntoViewIfNeeded();
+      previousVersion = (await yGammaSceneVersion(page)) ?? "";
     },
     async () => {
       await clickSemanticControl(
@@ -662,6 +1097,7 @@ async function runYGammaLeaderLabelInteraction(page) {
       );
     },
     async () => {
+      await waitForYGammaSceneChange(page, previousVersion);
       await page.waitForFunction(() => {
         const stats = globalThis.__coxeterSceneStats;
         return Boolean(
@@ -1126,9 +1562,19 @@ async function runImportRepairInteraction(page) {
     async () => {
       await resetPage(page);
       await switchToResearchMode(page);
+      const filesDetails = page
+        .locator("details")
+        .filter({
+          has: page.locator("summary", { hasText: "Files + Workspace" }),
+        })
+        .first();
+      if (!(await filesDetails.getAttribute("open"))) {
+        await filesDetails.locator("summary").click();
+      }
       await waitForStats(page);
     },
     async () => {
+      page.once("dialog", (dialog) => dialog.accept());
       await page.setInputFiles("#import-coxeter-input", {
         name: "broken-coxeter.json",
         mimeType: "application/json",
@@ -1177,6 +1623,10 @@ async function runInteractions(page) {
   const interactions = [];
   const runners = [
     { id: "label-toggle", run: runLabelToggleInteraction },
+    {
+      id: "gamma-incidence-selection",
+      run: runGammaIncidenceSelectionInteraction,
+    },
     { id: "rank-two-pair-focus", run: runRankTwoPairFocusInteraction },
     { id: "ygamma-preset-switch", run: runYGammaPresetInteraction },
     { id: "quotient-link-lens", run: runQuotientLinkLensInteraction },
@@ -1230,17 +1680,23 @@ async function runCase(page, testCase, expected) {
   radiusInput = await ensureGenerationControlsOpen(page);
   await radiusInput.fill(String(testCase.radius));
   const stats = await waitForStats(page, expected ?? testCase.expected);
+  const elapsedMs = performance.now() - startedAt;
+  const jsHeapUsedBytes = await browserHeapBytes(page);
 
   return {
     exampleId: testCase.exampleId,
     radius: testCase.radius,
-    elapsedMs: Number((performance.now() - startedAt).toFixed(3)),
+    elapsedMs: Number(elapsedMs.toFixed(3)),
     renderedNodes: stats.renderedNodes,
     renderedEdgeSegments: stats.renderedEdgeSegments,
     renderedCells: stats.renderedCells,
     renderedNodeLabels: stats.renderedNodeLabels ?? 0,
     renderedEdgeLabels: stats.renderedEdgeLabels ?? 0,
     renderedLabelLeaders: stats.renderedLabelLeaders ?? 0,
+    labelRenderer: stats.labelRenderer ?? "sprite",
+    pickingStrategy: stats.picking?.strategy ?? "linear",
+    pickingBuildMs: Number((stats.picking?.buildMs ?? 0).toFixed(3)),
+    pickingQueryMs: Number((stats.picking?.queryMs ?? 0).toFixed(3)),
     drawCalls: stats.drawCalls ?? 0,
     triangles: stats.triangles ?? 0,
     workerGenerationMs: Number((stats.workerGenerationMs ?? 0).toFixed(3)),
@@ -1249,6 +1705,7 @@ async function runCase(page, testCase, expected) {
       (stats.performanceTrace?.longTaskMaxMs ?? 0).toFixed(3),
     ),
     estimatedSceneBytes: stats.performanceTrace?.estimatedSceneBytes ?? 0,
+    jsHeapUsedBytes,
     lastGraphUpdateMs: Number((stats.lastGraphUpdateMs ?? 0).toFixed(3)),
     ...frameTimingSummary(stats.frameSamples ?? []),
   };
@@ -1273,6 +1730,9 @@ function checkOutput(path, snapshot) {
     longTaskTotalMs: _longTaskTotalMs,
     longTaskMaxMs: _longTaskMaxMs,
     estimatedSceneBytes: _estimatedSceneBytes,
+    jsHeapUsedBytes: _jsHeapUsedBytes,
+    pickingBuildMs: _pickingBuildMs,
+    pickingQueryMs: _pickingQueryMs,
     ...rest
   }) => {
     void _elapsedMs;
@@ -1287,12 +1747,16 @@ function checkOutput(path, snapshot) {
     void _longTaskTotalMs;
     void _longTaskMaxMs;
     void _estimatedSceneBytes;
+    void _jsHeapUsedBytes;
+    void _pickingBuildMs;
+    void _pickingQueryMs;
     return rest;
   };
   const expectedCases = expected.cases.map(withoutTiming);
   const actualCases = snapshot.cases.map(withoutTiming);
   const withoutInteractionTiming = ({
     elapsedMs: _elapsedMs,
+    phaseTiming: _phaseTiming,
     lastGraphUpdateMs: _lastGraphUpdateMs,
     frameDeltaMedianMs: _frameDeltaMedianMs,
     frameDeltaP95Ms: _frameDeltaP95Ms,
@@ -1310,12 +1774,16 @@ function checkOutput(path, snapshot) {
     longTaskTotalMs: _longTaskTotalMs,
     longTaskMaxMs: _longTaskMaxMs,
     estimatedSceneBytes: _estimatedSceneBytes,
+    jsHeapUsedBytes: _jsHeapUsedBytes,
     pickingCandidates: _pickingCandidates,
     pickingRejected: _pickingRejected,
+    pickingBuildMs: _pickingBuildMs,
+    pickingQueryMs: _pickingQueryMs,
     renderCountDelta: _renderCountDelta,
     ...rest
   }) => {
     void _elapsedMs;
+    void _phaseTiming;
     void _lastGraphUpdateMs;
     void _frameDeltaMedianMs;
     void _frameDeltaP95Ms;
@@ -1333,8 +1801,11 @@ function checkOutput(path, snapshot) {
     void _longTaskTotalMs;
     void _longTaskMaxMs;
     void _estimatedSceneBytes;
+    void _jsHeapUsedBytes;
     void _pickingCandidates;
     void _pickingRejected;
+    void _pickingBuildMs;
+    void _pickingQueryMs;
     void _renderCountDelta;
     return rest;
   };
@@ -1436,6 +1907,11 @@ function budgetFailuresFor(cases) {
         `${key} frame max ${testCase.frameDeltaMaxMs}ms > ${FRAME_BUDGETS.frameDeltaMaxMs}ms`,
       );
     }
+    if (testCase.longTaskMaxMs > CASE_LONG_TASK_BUDGET_MS) {
+      failures.push(
+        `${key} long task ${testCase.longTaskMaxMs}ms > ${CASE_LONG_TASK_BUDGET_MS}ms`,
+      );
+    }
   }
   return failures;
 }
@@ -1477,6 +1953,15 @@ function interactionBudgetFailuresFor(interactions) {
     ) {
       failures.push(
         `${interaction.id} render count delta ${interaction.renderCountDelta} > ${budget.maxRenderCountDelta}`,
+      );
+    }
+    const longTaskBudget =
+      interaction.id === "screenshot-export"
+        ? SCREENSHOT_LONG_TASK_BUDGET_MS
+        : INTERACTION_LONG_TASK_BUDGET_MS;
+    if (interaction.longTaskMaxMs > longTaskBudget) {
+      failures.push(
+        `${interaction.id} long task ${interaction.longTaskMaxMs}ms > ${longTaskBudget}ms`,
       );
     }
   }
@@ -1560,9 +2045,13 @@ try {
     cases.push(await runCase(page, testCase, testCase.expected));
   }
   const interactions = await runInteractions(page);
+  const failures = [
+    ...budgetFailuresFor(cases),
+    ...interactionBudgetFailuresFor(interactions),
+  ];
 
   const result = {
-    ok: true,
+    ok: failures.length === 0,
     benchmark: "timed-browser-v1",
     schemaVersion: 1,
     createdAt: new Date().toISOString(),
@@ -1574,11 +2063,15 @@ try {
       name: "chromium",
       version: browser.version(),
     },
+    buildHash: createHash("sha256")
+      .update(readFileSync(resolve(process.cwd(), "dist", "index.html")))
+      .digest("hex"),
     cachePolicy:
-      "single-pass; local/session storage cleared at reset points; persistent IndexedDB cache may be warm",
+      "production dist server; local/session storage cleared at reset points; persistent IndexedDB cache may be warm",
     totalElapsedMs: Number((performance.now() - startedAt).toFixed(3)),
     cases,
     interactions,
+    failures,
   };
 
   if (args.write) {
@@ -1594,7 +2087,7 @@ try {
   const output = { ...result, ...(check ? { check } : {}) };
   console.log(stableJson(output));
 
-  if (check && !check.ok) {
+  if (!result.ok || (check && !check.ok)) {
     process.exitCode = 1;
   }
 } finally {

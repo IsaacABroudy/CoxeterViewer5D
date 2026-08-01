@@ -3,6 +3,7 @@ import type {
   CoxeterSystemInput,
   GeneratedCayleyBall,
 } from "../types";
+import type { SphericalSubsetEnumerationResult } from "../davis";
 
 /**
  * Persistent generation-worker request. The system may be omitted after the
@@ -24,6 +25,7 @@ export interface GenerateBallSuccess {
   cacheKey: string;
   inputHash: string;
   ball: GeneratedCayleyBall;
+  sphericalSubsets: SphericalSubsetEnumerationResult;
   generationMs: number;
 }
 

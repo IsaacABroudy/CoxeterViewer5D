@@ -29,6 +29,9 @@ Examples of narrow exact claims:
   closure on the quotient action.
 - A compact example certificate verifies a source transcription or Gram
   signature claim stated in that certificate.
+- The JNW cube reader's cover projection maps every state vertex, directed
+  generator record, and relation square to the corresponding cell of
+  `Y_Gamma`.
 
 Examples of claims that do not follow automatically:
 
@@ -49,6 +52,8 @@ The following are useful drawings, not mathematical embeddings:
 - Higher-rank Davis proxy hulls.
 - PCA projections from higher-dimensional point clouds.
 - Camera offsets, opacity, label placement, and ghost context.
+- The colors and spatial spreading used to distinguish the four lifts of
+  `Y_Gamma` in the move-kernel cover.
 
 The drawing may be deterministic and carefully tested. Deterministic does not
 mean exact.

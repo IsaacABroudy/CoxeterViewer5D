@@ -196,6 +196,14 @@
       "infinitePairs": 3
     },
     {
+      "file": "tumarkin_5d_8facet_g12221_01.json",
+      "name": "Tumarkin 5D eight-facet G12221 (unique)",
+      "dataStatus": "certified",
+      "rank": 8,
+      "finitePairs": 27,
+      "infinitePairs": 1
+    },
+    {
       "file": "universal_rank3.json",
       "name": "Universal rank 3",
       "dataStatus": "toy",
@@ -273,7 +281,7 @@
     }
   ],
   "totals": {
-    "examples": 25,
+    "examples": 26,
     "generated": 6,
     "generatedNodes": 80,
     "generatedEdges": 104,
