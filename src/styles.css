@@ -212,7 +212,7 @@ textarea {
 
 .panel-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
   border-bottom: 1px solid #e6eaf0;
@@ -227,7 +227,10 @@ textarea {
 
 .panel-actions {
   display: flex;
+  min-width: 0;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -698,6 +701,7 @@ textarea {
 
 .icon-button {
   display: inline-grid;
+  flex: 0 0 36px;
   width: 36px;
   height: 36px;
   place-items: center;
