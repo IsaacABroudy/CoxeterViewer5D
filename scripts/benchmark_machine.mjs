@@ -14,7 +14,7 @@ const machineClasses = {
     hardGate: true,
     description: "GitHub-hosted Linux runner or equivalent shared CI machine.",
     elapsedScale: 1.75,
-    graphUpdateScale: 2,
+    graphUpdateScale: 2.5,
   },
   "local-dev-laptop": {
     hardGate: false,

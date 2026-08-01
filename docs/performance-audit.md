@@ -18,6 +18,9 @@ Long-task ceilings are machine-classed. Local checks retain the stricter
 `ci-linux-standard` budget for shared-runner variance. The CI profile does not
 relax semantic floors, elapsed-time limits, graph-update limits, or the
 zero-idle-render requirement.
+Its graph-update multiplier is deliberately separate from elapsed and
+long-task budgets so hosted-runner scheduling variance does not weaken the
+local interaction target.
 
 On the audit machine, ordinary graph updates took about `0.5-6 ms`. Selecting a
 Gamma incidence partition took about `16-17 ms`. Repeated production runs put a

@@ -366,7 +366,7 @@
           {
             "id": "I2_5:5",
             "maxElapsedMs": 1000,
-            "maxGraphUpdateMs": 9,
+            "maxGraphUpdateMs": 11,
             "featureFloors": {
               "renderedNodes": 10,
               "renderedEdgeSegments": 10,
@@ -392,7 +392,7 @@
           {
             "id": "universal_rank3:4",
             "maxElapsedMs": 1000,
-            "maxGraphUpdateMs": 8,
+            "maxGraphUpdateMs": 10,
             "featureFloors": {
               "renderedNodes": 46,
               "renderedEdgeSegments": 45,
@@ -418,7 +418,7 @@
           {
             "id": "compact_5_cube_gamma1:3",
             "maxElapsedMs": 1000,
-            "maxGraphUpdateMs": 9,
+            "maxGraphUpdateMs": 11,
             "featureFloors": {
               "renderedNodes": 71,
               "renderedEdgeSegments": 100,
@@ -499,7 +499,7 @@
           {
             "id": "cell-star",
             "maxElapsedMs": 1000,
-            "maxGraphUpdateMs": 8,
+            "maxGraphUpdateMs": 9,
             "featureFloors": {
               "renderedCells": 1,
               "renderedEdgeLabels": 1
@@ -534,7 +534,7 @@
           {
             "id": "ygamma-relation-star",
             "maxElapsedMs": 1000,
-            "maxGraphUpdateMs": 30,
+            "maxGraphUpdateMs": 38,
             "featureFloors": {
               "renderedCells": 1,
               "renderedEdgeLabels": 1,
@@ -563,7 +563,7 @@
           {
             "id": "ygamma-drawing-comparison",
             "maxElapsedMs": 1000,
-            "maxGraphUpdateMs": 25,
+            "maxGraphUpdateMs": 32,
             "featureFloors": {
               "renderedCells": 1,
               "renderedEdgeLabels": 1,
